@@ -6,4 +6,4 @@ license = "MPL-2.0"
 repository = "https://github.com/mkeeter/halfspace"
 description = "An experimental CAD tool"
 authors = ["Matt Keeter <matt.j.keeter@gmail.com"]
-readme = "../README.md"
+readme = "README.md"
