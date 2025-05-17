@@ -7,3 +7,9 @@ repository = "https://github.com/mkeeter/halfspace"
 description = "An experimental CAD tool"
 authors = ["Matt Keeter <matt.j.keeter@gmail.com"]
 readme = "README.md"
+
+[dependencies]
+eframe = { version = "0.31.1", features = ["wgpu"] }
+egui = "0.31.1"
+fidget = "0.3.6"
+rhai = { version = "1.21", features = ["sync"] }
