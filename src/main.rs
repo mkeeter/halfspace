@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use egui_dnd::dnd;
 
 use fidget::{
     context::Tree,
-    shapes::{Vec2, Vec3, Vec4},
+    shapes::{Vec2, Vec3},
 };
 
 enum Value {
@@ -54,31 +54,31 @@ impl From<rhai::Dynamic> for Value {
     }
 }
 
+#[derive(Hash)]
 struct Block {
-    /// Map from input name to expression
-    inputs: HashMap<String, String>,
-
-    /// Map from output name to value
-    outputs: HashMap<String, Value>,
-
     /// Script to be evaluated
     script: String,
 }
 
+#[derive(Hash)]
 enum Object {
     Block(Block),
     Group(String, Vec<Object>),
 }
 
+#[derive(Hash)]
 struct NamedObject {
     name: String,
     object: Object,
+    index: u64,
 
     /// Is the name being actively edited?
-    name_edit: Option<String>,
+    name_edit: Option<(bool, String)>,
+    to_delete: bool,
 }
 
 struct World {
+    next_index: u64,
     data: Vec<NamedObject>,
 }
 
@@ -97,15 +97,43 @@ struct App {
 
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let mut fonts = egui::FontDefinitions::default();
+        fonts.font_data.insert(
+            "inconsolata".to_owned(),
+            std::sync::Arc::new(egui::FontData::from_static(INCONSOLATA)),
+        );
+        fonts
+            .families
+            .get_mut(&egui::FontFamily::Proportional)
+            .unwrap()
+            .insert(0, "inconsolata".to_owned());
+
+        cc.egui_ctx.set_fonts(fonts);
         cc.egui_ctx.all_styles_mut(|style| {
             style.interaction.selectable_labels = false;
+            style.text_styles.insert(
+                egui::TextStyle::Heading,
+                egui::FontId::new(16.0, egui::FontFamily::Proportional),
+            );
+            style.text_styles.insert(
+                egui::TextStyle::Body,
+                egui::FontId::new(16.0, egui::FontFamily::Proportional),
+            );
+            style.text_styles.insert(
+                egui::TextStyle::Button,
+                egui::FontId::new(16.0, egui::FontFamily::Proportional),
+            );
         });
+
         // Customize egui here with cc.egui_ctx.set_fonts and cc.egui_ctx.set_visuals.
         // Restore app state using cc.storage (requires the "persistence" feature).
         // Use the cc.gl (a glow::Context) to create graphics shaders and buffers that you can use
         // for e.g. egui::PaintCallback.
         Self {
-            data: World { data: vec![] },
+            data: World {
+                data: vec![],
+                next_index: 0,
+            },
         }
     }
 }
@@ -122,49 +150,90 @@ impl eframe::App for App {
 }
 
 impl App {
+    fn object_name(obj: &mut NamedObject, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| match &mut obj.name_edit {
+            None => {
+                let response = ui
+                    .scope_builder(
+                        egui::UiBuilder::new().sense(egui::Sense::click()),
+                        |ui| ui.heading(&obj.name),
+                    )
+                    .response;
+                if response.double_clicked() {
+                    obj.name_edit = Some((true, obj.name.clone()));
+                }
+            }
+            Some((wants_focus, name)) => {
+                let response = ui.add(
+                    egui::TextEdit::singleline(name)
+                        .desired_width(ui.available_width() / 2.0),
+                );
+                if std::mem::take(wants_focus) {
+                    ui.memory_mut(|mem| mem.request_focus(response.id));
+                }
+                if response.lost_focus() {
+                    obj.name = std::mem::take(name);
+                    obj.name_edit = None;
+                }
+            }
+        });
+    }
+
     fn left(&mut self, ui: &mut egui::Ui) {
         ui.heading("Left Column");
-        for obj in &mut self.data.data {
-            // Editable object name
-            match &mut obj.name_edit {
-                None => {
-                    let response = ui
-                        .scope_builder(
-                            egui::UiBuilder::new().sense(egui::Sense::click()),
-                            |ui| ui.heading(&obj.name),
-                        )
-                        .response;
-                    if response.double_clicked() {
-                        obj.name_edit = Some(obj.name.clone());
+        dnd(ui, "dnd").show_vec(
+            &mut self.data.data,
+            |ui, obj, handle, _state| {
+                // Editable object name
+                ui.horizontal(|ui| {
+                    Self::object_name(obj, ui);
+                    ui.with_layout(
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |ui| {
+                            ui.add_space(5.0);
+                            handle.ui(ui, |ui| {
+                                ui.label(DRAG); // drag symbol
+                            });
+                            if ui.button(TRASH).clicked() {
+                                obj.to_delete = true;
+                            }
+                        },
+                    );
+                });
+                match &mut obj.object {
+                    Object::Block(b) => {
+                        ui.text_edit_multiline(&mut b.script);
                     }
+                    Object::Group(_name, _data) => (),
                 }
-                Some(name) => {
-                    if ui.text_edit_singleline(name).lost_focus() {
-                        obj.name = std::mem::take(name);
-                        obj.name_edit = None;
-                    }
-                }
-            };
-            match &mut obj.object {
-                Object::Block(b) => {
-                    ui.text_edit_multiline(&mut b.script);
-                }
-                Object::Group(_name, _data) => (),
-            }
-        }
+            },
+        );
+        self.data.data.retain(|obj| !obj.to_delete);
+
         ui.separator();
         ui.horizontal(|ui| {
-            if ui.button("Data").clicked() {
+            if ui.button(PLUS).clicked() {
+                let index = self.data.next_index;
+                self.data.next_index += 1;
                 self.data.data.push(NamedObject {
+                    index,
                     name: "HI".to_owned(),
                     object: Object::Block(Block {
-                        inputs: HashMap::new(),
-                        outputs: HashMap::new(),
                         script: "OMG WTF".to_owned(),
                     }),
                     name_edit: None,
+                    to_delete: false,
                 })
             }
         });
     }
 }
+
+const PLUS: &str = " \u{f067} ";
+const DRAG: &str = " \u{f0041} ";
+const TRASH: &str = " \u{f48e} ";
+
+const INCONSOLATA: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/fonts/InconsolataNerdFontPropo-Regular.ttf"
+));
