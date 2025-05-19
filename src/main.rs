@@ -63,7 +63,7 @@ struct Block {
 #[derive(Hash)]
 enum Object {
     Block(Block),
-    Group(String, Vec<Object>),
+    Group(Vec<Object>),
 }
 
 #[derive(Hash)]
@@ -204,7 +204,7 @@ impl App {
                     Object::Block(b) => {
                         ui.text_edit_multiline(&mut b.script);
                     }
-                    Object::Group(_name, _data) => (),
+                    Object::Group(_data) => (),
                 }
             },
         );
@@ -212,7 +212,7 @@ impl App {
 
         ui.separator();
         ui.horizontal(|ui| {
-            if ui.button(PLUS).clicked() {
+            if ui.button(NEW_FILE).clicked() {
                 let index = self.data.next_index;
                 self.data.next_index += 1;
                 self.data.data.push(NamedObject {
@@ -225,13 +225,25 @@ impl App {
                     to_delete: false,
                 })
             }
+            if ui.button(NEW_FOLDER).clicked() {
+                let index = self.data.next_index;
+                self.data.next_index += 1;
+                self.data.data.push(NamedObject {
+                    index,
+                    name: "group".to_owned(),
+                    object: Object::Group(vec![]),
+                    name_edit: None,
+                    to_delete: false,
+                })
+            }
         });
     }
 }
 
-const PLUS: &str = " \u{f067} ";
+const NEW_FILE: &str = " \u{ea7f} ";
 const DRAG: &str = " \u{f0041} ";
 const TRASH: &str = " \u{f48e} ";
+const NEW_FOLDER: &str = " \u{ea80} ";
 
 const INCONSOLATA: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
