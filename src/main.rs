@@ -5,6 +5,7 @@ use fidget::{
     shapes::{Vec2, Vec3},
 };
 
+#[allow(unused)]
 enum Value {
     Float(f64),
     Vec2(Vec2),
@@ -56,30 +57,26 @@ impl From<rhai::Dynamic> for Value {
 
 #[derive(Hash)]
 struct Block {
-    /// Script to be evaluated
-    script: String,
-}
-
-#[derive(Hash)]
-enum Object {
-    Block(Block),
-    Group(Vec<Object>),
-}
-
-#[derive(Hash)]
-struct NamedObject {
     name: String,
-    object: Object,
+    script: String,
     index: u64,
+}
 
-    /// Is the name being actively edited?
-    name_edit: Option<(bool, String)>,
-    to_delete: bool,
+impl From<&Block> for egui::Id {
+    fn from(value: &Block) -> Self {
+        egui::Id::new("block").with(value.index)
+    }
+}
+
+impl From<&mut Block> for egui::Id {
+    fn from(value: &mut Block) -> Self {
+        (value as &Block).into()
+    }
 }
 
 struct World {
     next_index: u64,
-    data: Vec<NamedObject>,
+    blocks: Vec<Block>,
 }
 
 pub fn main() -> Result<(), eframe::Error> {
@@ -131,7 +128,7 @@ impl App {
         // for e.g. egui::PaintCallback.
         Self {
             data: World {
-                data: vec![],
+                blocks: vec![],
                 next_index: 0,
             },
         }
@@ -149,101 +146,107 @@ impl eframe::App for App {
     }
 }
 
+#[derive(Copy, Clone, Default)]
+struct DeleteMe;
+
+#[derive(Copy, Clone, Default)]
+struct NameEdit {
+    needs_focus: bool,
+}
+
 impl App {
-    fn object_name(obj: &mut NamedObject, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| match &mut obj.name_edit {
+    fn object_name(block: &mut Block, ui: &mut egui::Ui) {
+        let id = egui::Id::from(block as &Block);
+        match ui.memory(|mem| mem.data.get_temp(id)) {
+            Some(NameEdit { needs_focus }) => {
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut block.name)
+                        .desired_width(ui.available_width() / 2.0),
+                );
+                let lost_focus = response.lost_focus();
+                ui.memory_mut(|mem| {
+                    if needs_focus {
+                        mem.request_focus(response.id);
+                        mem.data
+                            .insert_temp(id, NameEdit { needs_focus: false });
+                    }
+                    if lost_focus {
+                        mem.data.remove_temp::<NameEdit>(id);
+                    }
+                });
+            }
             None => {
                 let response = ui
                     .scope_builder(
                         egui::UiBuilder::new().sense(egui::Sense::click()),
-                        |ui| ui.heading(&obj.name),
+                        |ui| ui.heading(&block.name),
                     )
                     .response;
                 if response.double_clicked() {
-                    obj.name_edit = Some((true, obj.name.clone()));
+                    ui.memory_mut(|mem| {
+                        mem.data.insert_temp(id, NameEdit { needs_focus: true })
+                    });
                 }
             }
-            Some((wants_focus, name)) => {
-                let response = ui.add(
-                    egui::TextEdit::singleline(name)
-                        .desired_width(ui.available_width() / 2.0),
-                );
-                if std::mem::take(wants_focus) {
-                    ui.memory_mut(|mem| mem.request_focus(response.id));
-                }
-                if response.lost_focus() {
-                    obj.name = std::mem::take(name);
-                    obj.name_edit = None;
-                }
-            }
-        });
+        }
     }
 
     fn left(&mut self, ui: &mut egui::Ui) {
         ui.heading("Left Column");
         dnd(ui, "dnd").show_vec(
-            &mut self.data.data,
-            |ui, obj, handle, _state| {
+            &mut self.data.blocks,
+            |ui, block, handle, _state| {
                 // Editable object name
+                let id = egui::Id::from(block as &_);
                 ui.horizontal(|ui| {
-                    Self::object_name(obj, ui);
+                    Self::object_name(block, ui);
                     ui.with_layout(
                         egui::Layout::right_to_left(egui::Align::Center),
                         |ui| {
                             ui.add_space(5.0);
-                            handle.ui(ui, |ui| {
-                                ui.label(DRAG); // drag symbol
-                            });
+                            handle.show_drag_cursor_on_hover(false).ui(
+                                ui,
+                                |ui| {
+                                    let _ = ui.button(DRAG); // drag symbol
+                                },
+                            );
                             if ui.button(TRASH).clicked() {
-                                obj.to_delete = true;
+                                ui.memory_mut(|mem| {
+                                    mem.data.insert_temp(id, DeleteMe)
+                                });
                             }
                         },
                     );
                 });
-                match &mut obj.object {
-                    Object::Block(b) => {
-                        ui.text_edit_multiline(&mut b.script);
-                    }
-                    Object::Group(_data) => (),
-                }
+                ui.text_edit_multiline(&mut block.script);
             },
         );
-        self.data.data.retain(|obj| !obj.to_delete);
+        self.data.blocks.retain(|block| {
+            ui.memory_mut(|mem| {
+                mem.data
+                    .remove_temp::<DeleteMe>(egui::Id::from(block))
+                    .is_none()
+            })
+        });
 
         ui.separator();
         ui.horizontal(|ui| {
-            if ui.button(NEW_FILE).clicked() {
+            if ui.button(NEW_BLOCK).clicked() {
                 let index = self.data.next_index;
                 self.data.next_index += 1;
-                self.data.data.push(NamedObject {
+                self.data.blocks.push(Block {
                     index,
                     name: "HI".to_owned(),
-                    object: Object::Block(Block {
-                        script: "OMG WTF".to_owned(),
-                    }),
-                    name_edit: None,
-                    to_delete: false,
-                })
-            }
-            if ui.button(NEW_FOLDER).clicked() {
-                let index = self.data.next_index;
-                self.data.next_index += 1;
-                self.data.data.push(NamedObject {
-                    index,
-                    name: "group".to_owned(),
-                    object: Object::Group(vec![]),
-                    name_edit: None,
-                    to_delete: false,
+                    script: "OMG WTF".to_owned(),
                 })
             }
         });
     }
 }
 
-const NEW_FILE: &str = " \u{ea7f} ";
-const DRAG: &str = " \u{f0041} ";
-const TRASH: &str = " \u{f48e} ";
-const NEW_FOLDER: &str = " \u{ea80} ";
+const NEW_BLOCK: &str = "\u{f067}";
+const DRAG: &str = "\u{f0041}";
+const TRASH: &str = "\u{f48e}";
 
 const INCONSOLATA: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
