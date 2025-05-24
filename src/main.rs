@@ -56,7 +56,6 @@ impl From<rhai::Dynamic> for Value {
     }
 }
 
-#[derive(Hash)]
 struct Block {
     name: String,
     script: String,
@@ -72,6 +71,12 @@ impl From<&Block> for egui::Id {
 impl From<&mut Block> for egui::Id {
     fn from(value: &mut Block) -> Self {
         (value as &Block).into()
+    }
+}
+
+impl egui_dnd::DragDropItem for &mut Block {
+    fn id(&self) -> egui::Id {
+        egui::Id::from(self as &Block)
     }
 }
 
@@ -202,7 +207,7 @@ enum BlockResponse {
 
 /// Draws a draggable block within a [`egui_dnd`] context
 ///
-/// Returns `true` if the block should be deleted, `false` otherwise
+/// Returns a [`BlockResponse`] based on button presses
 #[must_use]
 fn draggable_block(
     ui: &mut egui::Ui,
@@ -246,12 +251,11 @@ fn draggable_block(
             },
         );
     });
-    egui_animation::Collapse::vertical(block as &Block, !collapsed.0).ui(
-        ui,
-        |ui| {
+    egui_animation::Collapse::vertical(block as &Block, !collapsed.0)
+        .with_animation_time(0.1)
+        .ui(ui, |ui| {
             ui.text_edit_multiline(&mut block.script);
-        },
-    );
+        });
     response
 }
 

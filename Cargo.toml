@@ -11,8 +11,10 @@ readme = "README.md"
 [dependencies]
 eframe = { version = "0.31.1", features = ["wgpu"] }
 egui = "0.31.1"
-egui_animation = "0.8.0"
-egui_dnd = "0.12.0"
+# egui_dnd = "0.12.0"
+# egui_animation = "0.8.0"
+egui_dnd.path = "../hello_egui/crates/egui_dnd"
+egui_animation.path = "../hello_egui/crates/egui_animation"
 fidget = "0.3.6"
 rhai = { version = "1.21", features = ["sync"] }
 
