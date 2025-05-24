@@ -164,6 +164,8 @@ impl App {
         // Draw blocks
         let mut to_delete = HashSet::new();
         let mut toggle_edit = HashSet::new();
+        // XXX there is a drag-and-drop implementation that's built into egui,
+        // see `egui_demo_lib/src/demo/drag_and_drop.rs`
         dnd(ui, "dnd").show_vec(
             &mut self.data.blocks,
             |ui, block, handle, state| match draggable_block(
