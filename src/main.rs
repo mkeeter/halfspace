@@ -114,14 +114,34 @@ impl egui_dock::TabViewer for World {
 
     fn ui(&mut self, ui: &mut egui::Ui, index: &mut BlockIndex) {
         let block = self.blocks.get_mut(index).unwrap();
-        egui::TextEdit::multiline(&mut block.script)
-            .desired_width(f32::INFINITY)
-            .show(ui);
+        let theme =
+            egui_extras::syntax_highlighting::CodeTheme::from_style(ui.style());
+        let mut layouter = |ui: &egui::Ui, buf: &str, wrap_width: f32| {
+            let mut layout_job = egui_extras::syntax_highlighting::highlight(
+                ui.ctx(),
+                ui.style(),
+                &theme,
+                buf,
+                "rs",
+            );
+            layout_job.wrap.max_width = wrap_width;
+            ui.fonts(|f| f.layout_job(layout_job))
+        };
+        ui.add(
+            egui::TextEdit::multiline(&mut block.script)
+                .font(egui::TextStyle::Monospace) // for cursor height
+                .code_editor()
+                .desired_rows(10)
+                .lock_focus(true)
+                .desired_width(f32::INFINITY)
+                .layouter(&mut layouter),
+        );
     }
 }
 
 pub fn main() -> Result<(), eframe::Error> {
     let native_options = eframe::NativeOptions::default();
+
     eframe::run_native(
         "halfspace",
         native_options,
@@ -162,15 +182,16 @@ impl App {
                 egui::TextStyle::Button,
                 egui::FontId::new(16.0, egui::FontFamily::Proportional),
             );
+            style.text_styles.insert(
+                egui::TextStyle::Monospace,
+                egui::FontId::new(16.0, egui::FontFamily::Proportional),
+            );
         });
 
         // Customize egui here with cc.egui_ctx.set_fonts and cc.egui_ctx.set_visuals.
         // Restore app state using cc.storage (requires the "persistence" feature).
         // Use the cc.gl (a glow::Context) to create graphics shaders and buffers that you can use
         // for e.g. egui::PaintCallback.
-        let mut tree = egui_dock::DockState::<BlockIndex>::new(vec![]);
-        println!("{:?}", tree.focused_leaf());
-        println!("{:?}", tree.main_surface().iter().collect::<Vec<_>>());
         Self {
             data: World {
                 blocks: HashMap::new(),
@@ -190,8 +211,6 @@ impl eframe::App for App {
                 self.left(ui);
             });
 
-        println!("{:?}", self.tree.main_surface().iter().collect::<Vec<_>>());
-
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::central_panel(&ctx.style())
@@ -206,7 +225,7 @@ impl eframe::App for App {
                 let layout = painter.layout(
                     "nothing selected".to_owned(),
                     style.text_styles[&egui::TextStyle::Heading].clone(),
-                    style.visuals.text_color(),
+                    style.visuals.widgets.noninteractive.text_color(),
                     f32::INFINITY,
                 );
                 let rect = painter.clip_rect();
@@ -291,12 +310,11 @@ fn draggable_block(
     handle: egui_dnd::Handle,
     state: egui_dnd::ItemState,
 ) -> Option<BlockResponse> {
-    let id = index.id();
     let mut response = None;
     egui::collapsing_header::CollapsingState::load_with_default_open(
         ui.ctx(),
-        id,
-        false,
+        index.id(),
+        true,
     )
     .show_header(ui, |ui| {
         // Editable object name
@@ -321,7 +339,7 @@ fn draggable_block(
             },
         );
     })
-    .body_unindented(|ui| ui.text_edit_multiline(&mut block.script));
+    .body(|ui| ui.add_enabled(false, egui::Label::new("no io")));
     response
 }
 
