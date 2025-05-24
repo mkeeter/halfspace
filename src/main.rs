@@ -168,6 +168,9 @@ impl App {
         // Restore app state using cc.storage (requires the "persistence" feature).
         // Use the cc.gl (a glow::Context) to create graphics shaders and buffers that you can use
         // for e.g. egui::PaintCallback.
+        let mut tree = egui_dock::DockState::<BlockIndex>::new(vec![]);
+        println!("{:?}", tree.focused_leaf());
+        println!("{:?}", tree.main_surface().iter().collect::<Vec<_>>());
         Self {
             data: World {
                 blocks: HashMap::new(),
@@ -187,11 +190,36 @@ impl eframe::App for App {
                 self.left(ui);
             });
 
-        egui_dock::DockArea::new(&mut self.tree)
-            .style(egui_dock::Style::from_egui(ctx.style().as_ref()))
-            .show_leaf_collapse_buttons(false)
-            .show_leaf_close_all_buttons(false)
-            .show(ctx, &mut self.data);
+        println!("{:?}", self.tree.main_surface().iter().collect::<Vec<_>>());
+
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::central_panel(&ctx.style())
+                    .inner_margin(0.)
+                    .fill(egui::Color32::TRANSPARENT),
+            )
+            .show(ctx, |ui| {
+                // Manually draw a backdrop; this will be covered by the
+                // DockArea if there's anything being drawn
+                let style = ui.style();
+                let painter = ui.painter();
+                let layout = painter.layout(
+                    "nothing selected".to_owned(),
+                    style.text_styles[&egui::TextStyle::Heading].clone(),
+                    style.visuals.text_color(),
+                    f32::INFINITY,
+                );
+                let rect = painter.clip_rect();
+                let text_corner = rect.center() - layout.size() / 2.0;
+                painter.rect_filled(rect, 0.0, style.visuals.panel_fill);
+                painter.galley(text_corner, layout, egui::Color32::BLACK);
+
+                egui_dock::DockArea::new(&mut self.tree)
+                    .style(egui_dock::Style::from_egui(ctx.style().as_ref()))
+                    .show_leaf_collapse_buttons(false)
+                    .show_leaf_close_all_buttons(false)
+                    .show_inside(ui, &mut self.data);
+            });
     }
 }
 
