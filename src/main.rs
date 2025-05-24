@@ -61,7 +61,7 @@ struct Block {
     script: String,
 }
 
-#[derive(Copy, Clone, Hash, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
 struct BlockIndex(u64);
 
 impl BlockIndex {
@@ -101,6 +101,25 @@ impl World {
     }
 }
 
+impl egui_dock::TabViewer for World {
+    type Tab = BlockIndex;
+
+    fn id(&mut self, tab: &mut Self::Tab) -> egui::Id {
+        tab.id()
+    }
+
+    fn title(&mut self, index: &mut BlockIndex) -> egui::WidgetText {
+        egui::WidgetText::from(&self.blocks[index].name)
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, index: &mut BlockIndex) {
+        let block = self.blocks.get_mut(index).unwrap();
+        egui::TextEdit::multiline(&mut block.script)
+            .desired_width(f32::INFINITY)
+            .show(ui);
+    }
+}
+
 pub fn main() -> Result<(), eframe::Error> {
     let native_options = eframe::NativeOptions::default();
     eframe::run_native(
@@ -112,6 +131,7 @@ pub fn main() -> Result<(), eframe::Error> {
 
 struct App {
     data: World,
+    tree: egui_dock::DockState<BlockIndex>,
 }
 
 impl App {
@@ -154,6 +174,7 @@ impl App {
                 order: vec![],
                 next_index: 0,
             },
+            tree: egui_dock::DockState::new(vec![]),
         }
     }
 }
@@ -165,9 +186,12 @@ impl eframe::App for App {
             .show(ctx, |ui| {
                 self.left(ui);
             });
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Hello World!");
-        });
+
+        egui_dock::DockArea::new(&mut self.tree)
+            .style(egui_dock::Style::from_egui(ctx.style().as_ref()))
+            .show_leaf_collapse_buttons(false)
+            .show_leaf_close_all_buttons(false)
+            .show(ctx, &mut self.data);
     }
 }
 
@@ -180,25 +204,32 @@ impl App {
     fn left(&mut self, ui: &mut egui::Ui) {
         // Draw blocks
         let mut to_delete = HashSet::new();
-        let mut toggle_edit = HashSet::new();
         // XXX there is a drag-and-drop implementation that's built into egui,
         // see `egui_demo_lib/src/demo/drag_and_drop.rs`
         dnd(ui, "dnd").show_vec(
             &mut self.data.order,
-            |ui, index, handle, state| match draggable_block(
-                ui,
-                *index,
-                self.data.blocks.get_mut(index).unwrap(),
-                handle,
-                state,
-            ) {
-                Some(BlockResponse::Delete) => {
-                    to_delete.insert(*index);
+            |ui, index, handle, state| {
+                let tab_location = self.tree.find_tab(index);
+                match draggable_block(
+                    ui,
+                    *index,
+                    self.data.blocks.get_mut(index).unwrap(),
+                    tab_location.is_some(),
+                    handle,
+                    state,
+                ) {
+                    Some(BlockResponse::Delete) => {
+                        to_delete.insert(*index);
+                    }
+                    Some(BlockResponse::Edit) => {
+                        if let Some(tab_location) = tab_location {
+                            self.tree.remove_tab(tab_location).unwrap();
+                        } else {
+                            self.tree.push_to_focused_leaf(*index);
+                        }
+                    }
+                    None => (),
                 }
-                Some(BlockResponse::Edit) => {
-                    toggle_edit.insert(*index);
-                }
-                None => (),
             },
         );
 
@@ -228,6 +259,7 @@ fn draggable_block(
     ui: &mut egui::Ui,
     index: BlockIndex,
     block: &mut Block,
+    is_open: bool,
     handle: egui_dnd::Handle,
     state: egui_dnd::ItemState,
 ) -> Option<BlockResponse> {
@@ -252,7 +284,10 @@ fn draggable_block(
                 if ui.button(TRASH).clicked() {
                     response = Some(BlockResponse::Delete);
                 }
-                if ui.button(PENCIL).clicked() {
+                if ui
+                    .add(egui::Button::new(PENCIL).selected(is_open))
+                    .clicked()
+                {
                     response = Some(BlockResponse::Edit);
                 }
             },
