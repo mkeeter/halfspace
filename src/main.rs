@@ -1,4 +1,5 @@
 use egui_dnd::dnd;
+use std::collections::HashSet;
 
 use fidget::{
     context::Tree,
@@ -147,89 +148,39 @@ impl eframe::App for App {
 }
 
 #[derive(Copy, Clone, Default)]
-struct DeleteMe;
-
-#[derive(Copy, Clone, Default)]
 struct NameEdit {
     needs_focus: bool,
 }
 
-impl App {
-    fn object_name(block: &mut Block, ui: &mut egui::Ui) {
-        let id = egui::Id::from(block as &Block);
-        match ui.memory(|mem| mem.data.get_temp(id)) {
-            Some(NameEdit { needs_focus }) => {
-                let response = ui.add(
-                    egui::TextEdit::singleline(&mut block.name)
-                        .desired_width(ui.available_width() / 2.0),
-                );
-                let lost_focus = response.lost_focus();
-                ui.memory_mut(|mem| {
-                    if needs_focus {
-                        mem.request_focus(response.id);
-                        mem.data
-                            .insert_temp(id, NameEdit { needs_focus: false });
-                    }
-                    if lost_focus {
-                        mem.data.remove_temp::<NameEdit>(id);
-                    }
-                });
-            }
-            None => {
-                let response = ui
-                    .scope_builder(
-                        egui::UiBuilder::new().sense(egui::Sense::click()),
-                        |ui| ui.heading(&block.name),
-                    )
-                    .response;
-                if response.double_clicked() {
-                    ui.memory_mut(|mem| {
-                        mem.data.insert_temp(id, NameEdit { needs_focus: true })
-                    });
-                }
-            }
-        }
-    }
+#[derive(Copy, Clone, Default)]
+struct Collapsed(bool);
 
+impl App {
     fn left(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Left Column");
+        // Draw blocks
+        let mut to_delete = HashSet::new();
+        let mut toggle_edit = HashSet::new();
         dnd(ui, "dnd").show_vec(
             &mut self.data.blocks,
-            |ui, block, handle, _state| {
-                // Editable object name
-                let id = egui::Id::from(block as &_);
-                ui.horizontal(|ui| {
-                    Self::object_name(block, ui);
-                    ui.with_layout(
-                        egui::Layout::right_to_left(egui::Align::Center),
-                        |ui| {
-                            ui.add_space(5.0);
-                            handle.show_drag_cursor_on_hover(false).ui(
-                                ui,
-                                |ui| {
-                                    let _ = ui.button(DRAG); // drag symbol
-                                },
-                            );
-                            if ui.button(TRASH).clicked() {
-                                ui.memory_mut(|mem| {
-                                    mem.data.insert_temp(id, DeleteMe)
-                                });
-                            }
-                        },
-                    );
-                });
-                ui.text_edit_multiline(&mut block.script);
+            |ui, block, handle, state| match draggable_block(
+                ui, block, handle, state,
+            ) {
+                Some(BlockResponse::Delete) => {
+                    to_delete.insert(block.index);
+                }
+                Some(BlockResponse::Edit) => {
+                    toggle_edit.insert(block.index);
+                }
+                None => (),
             },
         );
-        self.data.blocks.retain(|block| {
-            ui.memory_mut(|mem| {
-                mem.data
-                    .remove_temp::<DeleteMe>(egui::Id::from(block))
-                    .is_none()
-            })
-        });
+        self.data
+            .blocks
+            .retain(|block| !to_delete.contains(&block.index));
 
-        ui.separator();
+        if !self.data.blocks.is_empty() {
+            ui.separator();
+        }
         ui.horizontal(|ui| {
             if ui.button(NEW_BLOCK).clicked() {
                 let index = self.data.next_index;
@@ -244,9 +195,108 @@ impl App {
     }
 }
 
-const NEW_BLOCK: &str = "\u{f067}";
+enum BlockResponse {
+    Delete,
+    Edit,
+}
+
+/// Draws a draggable block within a [`egui_dnd`] context
+///
+/// Returns `true` if the block should be deleted, `false` otherwise
+#[must_use]
+fn draggable_block(
+    ui: &mut egui::Ui,
+    block: &mut Block,
+    handle: egui_dnd::Handle,
+    state: egui_dnd::ItemState,
+) -> Option<BlockResponse> {
+    let id: egui::Id = block.into();
+    let mut collapsed: Collapsed = ui
+        .memory(|mem| mem.data.get_temp(id))
+        .unwrap_or(Collapsed(false));
+    let mut response = None;
+    ui.horizontal(|ui| {
+        if ui
+            .add(
+                egui::Button::new(if collapsed.0 { EXPAND } else { COLLAPSE })
+                    .min_size(egui::vec2(15.0, 0.0))
+                    .frame(false),
+            )
+            .clicked()
+        {
+            collapsed.0 = !collapsed.0;
+            ui.memory_mut(|mem| mem.data.insert_temp(id, collapsed));
+        }
+        // Editable object name
+        block_name(block, ui);
+        // Buttons on the left side
+        ui.with_layout(
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| {
+                ui.add_space(5.0);
+                handle.show_drag_cursor_on_hover(false).ui(ui, |ui| {
+                    ui.add(egui::Button::new(DRAG).selected(state.dragged));
+                });
+                if ui.button(TRASH).clicked() {
+                    response = Some(BlockResponse::Delete);
+                }
+                if ui.button(PENCIL).clicked() {
+                    response = Some(BlockResponse::Edit);
+                }
+            },
+        );
+    });
+    egui_animation::Collapse::vertical(block as &Block, !collapsed.0).ui(
+        ui,
+        |ui| {
+            ui.text_edit_multiline(&mut block.script);
+        },
+    );
+    response
+}
+
+/// Draws the name of a block, editable with a double-click
+fn block_name(block: &mut Block, ui: &mut egui::Ui) {
+    let id = egui::Id::from(block as &Block);
+    match ui.memory(|mem| mem.data.get_temp(id)) {
+        Some(NameEdit { needs_focus }) => {
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut block.name)
+                    .desired_width(ui.available_width() / 2.0),
+            );
+            let lost_focus = response.lost_focus();
+            ui.memory_mut(|mem| {
+                if needs_focus {
+                    mem.request_focus(response.id);
+                    mem.data.insert_temp(id, NameEdit { needs_focus: false });
+                }
+                if lost_focus {
+                    mem.data.remove_temp::<NameEdit>(id);
+                }
+            });
+        }
+        None => {
+            let response = ui
+                .scope_builder(
+                    egui::UiBuilder::new().sense(egui::Sense::click()),
+                    |ui| ui.heading(&block.name),
+                )
+                .response;
+            if response.double_clicked() {
+                ui.memory_mut(|mem| {
+                    mem.data.insert_temp(id, NameEdit { needs_focus: true })
+                });
+            }
+        }
+    }
+}
+
+const NEW_BLOCK: &str = "\u{f067} New block";
 const DRAG: &str = "\u{f0041}";
 const TRASH: &str = "\u{f48e}";
+const EXPAND: &str = "\u{f0da}";
+const COLLAPSE: &str = "\u{f0d7}";
+const PENCIL: &str = "\u{f03eb}";
 
 const INCONSOLATA: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
