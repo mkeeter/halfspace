@@ -76,6 +76,31 @@ struct World {
     blocks: HashMap<BlockIndex, Block>,
 }
 
+impl World {
+    /// Filters blocks based on a function
+    fn retain<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&BlockIndex) -> bool,
+    {
+        self.blocks.retain(|index, _block| f(index));
+        self.order.retain(|index| f(index))
+    }
+
+    /// Appends a new empty block to the end of the list
+    fn new_empty_block(&mut self) {
+        let index = BlockIndex(self.next_index);
+        self.next_index += 1;
+        self.blocks.insert(
+            index,
+            Block {
+                name: "block".to_owned(),
+                script: "".to_owned(),
+            },
+        );
+        self.order.push(index);
+    }
+}
+
 pub fn main() -> Result<(), eframe::Error> {
     let native_options = eframe::NativeOptions::default();
     eframe::run_native(
@@ -176,25 +201,16 @@ impl App {
                 None => (),
             },
         );
-        self.data
-            .blocks
-            .retain(|index, _block| !to_delete.contains(index));
-        self.data.order.retain(|index| !to_delete.contains(index));
 
+        // Post-processing: edit blocks based on button presses
+        self.data.retain(|index| !to_delete.contains(index));
+
+        // Draw the "new block" button below a separator
         if !self.data.blocks.is_empty() {
             ui.separator();
         }
         if ui.button(NEW_BLOCK).clicked() {
-            let index = BlockIndex(self.data.next_index);
-            self.data.next_index += 1;
-            self.data.blocks.insert(
-                index,
-                Block {
-                    name: "HI".to_owned(),
-                    script: "OMG WTF".to_owned(),
-                },
-            );
-            self.data.order.push(index);
+            self.data.new_empty_block();
         }
     }
 }
