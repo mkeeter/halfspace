@@ -62,21 +62,15 @@ struct Block {
     index: u64,
 }
 
-impl From<&Block> for egui::Id {
-    fn from(value: &Block) -> Self {
-        egui::Id::new("block").with(value.index)
-    }
-}
-
-impl From<&mut Block> for egui::Id {
-    fn from(value: &mut Block) -> Self {
-        (value as &Block).into()
+impl Block {
+    fn id(&self) -> egui::Id {
+        egui::Id::new("block").with(self.index)
     }
 }
 
 impl egui_dnd::DragDropItem for &mut Block {
     fn id(&self) -> egui::Id {
-        egui::Id::from(self as &Block)
+        (self as &Block).id()
     }
 }
 
@@ -214,7 +208,7 @@ fn draggable_block(
     handle: egui_dnd::Handle,
     state: egui_dnd::ItemState,
 ) -> Option<BlockResponse> {
-    let id: egui::Id = block.into();
+    let id: egui::Id = block.id();
     let mut response = None;
     egui::collapsing_header::CollapsingState::load_with_default_open(
         ui.ctx(),
@@ -247,7 +241,7 @@ fn draggable_block(
 
 /// Draws the name of a block, editable with a double-click
 fn block_name(block: &mut Block, ui: &mut egui::Ui) {
-    let id = egui::Id::from(block as &Block);
+    let id = block.id();
     match ui.memory(|mem| mem.data.get_temp(id)) {
         Some(NameEdit { needs_focus }) => {
             let response = ui.add(
