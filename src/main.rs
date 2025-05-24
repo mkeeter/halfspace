@@ -143,9 +143,11 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::SidePanel::left("left_panel").show(ctx, |ui| {
-            self.left(ui);
-        });
+        egui::SidePanel::left("left_panel")
+            .min_width(250.0)
+            .show(ctx, |ui| {
+                self.left(ui);
+            });
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Hello World!");
         });
@@ -156,9 +158,6 @@ impl eframe::App for App {
 struct NameEdit {
     needs_focus: bool,
 }
-
-#[derive(Copy, Clone, Default)]
-struct Collapsed(bool);
 
 impl App {
     fn left(&mut self, ui: &mut egui::Ui) {
@@ -186,17 +185,15 @@ impl App {
         if !self.data.blocks.is_empty() {
             ui.separator();
         }
-        ui.horizontal(|ui| {
-            if ui.button(NEW_BLOCK).clicked() {
-                let index = self.data.next_index;
-                self.data.next_index += 1;
-                self.data.blocks.push(Block {
-                    index,
-                    name: "HI".to_owned(),
-                    script: "OMG WTF".to_owned(),
-                })
-            }
-        });
+        if ui.button(NEW_BLOCK).clicked() {
+            let index = self.data.next_index;
+            self.data.next_index += 1;
+            self.data.blocks.push(Block {
+                index,
+                name: "HI".to_owned(),
+                script: "OMG WTF".to_owned(),
+            })
+        }
     }
 }
 
@@ -216,22 +213,13 @@ fn draggable_block(
     state: egui_dnd::ItemState,
 ) -> Option<BlockResponse> {
     let id: egui::Id = block.into();
-    let mut collapsed: Collapsed = ui
-        .memory(|mem| mem.data.get_temp(id))
-        .unwrap_or(Collapsed(false));
     let mut response = None;
-    ui.horizontal(|ui| {
-        if ui
-            .add(
-                egui::Button::new(if collapsed.0 { EXPAND } else { COLLAPSE })
-                    .min_size(egui::vec2(15.0, 0.0))
-                    .frame(false),
-            )
-            .clicked()
-        {
-            collapsed.0 = !collapsed.0;
-            ui.memory_mut(|mem| mem.data.insert_temp(id, collapsed));
-        }
+    egui::collapsing_header::CollapsingState::load_with_default_open(
+        ui.ctx(),
+        id,
+        false,
+    )
+    .show_header(ui, |ui| {
         // Editable object name
         block_name(block, ui);
         // Buttons on the left side
@@ -250,12 +238,8 @@ fn draggable_block(
                 }
             },
         );
-    });
-    egui_animation::Collapse::vertical(block as &Block, !collapsed.0)
-        .with_animation_time(0.1)
-        .ui(ui, |ui| {
-            ui.text_edit_multiline(&mut block.script);
-        });
+    })
+    .body_unindented(|ui| ui.text_edit_multiline(&mut block.script));
     response
 }
 
@@ -298,8 +282,6 @@ fn block_name(block: &mut Block, ui: &mut egui::Ui) {
 const NEW_BLOCK: &str = "\u{f067} New block";
 const DRAG: &str = "\u{f0041}";
 const TRASH: &str = "\u{f48e}";
-const EXPAND: &str = "\u{f0da}";
-const COLLAPSE: &str = "\u{f0d7}";
 const PENCIL: &str = "\u{f03eb}";
 
 const INCONSOLATA: &[u8] = include_bytes!(concat!(
