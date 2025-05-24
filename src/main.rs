@@ -1,5 +1,5 @@
 use egui_dnd::dnd;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use fidget::{
     context::Tree,
@@ -59,24 +59,21 @@ impl From<rhai::Dynamic> for Value {
 struct Block {
     name: String,
     script: String,
-    index: u64,
 }
 
-impl Block {
-    fn id(&self) -> egui::Id {
-        egui::Id::new("block").with(self.index)
-    }
-}
+#[derive(Copy, Clone, Hash, Eq, PartialEq)]
+struct BlockIndex(u64);
 
-impl egui_dnd::DragDropItem for &mut Block {
+impl BlockIndex {
     fn id(&self) -> egui::Id {
-        (self as &Block).id()
+        egui::Id::new("block").with(self.0)
     }
 }
 
 struct World {
     next_index: u64,
-    blocks: Vec<Block>,
+    order: Vec<BlockIndex>,
+    blocks: HashMap<BlockIndex, Block>,
 }
 
 pub fn main() -> Result<(), eframe::Error> {
@@ -128,7 +125,8 @@ impl App {
         // for e.g. egui::PaintCallback.
         Self {
             data: World {
-                blocks: vec![],
+                blocks: HashMap::new(),
+                order: vec![],
                 next_index: 0,
             },
         }
@@ -161,34 +159,42 @@ impl App {
         // XXX there is a drag-and-drop implementation that's built into egui,
         // see `egui_demo_lib/src/demo/drag_and_drop.rs`
         dnd(ui, "dnd").show_vec(
-            &mut self.data.blocks,
-            |ui, block, handle, state| match draggable_block(
-                ui, block, handle, state,
+            &mut self.data.order,
+            |ui, index, handle, state| match draggable_block(
+                ui,
+                *index,
+                self.data.blocks.get_mut(index).unwrap(),
+                handle,
+                state,
             ) {
                 Some(BlockResponse::Delete) => {
-                    to_delete.insert(block.index);
+                    to_delete.insert(*index);
                 }
                 Some(BlockResponse::Edit) => {
-                    toggle_edit.insert(block.index);
+                    toggle_edit.insert(*index);
                 }
                 None => (),
             },
         );
         self.data
             .blocks
-            .retain(|block| !to_delete.contains(&block.index));
+            .retain(|index, _block| !to_delete.contains(index));
+        self.data.order.retain(|index| !to_delete.contains(index));
 
         if !self.data.blocks.is_empty() {
             ui.separator();
         }
         if ui.button(NEW_BLOCK).clicked() {
-            let index = self.data.next_index;
+            let index = BlockIndex(self.data.next_index);
             self.data.next_index += 1;
-            self.data.blocks.push(Block {
+            self.data.blocks.insert(
                 index,
-                name: "HI".to_owned(),
-                script: "OMG WTF".to_owned(),
-            })
+                Block {
+                    name: "HI".to_owned(),
+                    script: "OMG WTF".to_owned(),
+                },
+            );
+            self.data.order.push(index);
         }
     }
 }
@@ -204,11 +210,12 @@ enum BlockResponse {
 #[must_use]
 fn draggable_block(
     ui: &mut egui::Ui,
+    index: BlockIndex,
     block: &mut Block,
     handle: egui_dnd::Handle,
     state: egui_dnd::ItemState,
 ) -> Option<BlockResponse> {
-    let id: egui::Id = block.id();
+    let id = index.id();
     let mut response = None;
     egui::collapsing_header::CollapsingState::load_with_default_open(
         ui.ctx(),
@@ -217,7 +224,7 @@ fn draggable_block(
     )
     .show_header(ui, |ui| {
         // Editable object name
-        block_name(block, ui);
+        block_name(ui, index, block);
         // Buttons on the left side
         ui.with_layout(
             egui::Layout::right_to_left(egui::Align::Center),
@@ -240,8 +247,8 @@ fn draggable_block(
 }
 
 /// Draws the name of a block, editable with a double-click
-fn block_name(block: &mut Block, ui: &mut egui::Ui) {
-    let id = block.id();
+fn block_name(ui: &mut egui::Ui, index: BlockIndex, block: &mut Block) {
+    let id = index.id();
     match ui.memory(|mem| mem.data.get_temp(id)) {
         Some(NameEdit { needs_focus }) => {
             let response = ui.add(
