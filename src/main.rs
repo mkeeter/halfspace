@@ -175,11 +175,11 @@ impl App {
             .unwrap()
             .insert(0, "inconsolata".to_owned());
 
-        use syntect::parsing::SyntaxSetBuilder;
-
-        let mut builder = SyntaxSetBuilder::new();
-        builder.add_from_folder("syntax", true).unwrap();
-        let ps = builder.build();
+        let (ps, _) = bincode::serde::decode_from_slice(
+            SYNTAX,
+            bincode::config::standard(),
+        )
+        .unwrap();
         let ts = syntect::highlighting::ThemeSet::load_defaults();
         let syntax =
             egui_extras::syntax_highlighting::SyntectSettings { ps, ts };
@@ -410,3 +410,4 @@ const INCONSOLATA: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/fonts/InconsolataNerdFontPropo-Regular.ttf"
 ));
+const SYNTAX: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/syntax.bin"));
