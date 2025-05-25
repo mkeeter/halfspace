@@ -352,12 +352,12 @@ impl<'a> egui_dock::TabViewer for BoundWorld<'a> {
                 .layouter(&mut layouter),
         );
         *self.changed |= r.changed();
-        if let Some(state) = &block.state {
+        if let Some(state) = &mut block.state {
             if !state.stdout.is_empty() {
-                let mut text: &str = &state.stdout;
                 ui.label("Output");
                 ui.add(
-                    egui::TextEdit::multiline(&mut text)
+                    egui::TextEdit::multiline(&mut state.stdout)
+                        .interactive(false)
                         .desired_width(f32::INFINITY),
                 );
             }
@@ -542,6 +542,7 @@ impl App {
         // Draw blocks
         let mut to_delete = HashSet::new();
         let mut changed = false;
+        let last = self.data.order.last().cloned();
         // XXX there is a drag-and-drop implementation that's built into egui,
         // see `egui_demo_lib/src/demo/drag_and_drop.rs`
         dnd(ui, "dnd").show_vec(
@@ -553,6 +554,7 @@ impl App {
                     *index,
                     self.data.blocks.get_mut(index).unwrap(),
                     tab_location.is_some(),
+                    Some(*index) == last,
                     handle,
                     state,
                 );
@@ -616,10 +618,12 @@ fn draggable_block(
     index: BlockIndex,
     block: &mut Block,
     is_open: bool,
+    last: bool,
     handle: egui_dnd::Handle,
     state: egui_dnd::ItemState,
 ) -> BlockResponse {
     let mut response = BlockResponse::empty();
+    let padding = ui.spacing().icon_width + ui.spacing().icon_spacing;
     if block.state.as_ref().is_some_and(|s| !s.outputs.is_empty()) {
         egui::collapsing_header::CollapsingState::load_with_default_open(
             ui.ctx(),
@@ -631,27 +635,27 @@ fn draggable_block(
                 draggable_block_header(ui, index, block, is_open, handle, state)
         })
         .body_unindented(|ui| {
-            if let Some(state) = &block.state {
-                for (name, value) in &state.outputs {
-                    ui.horizontal(|ui| {
-                        ui.add_space(ui.spacing().icon_width);
-                        ui.label(name);
-                        let mut txt = value.to_string();
-                        ui.add_enabled(
-                            false,
-                            egui::TextEdit::singleline(&mut txt)
-                                .desired_width(f32::INFINITY)
-                                .interactive(false),
-                        );
-                    });
-                }
-            } else {
-                ui.add_enabled(false, egui::Label::new("no io"));
+            let state = block.state.as_ref().unwrap();
+            for (name, value) in &state.outputs {
+                ui.horizontal(|ui| {
+                    ui.add_space(padding);
+                    ui.label(name);
+                    let mut txt = value.to_string();
+                    ui.add_enabled(
+                        false,
+                        egui::TextEdit::singleline(&mut txt)
+                            .desired_width(f32::INFINITY)
+                            .interactive(false),
+                    );
+                });
+            }
+            if !last {
+                ui.separator();
             }
         });
     } else {
         ui.horizontal(|ui| {
-            ui.add_space(ui.spacing().icon_width);
+            ui.add_space(padding);
             response =
                 draggable_block_header(ui, index, block, is_open, handle, state)
         });
