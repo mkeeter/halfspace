@@ -56,11 +56,20 @@ impl From<rhai::Dynamic> for Value {
     }
 }
 
-#[derive(Clone)]
 struct Block {
     name: String,
     script: String,
     state: Option<BlockState>,
+}
+
+impl Block {
+    fn without_state(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            script: self.script.clone(),
+            state: None,
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
@@ -72,7 +81,6 @@ impl BlockIndex {
     }
 }
 
-#[derive(Clone)]
 struct World {
     next_index: u64,
     order: Vec<BlockIndex>,
@@ -81,6 +89,7 @@ struct World {
 
 #[derive(Clone)]
 struct BlockError {
+    #[allow(unused)] // TODO
     line: Option<usize>,
     message: String,
 }
@@ -91,14 +100,17 @@ enum NameError {
     DuplicateName,
 }
 
-#[derive(Clone)]
 struct BlockState {
     /// Output from `print` calls in the script
     stdout: String,
     /// Output from `debug` calls in the script, pinned to specific lines
     debug: HashMap<usize, Vec<String>>,
+    /// Error encountered evaluating the name
     name_error: Option<NameError>,
+    /// Errors encountered while parsing and evaluating the script
     script_errors: Vec<BlockError>,
+    /// Values defined with `output(..)` calls in the script, in order
+    outputs: Vec<(String, Value)>,
 }
 
 impl World {
@@ -135,6 +147,19 @@ impl World {
         true
     }
 
+    /// Returns a copy without `BlockState`, suitable for re-evaluation
+    fn without_state(&self) -> Self {
+        Self {
+            next_index: self.next_index,
+            order: self.order.clone(),
+            blocks: self
+                .blocks
+                .iter()
+                .map(|(k, v)| (*k, v.without_state()))
+                .collect(),
+        }
+    }
+
     /// Rebuilds the entire world, populating [`BlockState`] for each block
     fn rebuild(&mut self) {
         let mut name_map = HashMap::new();
@@ -155,6 +180,20 @@ impl World {
         }
         let io_log =
             std::sync::Arc::new(std::sync::RwLock::new(IoLog::default()));
+        #[derive(Default)]
+
+        struct Outputs {
+            names: HashSet<String>,
+            values: Vec<(String, Value)>,
+        }
+        impl Outputs {
+            fn take(&mut self) -> Vec<(String, Value)> {
+                self.names.clear();
+                std::mem::take(&mut self.values)
+            }
+        }
+        let outputs =
+            std::sync::Arc::new(std::sync::RwLock::new(Outputs::default()));
 
         for i in &self.order {
             let block = &mut self.blocks.get_mut(i).unwrap();
@@ -163,6 +202,7 @@ impl World {
                 name_error: None,
                 debug: HashMap::new(),
                 script_errors: vec![],
+                outputs: vec![],
             });
             let state = block.state.as_mut().unwrap();
 
@@ -206,6 +246,33 @@ impl World {
                     continue;
                 }
             };
+            let output_handle = outputs.clone();
+            engine.register_fn(
+                "output",
+                move |ctx: rhai::NativeCallContext,
+                      name: &str,
+                      v: rhai::Dynamic|
+                      -> Result<(), Box<rhai::EvalAltResult>> {
+                    let mut out = output_handle.write().unwrap();
+                    if !rhai::is_valid_identifier(name) {
+                        return Err(
+                            rhai::EvalAltResult::ErrorForbiddenVariable(
+                                name.to_owned(),
+                                ctx.position(),
+                            )
+                            .into(),
+                        );
+                    } else if !out.names.insert(name.to_owned()) {
+                        return Err(rhai::EvalAltResult::ErrorVariableExists(
+                            format!("output `{}` already exists", name),
+                            ctx.position(),
+                        )
+                        .into());
+                    }
+                    out.values.push((name.to_owned(), Value::from(v)));
+                    Ok(())
+                },
+            );
             let mut scope = rhai::Scope::new();
             let _out = match engine
                 .eval_ast_with_scope::<rhai::Dynamic>(&mut scope, &ast)
@@ -222,6 +289,7 @@ impl World {
             let (stdout, debug) = io_log.write().unwrap().take();
             state.stdout = stdout.join("\n");
             state.debug = debug;
+            state.outputs = outputs.write().unwrap().take();
         }
     }
 }
@@ -429,7 +497,7 @@ impl eframe::App for App {
                     .show_inside(ui, &mut bw);
             });
         if changed {
-            let mut world = self.data.clone();
+            let mut world = self.data.without_state();
             let ctx = ctx.clone();
             let tx = self.tx.clone();
             self.pool.install(move || {
