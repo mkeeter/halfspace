@@ -275,7 +275,10 @@ impl<'a> egui_dock::TabViewer for BoundWorld<'a> {
             if !state.stdout.is_empty() {
                 let mut text: &str = &state.stdout;
                 ui.label("Output");
-                ui.add(egui::TextEdit::multiline(&mut text));
+                ui.add(
+                    egui::TextEdit::multiline(&mut text)
+                        .desired_width(f32::INFINITY),
+                );
             }
             if !state.script_errors.is_empty() {
                 ui.label("Errors");
@@ -285,7 +288,10 @@ impl<'a> egui_dock::TabViewer for BoundWorld<'a> {
                     .map(|e| e.message.as_str())
                     .collect::<Vec<_>>()
                     .join("\n");
-                ui.add(egui::TextEdit::multiline(&mut text));
+                ui.add(
+                    egui::TextEdit::multiline(&mut text)
+                        .desired_width(f32::INFINITY),
+                );
             }
         }
     }
@@ -353,6 +359,8 @@ impl App {
                 egui::TextStyle::Monospace,
                 egui::FontId::new(16.0, egui::FontFamily::Proportional),
             );
+            style.interaction.tooltip_delay = 0.0;
+            style.interaction.show_tooltips_only_when_still = false;
         });
 
         // Customize egui here with cc.egui_ctx.set_fonts and cc.egui_ctx.set_visuals.
@@ -472,6 +480,13 @@ impl App {
                         self.tree.push_to_focused_leaf(*index);
                     }
                 }
+                if r.contains(BlockResponse::FOCUS_ERR) {
+                    if let Some(tab_location) = tab_location {
+                        self.tree.set_active_tab(tab_location)
+                    } else {
+                        self.tree.push_to_focused_leaf(*index);
+                    }
+                }
                 changed |= r.contains(BlockResponse::CHANGED);
             },
         );
@@ -499,8 +514,10 @@ bitflags::bitflags! {
         const DELETE = 0b00000001;
         /// Request to toggle the edit window
         const TOGGLE_EDIT = 0b00000010;
+        /// Request to focus the edit window
+        const FOCUS_ERR = 0b00000100;
         /// The block has changed
-        const CHANGED = 0b00000100;
+        const CHANGED = 0b00001000;
     }
 }
 
@@ -546,19 +563,38 @@ fn draggable_block(
                 {
                     response = BlockResponse::TOGGLE_EDIT;
                 }
-                if let Some(e) = block.state.as_ref().and_then(|s| s.name_error)
-                {
-                    let err = match e {
-                        NameError::DuplicateName => "duplicate name",
-                        NameError::InvalidIdentifier => "invalid identifier",
-                    };
-                    ui.label(
-                        egui::RichText::new(WARN)
-                            .color(ui.style().visuals.error_fg_color),
-                    )
-                    .on_hover_ui(|ui| {
-                        ui.label(err);
-                    });
+                if let Some(state) = &block.state {
+                    if let Some(e) = state.name_error {
+                        let err = match e {
+                            NameError::DuplicateName => "duplicate name",
+                            NameError::InvalidIdentifier => {
+                                "invalid identifier"
+                            }
+                        };
+                        ui.label(
+                            egui::RichText::new(WARN)
+                                .color(ui.style().visuals.error_fg_color),
+                        )
+                        .on_hover_ui(|ui| {
+                            ui.label(err);
+                        });
+                    } else if !state.script_errors.is_empty() {
+                        let r = ui
+                            .add(
+                                egui::Label::new(
+                                    egui::RichText::new(WARN).color(
+                                        ui.style().visuals.warn_fg_color,
+                                    ),
+                                )
+                                .sense(egui::Sense::click()),
+                            )
+                            .on_hover_ui(|ui| {
+                                ui.label("script contains error");
+                            });
+                        if r.clicked() {
+                            response |= BlockResponse::FOCUS_ERR;
+                        }
+                    }
                 }
             },
         );
