@@ -1721,12 +1721,14 @@ name = "halfspace"
 version = "0.1.0"
 dependencies = [
  "bincode 2.0.1",
+ "bitflags 2.9.1",
  "eframe",
  "egui",
  "egui_dnd",
  "egui_dock",
  "egui_extras",
  "fidget",
+ "rayon",
  "rhai",
  "syntect",
 ]

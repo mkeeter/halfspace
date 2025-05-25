@@ -56,9 +56,11 @@ impl From<rhai::Dynamic> for Value {
     }
 }
 
+#[derive(Clone)]
 struct Block {
     name: String,
     script: String,
+    state: Option<BlockState>,
 }
 
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
@@ -70,24 +72,55 @@ impl BlockIndex {
     }
 }
 
+#[derive(Clone)]
 struct World {
     next_index: u64,
     order: Vec<BlockIndex>,
     blocks: HashMap<BlockIndex, Block>,
 }
 
+#[derive(Clone)]
+struct BlockError {
+    line: Option<usize>,
+    message: String,
+}
+
+#[derive(Copy, Clone)]
+enum NameError {
+    InvalidIdentifier,
+    DuplicateName,
+}
+
+#[derive(Clone)]
+struct BlockState {
+    /// Output from `print` calls in the script
+    stdout: String,
+    /// Output from `debug` calls in the script, pinned to specific lines
+    debug: HashMap<usize, Vec<String>>,
+    name_error: Option<NameError>,
+    script_errors: Vec<BlockError>,
+}
+
 impl World {
     /// Filters blocks based on a function
-    fn retain<F>(&mut self, mut f: F)
+    ///
+    /// Returns `true` if anything changed, or `false` otherwise
+    #[must_use]
+    fn retain<F>(&mut self, mut f: F) -> bool
     where
         F: FnMut(&BlockIndex) -> bool,
     {
+        let prev_len = self.order.len();
         self.blocks.retain(|index, _block| f(index));
-        self.order.retain(|index| f(index))
+        self.order.retain(|index| f(index));
+        self.order.len() != prev_len
     }
 
     /// Appends a new empty block to the end of the list
-    fn new_empty_block(&mut self) {
+    ///
+    /// Returns `true` if anything changed (which is always the case)
+    #[must_use]
+    fn new_empty_block(&mut self) -> bool {
         let index = BlockIndex(self.next_index);
         self.next_index += 1;
         self.blocks.insert(
@@ -95,15 +128,108 @@ impl World {
             Block {
                 name: "block".to_owned(),
                 script: "".to_owned(),
+                state: None,
             },
         );
         self.order.push(index);
+        true
+    }
+
+    /// Rebuilds the entire world, populating [`BlockState`] for each block
+    fn rebuild(&mut self) {
+        let mut name_map = HashMap::new();
+        let mut engine = rhai::Engine::new();
+
+        #[derive(Default)]
+        struct IoLog {
+            stdout: Vec<String>,
+            debug: HashMap<usize, Vec<String>>,
+        }
+        impl IoLog {
+            fn take(&mut self) -> (Vec<String>, HashMap<usize, Vec<String>>) {
+                (
+                    std::mem::take(&mut self.stdout),
+                    std::mem::take(&mut self.debug),
+                )
+            }
+        }
+        let io_log =
+            std::sync::Arc::new(std::sync::RwLock::new(IoLog::default()));
+
+        for i in &self.order {
+            let block = &mut self.blocks.get_mut(i).unwrap();
+            block.state = Some(BlockState {
+                stdout: String::new(),
+                name_error: None,
+                debug: HashMap::new(),
+                script_errors: vec![],
+            });
+            let state = block.state.as_mut().unwrap();
+
+            // Check that the name is valid
+            if !rhai::is_valid_identifier(&block.name) {
+                state.name_error = Some(NameError::InvalidIdentifier);
+                continue;
+            }
+            // Bind from the name to a block index (if available)
+            match name_map.entry(block.name.clone()) {
+                std::collections::hash_map::Entry::Occupied(..) => {
+                    state.name_error = Some(NameError::DuplicateName);
+                    continue;
+                }
+                std::collections::hash_map::Entry::Vacant(v) => {
+                    v.insert(*i);
+                }
+            }
+            let io_debug = io_log.clone();
+            engine.on_debug(move |x, _src, pos| {
+                io_debug
+                    .write()
+                    .unwrap()
+                    .debug
+                    .entry(pos.line().unwrap())
+                    .or_default()
+                    .push(x.to_owned())
+            });
+            let io_print = io_log.clone();
+            engine.on_print(move |s| {
+                io_print.write().unwrap().stdout.push(s.to_owned())
+            });
+
+            let ast = match engine.compile(&block.script) {
+                Ok(ast) => ast,
+                Err(e) => {
+                    state.script_errors.push(BlockError {
+                        message: e.to_string(),
+                        line: e.position().line(),
+                    });
+                    continue;
+                }
+            };
+            let mut scope = rhai::Scope::new();
+            let _out = match engine
+                .eval_ast_with_scope::<rhai::Dynamic>(&mut scope, &ast)
+            {
+                Ok(v) => v,
+                Err(e) => {
+                    state.script_errors.push(BlockError {
+                        message: e.to_string(),
+                        line: e.position().line(),
+                    });
+                    continue;
+                }
+            };
+            let (stdout, debug) = io_log.write().unwrap().take();
+            state.stdout = stdout.join("\n");
+            state.debug = debug;
+        }
     }
 }
 
 struct BoundWorld<'a> {
     world: &'a mut World,
     syntax: &'a egui_extras::syntax_highlighting::SyntectSettings,
+    changed: &'a mut bool,
 }
 
 impl<'a> egui_dock::TabViewer for BoundWorld<'a> {
@@ -117,6 +243,7 @@ impl<'a> egui_dock::TabViewer for BoundWorld<'a> {
         egui::WidgetText::from(&self.world.blocks[index].name)
     }
 
+    /// Draw a block as as editable text pane
     fn ui(&mut self, ui: &mut egui::Ui, index: &mut BlockIndex) {
         let block = self.world.blocks.get_mut(index).unwrap();
         let theme =
@@ -134,7 +261,7 @@ impl<'a> egui_dock::TabViewer for BoundWorld<'a> {
             layout_job.wrap.max_width = wrap_width;
             ui.fonts(|f| f.layout_job(layout_job))
         };
-        ui.add(
+        let r = ui.add(
             egui::TextEdit::multiline(&mut block.script)
                 .font(egui::TextStyle::Monospace) // for cursor height
                 .code_editor()
@@ -143,6 +270,24 @@ impl<'a> egui_dock::TabViewer for BoundWorld<'a> {
                 .desired_width(f32::INFINITY)
                 .layouter(&mut layouter),
         );
+        *self.changed |= r.changed();
+        if let Some(state) = &block.state {
+            if !state.stdout.is_empty() {
+                let mut text: &str = &state.stdout;
+                ui.label("Output");
+                ui.add(egui::TextEdit::multiline(&mut text));
+            }
+            if !state.script_errors.is_empty() {
+                ui.label("Errors");
+                let mut text = state
+                    .script_errors
+                    .iter()
+                    .map(|e| e.message.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                ui.add(egui::TextEdit::multiline(&mut text));
+            }
+        }
     }
 }
 
@@ -160,6 +305,11 @@ struct App {
     data: World,
     tree: egui_dock::DockState<BlockIndex>,
     syntax: egui_extras::syntax_highlighting::SyntectSettings,
+
+    /// Pool to execute off-thread evaluation
+    pool: rayon::ThreadPool,
+    rx: std::sync::mpsc::Receiver<World>,
+    tx: std::sync::mpsc::Sender<World>,
 }
 
 impl App {
@@ -209,6 +359,7 @@ impl App {
         // Restore app state using cc.storage (requires the "persistence" feature).
         // Use the cc.gl (a glow::Context) to create graphics shaders and buffers that you can use
         // for e.g. egui::PaintCallback.
+        let (tx, rx) = std::sync::mpsc::channel();
         Self {
             data: World {
                 blocks: HashMap::new(),
@@ -217,16 +368,23 @@ impl App {
             },
             tree: egui_dock::DockState::new(vec![]),
             syntax,
+            pool: rayon::ThreadPoolBuilder::default().build().unwrap(),
+            tx,
+            rx,
         }
     }
 }
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        while let Ok(world) = self.rx.try_recv() {
+            self.data = world;
+        }
+        let mut changed = false;
         egui::SidePanel::left("left_panel")
             .min_width(250.0)
             .show(ctx, |ui| {
-                self.left(ui);
+                changed |= self.left(ui);
             });
 
         egui::CentralPanel::default()
@@ -254,6 +412,7 @@ impl eframe::App for App {
                 let mut bw = BoundWorld {
                     world: &mut self.data,
                     syntax: &self.syntax,
+                    changed: &mut changed,
                 };
                 egui_dock::DockArea::new(&mut self.tree)
                     .style(egui_dock::Style::from_egui(ctx.style().as_ref()))
@@ -261,6 +420,17 @@ impl eframe::App for App {
                     .show_leaf_close_all_buttons(false)
                     .show_inside(ui, &mut bw);
             });
+        if changed {
+            let mut world = self.data.clone();
+            let ctx = ctx.clone();
+            let tx = self.tx.clone();
+            self.pool.install(move || {
+                world.rebuild();
+                if tx.send(world).is_ok() {
+                    ctx.request_repaint();
+                }
+            });
+        }
     }
 }
 
@@ -270,54 +440,68 @@ struct NameEdit {
 }
 
 impl App {
-    fn left(&mut self, ui: &mut egui::Ui) {
+    /// Draws the left side panel
+    ///
+    /// Returns `true` if anything changed
+    #[must_use]
+    fn left(&mut self, ui: &mut egui::Ui) -> bool {
         // Draw blocks
         let mut to_delete = HashSet::new();
+        let mut changed = false;
         // XXX there is a drag-and-drop implementation that's built into egui,
         // see `egui_demo_lib/src/demo/drag_and_drop.rs`
         dnd(ui, "dnd").show_vec(
             &mut self.data.order,
             |ui, index, handle, state| {
                 let tab_location = self.tree.find_tab(index);
-                match draggable_block(
+                let r = draggable_block(
                     ui,
                     *index,
                     self.data.blocks.get_mut(index).unwrap(),
                     tab_location.is_some(),
                     handle,
                     state,
-                ) {
-                    Some(BlockResponse::Delete) => {
-                        to_delete.insert(*index);
-                    }
-                    Some(BlockResponse::Edit) => {
-                        if let Some(tab_location) = tab_location {
-                            self.tree.remove_tab(tab_location).unwrap();
-                        } else {
-                            self.tree.push_to_focused_leaf(*index);
-                        }
-                    }
-                    None => (),
+                );
+                if r.contains(BlockResponse::DELETE) {
+                    to_delete.insert(*index);
                 }
+                if r.contains(BlockResponse::TOGGLE_EDIT) {
+                    if let Some(tab_location) = tab_location {
+                        self.tree.remove_tab(tab_location).unwrap();
+                    } else {
+                        self.tree.push_to_focused_leaf(*index);
+                    }
+                }
+                changed |= r.contains(BlockResponse::CHANGED);
             },
         );
 
         // Post-processing: edit blocks based on button presses
-        self.data.retain(|index| !to_delete.contains(index));
+        changed |= self.data.retain(|index| !to_delete.contains(index));
 
         // Draw the "new block" button below a separator
         if !self.data.blocks.is_empty() {
             ui.separator();
         }
         if ui.button(NEW_BLOCK).clicked() {
-            self.data.new_empty_block();
+            changed |= self.data.new_empty_block();
         }
+        changed
     }
 }
 
-enum BlockResponse {
-    Delete,
-    Edit,
+// The `bitflags!` macro generates `struct`s that manage a set of flags.
+bitflags::bitflags! {
+    /// Represents a set of flags.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    struct BlockResponse: u32 {
+        /// Request to delete the block
+        const DELETE = 0b00000001;
+        /// Request to toggle the edit window
+        const TOGGLE_EDIT = 0b00000010;
+        /// The block has changed
+        const CHANGED = 0b00000100;
+    }
 }
 
 /// Draws a draggable block within a [`egui_dnd`] context
@@ -331,8 +515,10 @@ fn draggable_block(
     is_open: bool,
     handle: egui_dnd::Handle,
     state: egui_dnd::ItemState,
-) -> Option<BlockResponse> {
-    let mut response = None;
+) -> BlockResponse {
+    let mut response = BlockResponse::empty();
+    // TODO: don't draw as collapsible if there's no IO, just pad by
+    // ui.spacing().icon_width instead.
     egui::collapsing_header::CollapsingState::load_with_default_open(
         ui.ctx(),
         index.id(),
@@ -340,7 +526,9 @@ fn draggable_block(
     )
     .show_header(ui, |ui| {
         // Editable object name
-        block_name(ui, index, block);
+        if block_name(ui, index, block) {
+            response |= BlockResponse::CHANGED;
+        }
         // Buttons on the left side
         ui.with_layout(
             egui::Layout::right_to_left(egui::Align::Center),
@@ -350,13 +538,27 @@ fn draggable_block(
                     ui.add(egui::Button::new(DRAG).selected(state.dragged));
                 });
                 if ui.button(TRASH).clicked() {
-                    response = Some(BlockResponse::Delete);
+                    response |= BlockResponse::DELETE;
                 }
                 if ui
                     .add(egui::Button::new(PENCIL).selected(is_open))
                     .clicked()
                 {
-                    response = Some(BlockResponse::Edit);
+                    response = BlockResponse::TOGGLE_EDIT;
+                }
+                if let Some(e) = block.state.as_ref().and_then(|s| s.name_error)
+                {
+                    let err = match e {
+                        NameError::DuplicateName => "duplicate name",
+                        NameError::InvalidIdentifier => "invalid identifier",
+                    };
+                    ui.label(
+                        egui::RichText::new(WARN)
+                            .color(ui.style().visuals.error_fg_color),
+                    )
+                    .on_hover_ui(|ui| {
+                        ui.label(err);
+                    });
                 }
             },
         );
@@ -366,8 +568,12 @@ fn draggable_block(
 }
 
 /// Draws the name of a block, editable with a double-click
-fn block_name(ui: &mut egui::Ui, index: BlockIndex, block: &mut Block) {
+///
+/// Returns `true` if the name has changed, `false` otherwise
+#[must_use]
+fn block_name(ui: &mut egui::Ui, index: BlockIndex, block: &mut Block) -> bool {
     let id = index.id();
+    let mut changed = false;
     match ui.memory(|mem| mem.data.get_temp(id)) {
         Some(NameEdit { needs_focus }) => {
             let response = ui.add(
@@ -375,6 +581,7 @@ fn block_name(ui: &mut egui::Ui, index: BlockIndex, block: &mut Block) {
                     .desired_width(ui.available_width() / 2.0),
             );
             let lost_focus = response.lost_focus();
+            changed |= response.changed();
             ui.memory_mut(|mem| {
                 if needs_focus {
                     mem.request_focus(response.id);
@@ -399,12 +606,15 @@ fn block_name(ui: &mut egui::Ui, index: BlockIndex, block: &mut Block) {
             }
         }
     }
+    changed
 }
 
+// Unicode symbols from Nerd Fonts, see https://www.nerdfonts.com/cheat-sheet
 const NEW_BLOCK: &str = "\u{f067} New block";
 const DRAG: &str = "\u{f0041}";
 const TRASH: &str = "\u{f48e}";
 const PENCIL: &str = "\u{f03eb}";
+const WARN: &str = "\u{f071}";
 
 const INCONSOLATA: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
