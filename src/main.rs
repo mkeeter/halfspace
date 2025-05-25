@@ -101,7 +101,12 @@ impl World {
     }
 }
 
-impl egui_dock::TabViewer for World {
+struct BoundWorld<'a> {
+    world: &'a mut World,
+    syntax: &'a egui_extras::syntax_highlighting::SyntectSettings,
+}
+
+impl<'a> egui_dock::TabViewer for BoundWorld<'a> {
     type Tab = BlockIndex;
 
     fn id(&mut self, tab: &mut Self::Tab) -> egui::Id {
@@ -109,21 +114,23 @@ impl egui_dock::TabViewer for World {
     }
 
     fn title(&mut self, index: &mut BlockIndex) -> egui::WidgetText {
-        egui::WidgetText::from(&self.blocks[index].name)
+        egui::WidgetText::from(&self.world.blocks[index].name)
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, index: &mut BlockIndex) {
-        let block = self.blocks.get_mut(index).unwrap();
+        let block = self.world.blocks.get_mut(index).unwrap();
         let theme =
             egui_extras::syntax_highlighting::CodeTheme::from_style(ui.style());
         let mut layouter = |ui: &egui::Ui, buf: &str, wrap_width: f32| {
-            let mut layout_job = egui_extras::syntax_highlighting::highlight(
-                ui.ctx(),
-                ui.style(),
-                &theme,
-                buf,
-                "rs",
-            );
+            let mut layout_job =
+                egui_extras::syntax_highlighting::highlight_with(
+                    ui.ctx(),
+                    ui.style(),
+                    &theme,
+                    buf,
+                    "rhai",
+                    self.syntax,
+                );
             layout_job.wrap.max_width = wrap_width;
             ui.fonts(|f| f.layout_job(layout_job))
         };
@@ -152,6 +159,7 @@ pub fn main() -> Result<(), eframe::Error> {
 struct App {
     data: World,
     tree: egui_dock::DockState<BlockIndex>,
+    syntax: egui_extras::syntax_highlighting::SyntectSettings,
 }
 
 impl App {
@@ -166,6 +174,15 @@ impl App {
             .get_mut(&egui::FontFamily::Proportional)
             .unwrap()
             .insert(0, "inconsolata".to_owned());
+
+        use syntect::parsing::SyntaxSetBuilder;
+
+        let mut builder = SyntaxSetBuilder::new();
+        builder.add_from_folder("syntax", true).unwrap();
+        let ps = builder.build();
+        let ts = syntect::highlighting::ThemeSet::load_defaults();
+        let syntax =
+            egui_extras::syntax_highlighting::SyntectSettings { ps, ts };
 
         cc.egui_ctx.set_fonts(fonts);
         cc.egui_ctx.all_styles_mut(|style| {
@@ -199,6 +216,7 @@ impl App {
                 next_index: 0,
             },
             tree: egui_dock::DockState::new(vec![]),
+            syntax,
         }
     }
 }
@@ -233,11 +251,15 @@ impl eframe::App for App {
                 painter.rect_filled(rect, 0.0, style.visuals.panel_fill);
                 painter.galley(text_corner, layout, egui::Color32::BLACK);
 
+                let mut bw = BoundWorld {
+                    world: &mut self.data,
+                    syntax: &self.syntax,
+                };
                 egui_dock::DockArea::new(&mut self.tree)
                     .style(egui_dock::Style::from_egui(ctx.style().as_ref()))
                     .show_leaf_collapse_buttons(false)
                     .show_leaf_close_all_buttons(false)
-                    .show_inside(ui, &mut self.data);
+                    .show_inside(ui, &mut bw);
             });
     }
 }
