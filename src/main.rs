@@ -16,6 +16,19 @@ enum Value {
     Dynamic(rhai::Dynamic),
 }
 
+impl std::fmt::Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::Float(v) => write!(f, "{v}"),
+            Value::Vec2(v) => write!(f, "vec2({}, {})", v.x, v.y),
+            Value::Vec3(v) => write!(f, "vec3({}, {}, {})", v.x, v.y, v.z),
+            Value::Tree(_) => write!(f, "Tree(..)"),
+            Value::String(s) => write!(f, "\"{s}\""),
+            Value::Dynamic(d) => write!(f, "{d}"),
+        }
+    }
+}
+
 impl From<rhai::Dynamic> for Value {
     fn from(d: rhai::Dynamic) -> Self {
         let get_f64 = |d: &rhai::Dynamic| {
@@ -356,10 +369,15 @@ impl<'a> egui_dock::TabViewer for BoundWorld<'a> {
                     .map(|e| e.message.as_str())
                     .collect::<Vec<_>>()
                     .join("\n");
-                ui.add(
-                    egui::TextEdit::multiline(&mut text)
-                        .desired_width(f32::INFINITY),
-                );
+                ui.scope(|ui| {
+                    let vis = ui.visuals_mut();
+                    vis.widgets.inactive = vis.widgets.active;
+                    ui.add(
+                        egui::TextEdit::multiline(&mut text)
+                            .interactive(false)
+                            .desired_width(f32::INFINITY),
+                    );
+                });
             }
         }
     }
@@ -577,6 +595,7 @@ impl App {
 bitflags::bitflags! {
     /// Represents a set of flags.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    #[must_use]
     struct BlockResponse: u32 {
         /// Request to delete the block
         const DELETE = 0b00000001;
@@ -592,7 +611,6 @@ bitflags::bitflags! {
 /// Draws a draggable block within a [`egui_dnd`] context
 ///
 /// Returns a [`BlockResponse`] based on button presses
-#[must_use]
 fn draggable_block(
     ui: &mut egui::Ui,
     index: BlockIndex,
@@ -602,79 +620,110 @@ fn draggable_block(
     state: egui_dnd::ItemState,
 ) -> BlockResponse {
     let mut response = BlockResponse::empty();
-    // TODO: don't draw as collapsible if there's no IO, just pad by
-    // ui.spacing().icon_width instead.
-    egui::collapsing_header::CollapsingState::load_with_default_open(
-        ui.ctx(),
-        index.id(),
-        true,
-    )
-    .show_header(ui, |ui| {
-        // Editable object name
-        if block_name(ui, index, block) {
-            response |= BlockResponse::CHANGED;
+    if block.state.as_ref().is_some_and(|s| !s.outputs.is_empty()) {
+        egui::collapsing_header::CollapsingState::load_with_default_open(
+            ui.ctx(),
+            index.id(),
+            true,
+        )
+        .show_header(ui, |ui| {
+            response =
+                draggable_block_header(ui, index, block, is_open, handle, state)
+        })
+        .body_unindented(|ui| {
+            if let Some(state) = &block.state {
+                for (name, value) in &state.outputs {
+                    ui.horizontal(|ui| {
+                        ui.add_space(ui.spacing().icon_width);
+                        ui.label(name);
+                        let mut txt = value.to_string();
+                        ui.add_enabled(
+                            false,
+                            egui::TextEdit::singleline(&mut txt)
+                                .desired_width(f32::INFINITY)
+                                .interactive(false),
+                        );
+                    });
+                }
+            } else {
+                ui.add_enabled(false, egui::Label::new("no io"));
+            }
+        });
+    } else {
+        ui.horizontal(|ui| {
+            ui.add_space(ui.spacing().icon_width);
+            response =
+                draggable_block_header(ui, index, block, is_open, handle, state)
+        });
+    }
+    response
+}
+
+fn draggable_block_header(
+    ui: &mut egui::Ui,
+    index: BlockIndex,
+    block: &mut Block,
+    is_open: bool,
+    handle: egui_dnd::Handle,
+    state: egui_dnd::ItemState,
+) -> BlockResponse {
+    // Editable object name
+    let mut response = BlockResponse::empty();
+    if block_name(ui, index, block) {
+        response |= BlockResponse::CHANGED;
+    }
+    // Buttons on the left side
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        ui.add_space(5.0);
+        handle.show_drag_cursor_on_hover(false).ui(ui, |ui| {
+            ui.add(egui::Button::new(DRAG).selected(state.dragged));
+        });
+        if ui.button(TRASH).clicked() {
+            response |= BlockResponse::DELETE;
         }
-        // Buttons on the left side
-        ui.with_layout(
-            egui::Layout::right_to_left(egui::Align::Center),
-            |ui| {
-                ui.add_space(5.0);
-                handle.show_drag_cursor_on_hover(false).ui(ui, |ui| {
-                    ui.add(egui::Button::new(DRAG).selected(state.dragged));
+        if ui
+            .add(egui::Button::new(PENCIL).selected(is_open))
+            .clicked()
+        {
+            response = BlockResponse::TOGGLE_EDIT;
+        }
+        if let Some(state) = &block.state {
+            if let Some(e) = state.name_error {
+                let err = match e {
+                    NameError::DuplicateName => "duplicate name",
+                    NameError::InvalidIdentifier => "invalid identifier",
+                };
+                ui.label(
+                    egui::RichText::new(WARN)
+                        .color(ui.style().visuals.error_fg_color),
+                )
+                .on_hover_ui(|ui| {
+                    ui.label(err);
                 });
-                if ui.button(TRASH).clicked() {
-                    response |= BlockResponse::DELETE;
-                }
-                if ui
-                    .add(egui::Button::new(PENCIL).selected(is_open))
-                    .clicked()
-                {
-                    response = BlockResponse::TOGGLE_EDIT;
-                }
-                if let Some(state) = &block.state {
-                    if let Some(e) = state.name_error {
-                        let err = match e {
-                            NameError::DuplicateName => "duplicate name",
-                            NameError::InvalidIdentifier => {
-                                "invalid identifier"
-                            }
-                        };
-                        ui.label(
+            } else if !state.script_errors.is_empty() {
+                let r = ui
+                    .add(
+                        egui::Label::new(
                             egui::RichText::new(WARN)
-                                .color(ui.style().visuals.error_fg_color),
+                                .color(ui.style().visuals.warn_fg_color),
                         )
-                        .on_hover_ui(|ui| {
-                            ui.label(err);
-                        });
-                    } else if !state.script_errors.is_empty() {
-                        let r = ui
-                            .add(
-                                egui::Label::new(
-                                    egui::RichText::new(WARN).color(
-                                        ui.style().visuals.warn_fg_color,
-                                    ),
-                                )
-                                .sense(egui::Sense::click()),
-                            )
-                            .on_hover_ui(|ui| {
-                                ui.label("script contains error");
-                            });
-                        if r.clicked() {
-                            response |= BlockResponse::FOCUS_ERR;
-                        }
-                    }
+                        .sense(egui::Sense::click()),
+                    )
+                    .on_hover_ui(|ui| {
+                        ui.label("script contains error");
+                    });
+                if r.clicked() {
+                    response |= BlockResponse::FOCUS_ERR;
                 }
-            },
-        );
-    })
-    .body(|ui| ui.add_enabled(false, egui::Label::new("no io")));
+            }
+        }
+    });
     response
 }
 
 /// Draws the name of a block, editable with a double-click
 ///
 /// Returns `true` if the name has changed, `false` otherwise
-#[must_use]
 fn block_name(ui: &mut egui::Ui, index: BlockIndex, block: &mut Block) -> bool {
     let id = index.id();
     let mut changed = false;
@@ -682,6 +731,7 @@ fn block_name(ui: &mut egui::Ui, index: BlockIndex, block: &mut Block) -> bool {
         Some(NameEdit { needs_focus }) => {
             let response = ui.add(
                 egui::TextEdit::singleline(&mut block.name)
+                    // XXX fix width
                     .desired_width(ui.available_width() / 2.0),
             );
             let lost_focus = response.lost_focus();
@@ -697,10 +747,15 @@ fn block_name(ui: &mut egui::Ui, index: BlockIndex, block: &mut Block) -> bool {
             });
         }
         None => {
+            let (enabled, name) = if block.name.is_empty() {
+                (false, "[empty]")
+            } else {
+                (true, block.name.as_str())
+            };
             let response = ui
                 .scope_builder(
                     egui::UiBuilder::new().sense(egui::Sense::click()),
-                    |ui| ui.heading(&block.name),
+                    |ui| ui.add_enabled(enabled, egui::Label::new(name)),
                 )
                 .response;
             if response.double_clicked() {
