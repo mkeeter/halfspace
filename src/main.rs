@@ -1,5 +1,8 @@
 use egui_dnd::dnd;
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{Arc, RwLock},
+};
 
 use fidget::{
     context::Tree,
@@ -7,6 +10,7 @@ use fidget::{
 };
 
 #[allow(unused)]
+#[derive(Clone)]
 enum Value {
     Float(f64),
     Vec2(Vec2),
@@ -69,10 +73,29 @@ impl From<rhai::Dynamic> for Value {
     }
 }
 
+impl Value {
+    fn to_dynamic(&self) -> rhai::Dynamic {
+        match self {
+            Value::Vec2(v) => rhai::Dynamic::from(*v),
+            Value::Vec3(v) => rhai::Dynamic::from(*v),
+            Value::Float(v) => rhai::Dynamic::from(*v),
+            Value::Tree(v) => rhai::Dynamic::from(v.clone()),
+            Value::String(v) => rhai::Dynamic::from(v.clone()),
+            Value::Dynamic(v) => v.clone(),
+        }
+    }
+}
+
 struct Block {
     name: String,
     script: String,
     state: Option<BlockState>,
+
+    /// Map from input name to expression
+    ///
+    /// This does not live in the `BlockState` because it must be persistent;
+    /// the resulting values _are_ stored in the block state.
+    inputs: HashMap<String, String>,
 }
 
 impl Block {
@@ -80,6 +103,7 @@ impl Block {
         Self {
             name: self.name.clone(),
             script: self.script.clone(),
+            inputs: self.inputs.clone(),
             state: None,
         }
     }
@@ -113,6 +137,11 @@ enum NameError {
     DuplicateName,
 }
 
+enum IoValue {
+    Input(Result<Value, String>),
+    Output(Value),
+}
+
 struct BlockState {
     /// Output from `print` calls in the script
     stdout: String,
@@ -122,8 +151,8 @@ struct BlockState {
     name_error: Option<NameError>,
     /// Errors encountered while parsing and evaluating the script
     script_errors: Vec<BlockError>,
-    /// Values defined with `output(..)` calls in the script, in order
-    outputs: Vec<(String, Value)>,
+    /// Values defined with `input(..)` or `output(..)` calls in the script
+    io_values: Vec<(String, IoValue)>,
 }
 
 impl World {
@@ -164,6 +193,7 @@ impl World {
             Block {
                 name,
                 script: "".to_owned(),
+                inputs: HashMap::new(),
                 state: None,
             },
         );
@@ -188,7 +218,9 @@ impl World {
     fn rebuild(&mut self) {
         let mut name_map = HashMap::new();
         let mut engine = rhai::Engine::new();
+        engine.set_fail_on_invalid_map_property(true);
 
+        // Bind IO handlers to the engine's `print` and `debug` calls
         #[derive(Default)]
         struct IoLog {
             stdout: Vec<String>,
@@ -202,22 +234,67 @@ impl World {
                 )
             }
         }
-        let io_log =
-            std::sync::Arc::new(std::sync::RwLock::new(IoLog::default()));
-        #[derive(Default)]
+        let io_log = Arc::new(RwLock::new(IoLog::default()));
+        let io_debug = io_log.clone();
+        engine.on_debug(move |x, _src, pos| {
+            io_debug
+                .write()
+                .unwrap()
+                .debug
+                .entry(pos.line().unwrap())
+                .or_default()
+                .push(x.to_owned())
+        });
+        let io_print = io_log.clone();
+        engine.on_print(move |s| {
+            io_print.write().unwrap().stdout.push(s.to_owned())
+        });
 
-        struct Outputs {
+        // Bind a custom `output` function
+        #[derive(Default)]
+        struct IoValues {
             names: HashSet<String>,
-            values: Vec<(String, Value)>,
+            values: Vec<(String, IoValue)>,
         }
-        impl Outputs {
-            fn take(&mut self) -> Vec<(String, Value)> {
-                self.names.clear();
-                std::mem::take(&mut self.values)
+        impl IoValues {
+            fn take(&mut self) -> (HashSet<String>, Vec<(String, IoValue)>) {
+                (
+                    std::mem::take(&mut self.names),
+                    std::mem::take(&mut self.values),
+                )
             }
         }
-        let outputs =
-            std::sync::Arc::new(std::sync::RwLock::new(Outputs::default()));
+        let io_values = Arc::new(RwLock::new(IoValues::default()));
+        let output_handle = io_values.clone();
+        engine.register_fn(
+            "output",
+            move |ctx: rhai::NativeCallContext,
+                  name: &str,
+                  v: rhai::Dynamic|
+                  -> Result<(), Box<rhai::EvalAltResult>> {
+                let mut out = output_handle.write().unwrap();
+                if !rhai::is_valid_identifier(name) {
+                    return Err(rhai::EvalAltResult::ErrorForbiddenVariable(
+                        name.to_owned(),
+                        ctx.position(),
+                    )
+                    .into());
+                } else if !out.names.insert(name.to_owned()) {
+                    return Err(rhai::EvalAltResult::ErrorVariableExists(
+                        format!("io `{}` already exists", name),
+                        ctx.position(),
+                    )
+                    .into());
+                }
+                out.values
+                    .push((name.to_owned(), IoValue::Output(Value::from(v))));
+                Ok(())
+            },
+        );
+
+        // Inputs are evaluated in a separate context with a scope that's
+        // accumulated from previous block outputs.
+        let input_scope = Arc::new(RwLock::new(rhai::Scope::new()));
 
         for i in &self.order {
             let block = &mut self.blocks.get_mut(i).unwrap();
@@ -226,7 +303,7 @@ impl World {
                 name_error: None,
                 debug: HashMap::new(),
                 script_errors: vec![],
-                outputs: vec![],
+                io_values: vec![],
             });
             let state = block.state.as_mut().unwrap();
 
@@ -245,20 +322,50 @@ impl World {
                     v.insert(*i);
                 }
             }
-            let io_debug = io_log.clone();
-            engine.on_debug(move |x, _src, pos| {
-                io_debug
-                    .write()
-                    .unwrap()
-                    .debug
-                    .entry(pos.line().unwrap())
-                    .or_default()
-                    .push(x.to_owned())
-            });
-            let io_print = io_log.clone();
-            engine.on_print(move |s| {
-                io_print.write().unwrap().stdout.push(s.to_owned())
-            });
+
+            let input_scope_handle = input_scope.clone();
+            let input_text = Arc::new(RwLock::new(block.inputs.clone()));
+            let input_text_handle = input_text.clone();
+            let input_handle = io_values.clone();
+            let input_fn = move |ctx: rhai::NativeCallContext,
+                                 name: &str|
+                  -> Result<
+                rhai::Dynamic,
+                Box<rhai::EvalAltResult>,
+            > {
+                let mut input_handle = input_handle.write().unwrap();
+                if !rhai::is_valid_identifier(name) {
+                    return Err(rhai::EvalAltResult::ErrorForbiddenVariable(
+                        name.to_owned(),
+                        ctx.position(),
+                    )
+                    .into());
+                } else if !input_handle.names.insert(name.to_owned()) {
+                    return Err(rhai::EvalAltResult::ErrorVariableExists(
+                        format!("io `{}` already exists", name),
+                        ctx.position(),
+                    )
+                    .into());
+                }
+                let mut input_text_lock = input_text_handle.write().unwrap();
+                let txt = input_text_lock
+                    .entry(name.to_owned())
+                    .or_insert("0".to_owned());
+                let e = ctx.engine();
+                let mut scope = input_scope_handle.write().unwrap();
+                let v = e.eval_expression_with_scope::<rhai::Dynamic>(
+                    &mut scope, txt,
+                );
+                let i = match &v {
+                    Ok(value) => Ok(Value::from(value.clone())),
+                    Err(e) => Err(e.to_string()),
+                };
+                input_handle
+                    .values
+                    .push((name.to_owned(), IoValue::Input(i)));
+                v.map_err(|_| "error in input expression".into())
+            };
+            engine.register_fn("input", input_fn);
 
             let ast = match engine.compile(&block.script) {
                 Ok(ast) => ast,
@@ -270,50 +377,39 @@ impl World {
                     continue;
                 }
             };
-            let output_handle = outputs.clone();
-            engine.register_fn(
-                "output",
-                move |ctx: rhai::NativeCallContext,
-                      name: &str,
-                      v: rhai::Dynamic|
-                      -> Result<(), Box<rhai::EvalAltResult>> {
-                    let mut out = output_handle.write().unwrap();
-                    if !rhai::is_valid_identifier(name) {
-                        return Err(
-                            rhai::EvalAltResult::ErrorForbiddenVariable(
-                                name.to_owned(),
-                                ctx.position(),
-                            )
-                            .into(),
-                        );
-                    } else if !out.names.insert(name.to_owned()) {
-                        return Err(rhai::EvalAltResult::ErrorVariableExists(
-                            format!("output `{}` already exists", name),
-                            ctx.position(),
-                        )
-                        .into());
-                    }
-                    out.values.push((name.to_owned(), Value::from(v)));
-                    Ok(())
-                },
-            );
             let mut scope = rhai::Scope::new();
-            let _out = match engine
-                .eval_ast_with_scope::<rhai::Dynamic>(&mut scope, &ast)
-            {
-                Ok(v) => v,
-                Err(e) => {
-                    state.script_errors.push(BlockError {
-                        message: e.to_string(),
-                        line: e.position().line(),
-                    });
-                    continue;
-                }
-            };
+            let r =
+                engine.eval_ast_with_scope::<rhai::Dynamic>(&mut scope, &ast);
             let (stdout, debug) = io_log.write().unwrap().take();
             state.stdout = stdout.join("\n");
             state.debug = debug;
-            state.outputs = outputs.write().unwrap().take();
+            let (io_names, io_values) = io_values.write().unwrap().take();
+            state.io_values = io_values;
+            block.inputs = std::mem::take(&mut input_text.write().unwrap());
+
+            // Write outputs into the shared input scope
+            let obj: rhai::Map = state
+                .io_values
+                .iter()
+                .filter_map(|(name, value)| match value {
+                    IoValue::Output(value) => {
+                        Some((name.into(), value.to_dynamic()))
+                    }
+                    IoValue::Input(..) => None,
+                })
+                .collect();
+            input_scope.write().unwrap().push(&block.name, obj);
+
+            if let Err(e) = r {
+                state.script_errors.push(BlockError {
+                    message: e.to_string(),
+                    line: e.position().line(),
+                });
+            } else {
+                // If the script evaluated successfully, filter out any input
+                // fields which haven't been used in the script.
+                block.inputs.retain(|k, _| io_names.contains(k));
+            }
         }
     }
 }
@@ -571,6 +667,9 @@ impl App {
                 );
                 if r.contains(BlockResponse::DELETE) {
                     to_delete.insert(*index);
+                    if let Some(tab_location) = tab_location {
+                        self.tree.remove_tab(tab_location).unwrap();
+                    }
                 }
                 if r.contains(BlockResponse::TOGGLE_EDIT) {
                     if let Some(tab_location) = tab_location {
@@ -635,7 +734,11 @@ fn draggable_block(
 ) -> BlockResponse {
     let mut response = BlockResponse::empty();
     let padding = ui.spacing().icon_width + ui.spacing().icon_spacing;
-    if block.state.as_ref().is_some_and(|s| !s.outputs.is_empty()) {
+    if block
+        .state
+        .as_ref()
+        .is_some_and(|s| !s.io_values.is_empty())
+    {
         egui::collapsing_header::CollapsingState::load_with_default_open(
             ui.ctx(),
             index.id(),
@@ -647,17 +750,33 @@ fn draggable_block(
         })
         .body_unindented(|ui| {
             let state = block.state.as_ref().unwrap();
-            for (name, value) in &state.outputs {
+            for (name, value) in &state.io_values {
                 ui.horizontal(|ui| {
                     ui.add_space(padding);
                     ui.label(name);
-                    let mut txt = value.to_string();
-                    ui.add_enabled(
-                        false,
-                        egui::TextEdit::singleline(&mut txt)
-                            .desired_width(f32::INFINITY)
-                            .interactive(false),
-                    );
+                    match value {
+                        IoValue::Output(value) => {
+                            let mut txt = value.to_string();
+                            ui.add_enabled(
+                                false,
+                                egui::TextEdit::singleline(&mut txt)
+                                    .desired_width(f32::INFINITY),
+                            );
+                        }
+                        IoValue::Input(value) => {
+                            // TODO show errors here?
+                            let s = block.inputs.get_mut(name).unwrap();
+                            if ui
+                                .add(
+                                    egui::TextEdit::singleline(s)
+                                        .desired_width(f32::INFINITY),
+                                )
+                                .changed()
+                            {
+                                response |= BlockResponse::CHANGED;
+                            }
+                        }
+                    }
                 });
             }
             if !last {
