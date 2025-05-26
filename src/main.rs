@@ -766,6 +766,7 @@ fn draggable_block(
                         IoValue::Input(value) => {
                             // TODO show errors here?
                             let s = block.inputs.get_mut(name).unwrap();
+                            println!("{}", ui.available_width());
                             if ui
                                 .add(
                                     egui::TextEdit::singleline(s)
@@ -803,10 +804,7 @@ fn draggable_block_header(
 ) -> BlockResponse {
     // Editable object name
     let mut response = BlockResponse::empty();
-    if block_name(ui, index, block) {
-        response |= BlockResponse::CHANGED;
-    }
-    // Buttons on the left side
+    // Buttons on the right side
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         ui.add_space(5.0);
         handle.show_drag_cursor_on_hover(false).ui(ui, |ui| {
@@ -851,6 +849,14 @@ fn draggable_block_header(
                 }
             }
         }
+        ui.with_layout(
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                if block_name(ui, index, block) {
+                    response |= BlockResponse::CHANGED;
+                }
+            },
+        );
     });
     response
 }
@@ -865,8 +871,8 @@ fn block_name(ui: &mut egui::Ui, index: BlockIndex, block: &mut Block) -> bool {
         Some(NameEdit { needs_focus }) => {
             let response = ui.add(
                 egui::TextEdit::singleline(&mut block.name)
-                    // XXX fix width
-                    .desired_width(ui.available_width() / 2.0),
+                    .id(egui::Id::new(index).with("name_edit"))
+                    .desired_width(f32::INFINITY),
             );
             let lost_focus = response.lost_focus();
             changed |= response.changed();
@@ -886,12 +892,10 @@ fn block_name(ui: &mut egui::Ui, index: BlockIndex, block: &mut Block) -> bool {
             } else {
                 (true, block.name.as_str())
             };
-            let response = ui
-                .scope_builder(
-                    egui::UiBuilder::new().sense(egui::Sense::click()),
-                    |ui| ui.add_enabled(enabled, egui::Label::new(name)),
-                )
-                .response;
+            let response = ui.add_enabled(
+                enabled,
+                egui::Label::new(name).sense(egui::Sense::click()),
+            );
             if response.double_clicked() {
                 ui.memory_mut(|mem| {
                     mem.data.insert_temp(id, NameEdit { needs_focus: true })
