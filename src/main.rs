@@ -148,10 +148,21 @@ impl World {
     fn new_empty_block(&mut self) -> bool {
         let index = BlockIndex(self.next_index);
         self.next_index += 1;
+        let names = self
+            .blocks
+            .values()
+            .map(|b| b.name.as_str())
+            .collect::<HashSet<_>>();
+        // XXX this is Accidentally Quadratic if you add a bunch of blocks
+        let name = std::iter::once("block".to_owned())
+            .chain((0..).map(|i| format!("block_{i:03}")))
+            .find(|name| !names.contains(name.as_str()))
+            .unwrap();
+
         self.blocks.insert(
             index,
             Block {
-                name: "block".to_owned(),
+                name,
                 script: "".to_owned(),
                 state: None,
             },
