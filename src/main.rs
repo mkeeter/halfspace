@@ -1,6 +1,7 @@
 use egui_dnd::dnd;
 use std::collections::HashSet;
 
+mod draw;
 mod gui;
 mod world;
 
@@ -29,6 +30,10 @@ struct App {
 
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        // Install custom render pipelines
+        let wgpu_state = cc.wgpu_render_state.as_ref().unwrap();
+        draw::WgpuResources::install(wgpu_state);
+
         let mut fonts = egui::FontDefinitions::default();
         fonts.font_data.insert(
             "inconsolata".to_owned(),

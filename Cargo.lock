@@ -1724,6 +1724,7 @@ dependencies = [
  "bitflags 2.9.1",
  "eframe",
  "egui",
+ "egui-wgpu",
  "egui_dnd",
  "egui_dock",
  "egui_extras",
@@ -1731,6 +1732,7 @@ dependencies = [
  "rayon",
  "rhai",
  "syntect",
+ "zerocopy",
 ]
 
 [[package]]

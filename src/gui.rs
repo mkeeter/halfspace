@@ -67,6 +67,10 @@ impl<'a> egui_dock::TabViewer for BoundWorld<'a> {
 impl<'a> BoundWorld<'a> {
     fn view_ui(&mut self, ui: &mut egui::Ui, index: BlockIndex) {
         ui.label(format!("HELLO {index:?}"));
+        ui.painter().add(egui_wgpu::Callback::new_paint_callback(
+            ui.clip_rect(),
+            crate::draw::WgpuPainter::new(),
+        ));
     }
 
     fn script_ui(&mut self, ui: &mut egui::Ui, index: BlockIndex) {
