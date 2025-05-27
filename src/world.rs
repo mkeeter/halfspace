@@ -246,20 +246,6 @@ impl World {
         let mut engine = rhai::Engine::new();
         engine.set_fail_on_invalid_map_property(true);
 
-        // Bind IO handlers to the engine's `print` and `debug` calls
-        #[derive(Default)]
-        struct IoLog {
-            stdout: Vec<String>,
-            debug: HashMap<usize, Vec<String>>,
-        }
-        impl IoLog {
-            fn take(&mut self) -> (Vec<String>, HashMap<usize, Vec<String>>) {
-                (
-                    std::mem::take(&mut self.stdout),
-                    std::mem::take(&mut self.debug),
-                )
-            }
-        }
         let io_log = Arc::new(RwLock::new(IoLog::default()));
         let io_debug = io_log.clone();
         engine.on_debug(move |x, _src, pos| {
@@ -276,20 +262,6 @@ impl World {
             io_print.write().unwrap().stdout.push(s.to_owned())
         });
 
-        // Bind a custom `output` function
-        #[derive(Default)]
-        struct IoValues {
-            names: HashSet<String>,
-            values: Vec<(String, IoValue)>,
-        }
-        impl IoValues {
-            fn take(&mut self) -> (HashSet<String>, Vec<(String, IoValue)>) {
-                (
-                    std::mem::take(&mut self.names),
-                    std::mem::take(&mut self.values),
-                )
-            }
-        }
         let io_values = Arc::new(RwLock::new(IoValues::default()));
         let output_handle = io_values.clone();
         engine.register_fn(
@@ -437,5 +409,35 @@ impl World {
                 block.inputs.retain(|k, _| io_names.contains(k));
             }
         }
+    }
+}
+
+/// Helper `struct` to accumulate `print` and `debug` calls
+#[derive(Default)]
+struct IoLog {
+    stdout: Vec<String>,
+    debug: HashMap<usize, Vec<String>>,
+}
+impl IoLog {
+    fn take(&mut self) -> (Vec<String>, HashMap<usize, Vec<String>>) {
+        (
+            std::mem::take(&mut self.stdout),
+            std::mem::take(&mut self.debug),
+        )
+    }
+}
+
+/// Helper struct to record `input` and `output` calls
+#[derive(Default)]
+struct IoValues {
+    names: HashSet<String>,
+    values: Vec<(String, IoValue)>,
+}
+impl IoValues {
+    fn take(&mut self) -> (HashSet<String>, Vec<(String, IoValue)>) {
+        (
+            std::mem::take(&mut self.names),
+            std::mem::take(&mut self.values),
+        )
     }
 }
