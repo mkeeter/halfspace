@@ -749,36 +749,8 @@ fn draggable_block(
                 draggable_block_header(ui, index, block, is_open, handle, state)
         })
         .body_unindented(|ui| {
-            let state = block.state.as_ref().unwrap();
-            for (name, value) in &state.io_values {
-                ui.horizontal(|ui| {
-                    ui.add_space(padding);
-                    ui.label(name);
-                    match value {
-                        IoValue::Output(value) => {
-                            let mut txt = value.to_string();
-                            ui.add_enabled(
-                                false,
-                                egui::TextEdit::singleline(&mut txt)
-                                    .desired_width(f32::INFINITY),
-                            );
-                        }
-                        IoValue::Input(value) => {
-                            // TODO show errors here?
-                            let s = block.inputs.get_mut(name).unwrap();
-                            println!("{}", ui.available_width());
-                            if ui
-                                .add(
-                                    egui::TextEdit::singleline(s)
-                                        .desired_width(f32::INFINITY),
-                                )
-                                .changed()
-                            {
-                                response |= BlockResponse::CHANGED;
-                            }
-                        }
-                    }
-                });
+            if block_body(ui, index, block) {
+                response |= BlockResponse::CHANGED;
             }
             if !last {
                 ui.separator();
@@ -792,6 +764,59 @@ fn draggable_block(
         });
     }
     response
+}
+
+#[must_use]
+fn block_body(ui: &mut egui::Ui, index: BlockIndex, block: &mut Block) -> bool {
+    let mut changed = false;
+    let state = block.state.as_ref().unwrap();
+    let padding = ui.spacing().icon_width + ui.spacing().icon_spacing;
+    for (name, value) in &state.io_values {
+        ui.horizontal(|ui| {
+            ui.add_space(padding);
+            ui.label(name);
+            match value {
+                IoValue::Output(value) => {
+                    let mut txt = value.to_string();
+                    ui.add_enabled(
+                        false,
+                        egui::TextEdit::singleline(&mut txt)
+                            .desired_width(f32::INFINITY),
+                    );
+                }
+                IoValue::Input(value) => {
+                    let s = block.inputs.get_mut(name).unwrap();
+                    let input_id = index.id().with("input_edit");
+                    ui.with_layout(
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |ui| {
+                            if let Err(err) = &value {
+                                ui.label(
+                                    egui::RichText::new(WARN).color(
+                                        ui.style().visuals.error_fg_color,
+                                    ),
+                                )
+                                .on_hover_ui(
+                                    |ui| {
+                                        ui.label(err);
+                                    },
+                                );
+                            }
+                            let r = ui.add(
+                                egui::TextEdit::singleline(s)
+                                    .id(input_id)
+                                    .desired_width(f32::INFINITY),
+                            );
+                            if r.changed() {
+                                changed = true;
+                            }
+                        },
+                    );
+                }
+            }
+        });
+    }
+    changed
 }
 
 fn draggable_block_header(
