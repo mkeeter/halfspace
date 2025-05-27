@@ -65,18 +65,26 @@ impl RenderData {
             }
         }
 
+        // XXX this is expensive tree deduplication!
+        let mut ctx = fidget::Context::new();
         let valid = match self {
             RenderData::Empty => false,
             RenderData::Working {
                 tree: working_tree,
                 size,
                 ..
-            } => &tree == working_tree && size == &image_size,
+            } => {
+                size == &image_size
+                    && ctx.import(working_tree) == ctx.import(&tree)
+            }
             RenderData::Done {
                 tree: working_tree,
                 image,
                 ..
-            } => &tree == working_tree && image.size() == image_size,
+            } => {
+                image.size() == image_size
+                    && ctx.import(working_tree) == ctx.import(&tree)
+            }
         };
 
         if !valid {

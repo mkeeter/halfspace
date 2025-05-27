@@ -270,8 +270,24 @@ impl World {
         fidget::rhai::tree::register(&mut engine);
         fidget::rhai::vec::register(&mut engine);
         fidget::rhai::shapes::register(&mut engine);
-        engine.register_fn("axes", fidget::context::Tree::axes);
+        engine.register_fn("axes", || -> rhai::Array {
+            let (x, y, z) = fidget::context::Tree::axes();
+            vec![
+                rhai::Dynamic::from(x),
+                rhai::Dynamic::from(y),
+                rhai::Dynamic::from(z),
+            ]
+        });
         engine.set_fail_on_invalid_map_property(true);
+        engine.set_max_expr_depths(64, 32);
+        engine.on_progress(move |count| {
+            // Pick a number, any number
+            if count > 50_000 {
+                Some("script runtime exceeded".into())
+            } else {
+                None
+            }
+        });
 
         let io_log = Arc::new(RwLock::new(IoLog::default()));
         let io_debug = io_log.clone();

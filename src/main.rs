@@ -25,8 +25,9 @@ struct App {
     syntax: egui_extras::syntax_highlighting::SyntectSettings,
     render: HashMap<BlockIndex, RenderData>,
 
-    rx: std::sync::mpsc::Receiver<World>,
-    tx: std::sync::mpsc::Sender<World>,
+    generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    rx: std::sync::mpsc::Receiver<(u64, World)>,
+    tx: std::sync::mpsc::Sender<(u64, World)>,
 }
 
 impl App {
@@ -88,6 +89,7 @@ impl App {
             tree: egui_dock::DockState::new(vec![]),
             syntax,
             render: HashMap::new(),
+            generation: std::sync::Arc::new(0.into()),
             tx,
             rx,
         }
@@ -97,8 +99,12 @@ impl App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Receive new data from the worker thread
-        while let Ok(world) = self.rx.try_recv() {
-            self.data = world;
+        while let Ok((rx_gen, world)) = self.rx.try_recv() {
+            if rx_gen
+                == self.generation.load(std::sync::atomic::Ordering::Acquire)
+            {
+                self.data = world;
+            }
         }
         let mut changed = false;
         egui::SidePanel::left("left_panel")
@@ -146,10 +152,21 @@ impl eframe::App for App {
             let mut world = self.data.without_state();
             let ctx = ctx.clone();
             let tx = self.tx.clone();
+            let expected_gen = self
+                .generation
+                .fetch_add(1u64, std::sync::atomic::Ordering::Release)
+                + 1;
+            let gen_handle = self.generation.clone();
             rayon::spawn(move || {
-                world.rebuild();
-                if tx.send(world).is_ok() {
-                    ctx.request_repaint();
+                // The world may have moved on before this script evaluation
+                // started; if so, then skip it entirely.
+                let current_gen =
+                    gen_handle.load(std::sync::atomic::Ordering::Acquire);
+                if current_gen == expected_gen {
+                    world.rebuild();
+                    if tx.send((expected_gen, world)).is_ok() {
+                        ctx.request_repaint();
+                    }
                 }
             });
         }
