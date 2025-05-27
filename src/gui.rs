@@ -9,20 +9,68 @@ pub struct BoundWorld<'a> {
     pub changed: &'a mut bool,
 }
 
-impl<'a> egui_dock::TabViewer for BoundWorld<'a> {
-    type Tab = BlockIndex;
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+enum TabMode {
+    Script,
+    View,
+}
 
-    fn id(&mut self, tab: &mut Self::Tab) -> egui::Id {
-        tab.id()
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+pub struct Tab {
+    index: BlockIndex,
+    mode: TabMode,
+}
+
+impl Tab {
+    pub fn script(index: BlockIndex) -> Self {
+        Self {
+            index,
+            mode: TabMode::Script,
+        }
+    }
+    pub fn view(index: BlockIndex) -> Self {
+        Self {
+            index,
+            mode: TabMode::View,
+        }
+    }
+}
+
+impl<'a> egui_dock::TabViewer for BoundWorld<'a> {
+    type Tab = Tab;
+
+    fn id(&mut self, tab: &mut Tab) -> egui::Id {
+        tab.index.id().with(match tab.mode {
+            TabMode::Script => "tab_script",
+            TabMode::View => "tab_view",
+        })
     }
 
-    fn title(&mut self, index: &mut BlockIndex) -> egui::WidgetText {
-        egui::WidgetText::from(&self.world[*index].name)
+    fn title(&mut self, tab: &mut Tab) -> egui::WidgetText {
+        let mut name = self.world[tab.index].name.to_string();
+        match tab.mode {
+            TabMode::Script => (),
+            TabMode::View => name += " (view)",
+        };
+        egui::WidgetText::from(&name)
     }
 
     /// Draw a block as as editable text pane
-    fn ui(&mut self, ui: &mut egui::Ui, index: &mut BlockIndex) {
-        let block = &mut self.world[*index];
+    fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Tab) {
+        match tab.mode {
+            TabMode::Script => self.script_ui(ui, tab.index),
+            TabMode::View => self.view_ui(ui, tab.index),
+        }
+    }
+}
+
+impl<'a> BoundWorld<'a> {
+    fn view_ui(&mut self, ui: &mut egui::Ui, index: BlockIndex) {
+        ui.label(format!("HELLO {index:?}"));
+    }
+
+    fn script_ui(&mut self, ui: &mut egui::Ui, index: BlockIndex) {
+        let block = &mut self.world[index];
         let theme =
             egui_extras::syntax_highlighting::CodeTheme::from_style(ui.style());
         let mut layouter = |ui: &egui::Ui, buf: &str, wrap_width: f32| {
@@ -84,6 +132,14 @@ struct NameEdit {
     needs_focus: bool,
 }
 
+#[derive(Copy, Clone)]
+pub struct BlockUiFlags {
+    pub is_open: bool,
+    pub is_last: bool,
+    pub is_dragged: bool,
+    pub is_view_open: Option<bool>,
+}
+
 /// Draws a draggable block within a [`egui_dnd`] context
 ///
 /// Returns a [`BlockResponse`] based on button presses
@@ -91,10 +147,8 @@ pub fn draggable_block(
     ui: &mut egui::Ui,
     index: BlockIndex,
     block: &mut Block,
-    is_open: bool,
-    last: bool,
+    flags: BlockUiFlags,
     handle: egui_dnd::Handle,
-    state: egui_dnd::ItemState,
 ) -> BlockResponse {
     let mut response = BlockResponse::empty();
     let padding = ui.spacing().icon_width + ui.spacing().icon_spacing;
@@ -109,22 +163,20 @@ pub fn draggable_block(
             true,
         )
         .show_header(ui, |ui| {
-            response =
-                draggable_block_header(ui, index, block, is_open, handle, state)
+            response = draggable_block_header(ui, index, block, flags, handle)
         })
         .body_unindented(|ui| {
             if block_body(ui, index, block) {
                 response |= BlockResponse::CHANGED;
             }
-            if !last {
+            if !flags.is_last {
                 ui.separator();
             }
         });
     } else {
         ui.horizontal(|ui| {
             ui.add_space(padding);
-            response =
-                draggable_block_header(ui, index, block, is_open, handle, state)
+            response = draggable_block_header(ui, index, block, flags, handle)
         });
     }
     response
@@ -187,9 +239,8 @@ fn draggable_block_header(
     ui: &mut egui::Ui,
     index: BlockIndex,
     block: &mut Block,
-    is_open: bool,
+    flags: BlockUiFlags,
     handle: egui_dnd::Handle,
-    state: egui_dnd::ItemState,
 ) -> BlockResponse {
     // Editable object name
     let mut response = BlockResponse::empty();
@@ -197,16 +248,21 @@ fn draggable_block_header(
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         ui.add_space(5.0);
         handle.show_drag_cursor_on_hover(false).ui(ui, |ui| {
-            ui.add(egui::Button::new(DRAG).selected(state.dragged));
+            ui.add(egui::Button::new(DRAG).selected(flags.is_dragged));
         });
         if ui.button(TRASH).clicked() {
             response |= BlockResponse::DELETE;
         }
         if ui
-            .add(egui::Button::new(PENCIL).selected(is_open))
+            .add(egui::Button::new(PENCIL).selected(flags.is_open))
             .clicked()
         {
             response = BlockResponse::TOGGLE_EDIT;
+        }
+        if let Some(view) = flags.is_view_open {
+            if ui.add(egui::Button::new(EYE).selected(view)).clicked() {
+                response = BlockResponse::TOGGLE_VIEW;
+            }
         }
         if let Some(state) = &block.state {
             if let Some(e) = state.name_error {
@@ -301,3 +357,4 @@ const DRAG: &str = "\u{f0041}";
 const TRASH: &str = "\u{f48e}";
 const PENCIL: &str = "\u{f03eb}";
 const WARN: &str = "\u{f071}";
+const EYE: &str = "\u{f441}";

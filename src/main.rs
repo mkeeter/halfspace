@@ -4,7 +4,7 @@ use std::collections::HashSet;
 mod gui;
 mod world;
 
-use world::{BlockIndex, World};
+use world::World;
 
 pub fn main() -> Result<(), eframe::Error> {
     let native_options = eframe::NativeOptions::default();
@@ -18,7 +18,7 @@ pub fn main() -> Result<(), eframe::Error> {
 
 struct App {
     data: World,
-    tree: egui_dock::DockState<BlockIndex>,
+    tree: egui_dock::DockState<gui::Tab>,
     syntax: egui_extras::syntax_highlighting::SyntectSettings,
 
     /// Pool to execute off-thread evaluation
@@ -164,34 +164,66 @@ impl App {
         dnd(ui, "dnd").show_vec(
             &mut self.data.order,
             |ui, index, handle, state| {
-                let tab_location = self.tree.find_tab(index);
-                let r = gui::draggable_block(
-                    ui,
-                    *index,
-                    self.data.blocks.get_mut(index).unwrap(),
-                    tab_location.is_some(),
-                    Some(*index) == last,
-                    handle,
-                    state,
-                );
+                let script_index = gui::Tab::script(*index);
+                let view_index = gui::Tab::view(*index);
+                let tab_location = self.tree.find_tab(&script_index);
+                let mut view_location = self.tree.find_tab(&view_index);
+                let block = self.data.blocks.get_mut(index).unwrap();
+
+                // If we have an open view but block is (1) valid and (2) no
+                // longer defines a view, then close the view.  We'll leave the
+                // view open if the block isn't valid, to prevent views from
+                // flicking in and out as a script is edited.
+                let block_defines_view =
+                    block.state.as_ref().is_some_and(|s| s.view);
+                if let Some(v) = view_location {
+                    if block.is_valid() && !block_defines_view {
+                        self.tree.remove_tab(v);
+                        view_location = None;
+                    }
+                }
+
+                let flags = gui::BlockUiFlags {
+                    is_last: Some(*index) == last,
+                    is_open: tab_location.is_some(),
+                    is_dragged: state.dragged,
+                    is_view_open: view_location.map(|_| true).or(
+                        if block_defines_view {
+                            Some(false)
+                        } else {
+                            None
+                        },
+                    ),
+                };
+                let r = gui::draggable_block(ui, *index, block, flags, handle);
                 if r.contains(BlockResponse::DELETE) {
                     to_delete.insert(*index);
                     if let Some(tab_location) = tab_location {
                         self.tree.remove_tab(tab_location).unwrap();
+                    }
+                    if let Some(view_location) = view_location {
+                        self.tree.remove_tab(view_location).unwrap();
                     }
                 }
                 if r.contains(BlockResponse::TOGGLE_EDIT) {
                     if let Some(tab_location) = tab_location {
                         self.tree.remove_tab(tab_location).unwrap();
                     } else {
-                        self.tree.push_to_focused_leaf(*index);
+                        self.tree.push_to_focused_leaf(script_index);
+                    }
+                }
+                if r.contains(BlockResponse::TOGGLE_VIEW) {
+                    if let Some(view_location) = view_location {
+                        self.tree.remove_tab(view_location).unwrap();
+                    } else {
+                        self.tree.push_to_focused_leaf(view_index);
                     }
                 }
                 if r.contains(BlockResponse::FOCUS_ERR) {
                     if let Some(tab_location) = tab_location {
                         self.tree.set_active_tab(tab_location)
                     } else {
-                        self.tree.push_to_focused_leaf(*index);
+                        self.tree.push_to_focused_leaf(script_index);
                     }
                 }
                 changed |= r.contains(BlockResponse::CHANGED);
@@ -218,13 +250,15 @@ bitflags::bitflags! {
     #[must_use]
     struct BlockResponse: u32 {
         /// Request to delete the block
-        const DELETE = 0b00000001;
+        const DELETE        = (1 << 0);
         /// Request to toggle the edit window
-        const TOGGLE_EDIT = 0b00000010;
+        const TOGGLE_EDIT   = (1 << 1);
+        /// Request to toggle the view window
+        const TOGGLE_VIEW   = (1 << 2);
         /// Request to focus the edit window
-        const FOCUS_ERR = 0b00000100;
+        const FOCUS_ERR     = (1 << 3);
         /// The block has changed
-        const CHANGED = 0b00001000;
+        const CHANGED       = (1 << 4);
     }
 }
 

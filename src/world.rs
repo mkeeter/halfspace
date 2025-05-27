@@ -106,6 +106,11 @@ impl Block {
             state: None,
         }
     }
+    pub fn is_valid(&self) -> bool {
+        self.state.as_ref().is_some_and(|s| {
+            s.name_error.is_none() && s.script_errors.is_empty()
+        })
+    }
 }
 
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
@@ -165,6 +170,8 @@ pub struct BlockState {
     pub script_errors: Vec<BlockError>,
     /// Values defined with `input(..)` or `output(..)` calls in the script
     pub io_values: Vec<(String, IoValue)>,
+    /// Does this block define a view?
+    pub view: bool, // XXX this will have more data soon
 }
 
 impl World {
@@ -271,19 +278,7 @@ impl World {
                   v: rhai::Dynamic|
                   -> Result<(), Box<rhai::EvalAltResult>> {
                 let mut out = output_handle.write().unwrap();
-                if !rhai::is_valid_identifier(name) {
-                    return Err(rhai::EvalAltResult::ErrorForbiddenVariable(
-                        name.to_owned(),
-                        ctx.position(),
-                    )
-                    .into());
-                } else if !out.names.insert(name.to_owned()) {
-                    return Err(rhai::EvalAltResult::ErrorVariableExists(
-                        format!("io `{}` already exists", name),
-                        ctx.position(),
-                    )
-                    .into());
-                }
+                out.insert_name(&ctx, name)?;
                 out.values
                     .push((name.to_owned(), IoValue::Output(Value::from(v))));
                 Ok(())
@@ -302,6 +297,7 @@ impl World {
                 debug: HashMap::new(),
                 script_errors: vec![],
                 io_values: vec![],
+                view: false,
             });
             let state = block.state.as_mut().unwrap();
 
@@ -332,19 +328,8 @@ impl World {
                 Box<rhai::EvalAltResult>,
             > {
                 let mut input_handle = input_handle.write().unwrap();
-                if !rhai::is_valid_identifier(name) {
-                    return Err(rhai::EvalAltResult::ErrorForbiddenVariable(
-                        name.to_owned(),
-                        ctx.position(),
-                    )
-                    .into());
-                } else if !input_handle.names.insert(name.to_owned()) {
-                    return Err(rhai::EvalAltResult::ErrorVariableExists(
-                        format!("io `{}` already exists", name),
-                        ctx.position(),
-                    )
-                    .into());
-                }
+                input_handle.insert_name(&ctx, name)?;
+
                 let mut input_text_lock = input_text_handle.write().unwrap();
                 let txt = input_text_lock
                     .entry(name.to_owned())
@@ -364,6 +349,26 @@ impl World {
                 v.map_err(|_| "error in input expression".into())
             };
             engine.register_fn("input", input_fn);
+            let view_handle = io_values.clone();
+            engine.register_fn(
+                "view",
+                move |ctx: rhai::NativeCallContext,
+                      name: &str|
+                      -> Result<(), Box<rhai::EvalAltResult>> {
+                    let mut view_handle = view_handle.write().unwrap();
+                    view_handle.insert_name(&ctx, name)?;
+                    if view_handle.view.is_some() {
+                        return Err(rhai::EvalAltResult::ErrorRuntime(
+                            "cannot have multiple views in a single block"
+                                .into(),
+                            ctx.position(),
+                        )
+                        .into());
+                    }
+                    view_handle.view = Some(name.to_owned());
+                    Ok(())
+                },
+            );
 
             let ast = match engine.compile(&block.script) {
                 Ok(ast) => ast,
@@ -378,11 +383,17 @@ impl World {
             let mut scope = rhai::Scope::new();
             let r =
                 engine.eval_ast_with_scope::<rhai::Dynamic>(&mut scope, &ast);
+
+            // Update block state based on actions taken by the script
             let (stdout, debug) = io_log.write().unwrap().take();
             state.stdout = stdout.join("\n");
             state.debug = debug;
-            let (io_names, io_values) = io_values.write().unwrap().take();
+            let (io_names, io_values, io_view) =
+                io_values.write().unwrap().take();
             state.io_values = io_values;
+            state.view = io_view.is_some();
+
+            // Update inputs, which may have been modified
             block.inputs = std::mem::take(&mut input_text.write().unwrap());
 
             // Write outputs into the shared input scope
@@ -427,17 +438,43 @@ impl IoLog {
     }
 }
 
-/// Helper struct to record `input` and `output` calls
+/// Helper struct to record `input`, `output`, and `view` calls
 #[derive(Default)]
 struct IoValues {
     names: HashSet<String>,
     values: Vec<(String, IoValue)>,
+    view: Option<String>,
 }
+
 impl IoValues {
-    fn take(&mut self) -> (HashSet<String>, Vec<(String, IoValue)>) {
+    fn insert_name(
+        &mut self,
+        ctx: &rhai::NativeCallContext,
+        name: &str,
+    ) -> Result<(), Box<rhai::EvalAltResult>> {
+        if !rhai::is_valid_identifier(name) {
+            Err(rhai::EvalAltResult::ErrorForbiddenVariable(
+                name.to_owned(),
+                ctx.position(),
+            )
+            .into())
+        } else if !self.names.insert(name.to_owned()) {
+            Err(rhai::EvalAltResult::ErrorVariableExists(
+                format!("io `{}` already exists", name),
+                ctx.position(),
+            )
+            .into())
+        } else {
+            Ok(())
+        }
+    }
+    fn take(
+        &mut self,
+    ) -> (HashSet<String>, Vec<(String, IoValue)>, Option<String>) {
         (
             std::mem::take(&mut self.names),
             std::mem::take(&mut self.values),
+            std::mem::take(&mut self.view),
         )
     }
 }
