@@ -1,4 +1,7 @@
+use std::collections::HashMap;
+
 use crate::{
+    render::RenderData,
     world::{Block, BlockIndex, IoValue, NameError, World},
     BlockResponse,
 };
@@ -7,6 +10,7 @@ pub struct BoundWorld<'a> {
     pub world: &'a mut World,
     pub syntax: &'a egui_extras::syntax_highlighting::SyntectSettings,
     pub changed: &'a mut bool,
+    pub render: &'a mut HashMap<BlockIndex, RenderData>,
 }
 
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
@@ -66,11 +70,43 @@ impl<'a> egui_dock::TabViewer for BoundWorld<'a> {
 
 impl<'a> BoundWorld<'a> {
     fn view_ui(&mut self, ui: &mut egui::Ui, index: BlockIndex) {
-        ui.label(format!("HELLO {index:?}"));
-        ui.painter().add(egui_wgpu::Callback::new_paint_callback(
-            ui.clip_rect(),
-            crate::draw::WgpuPainter::new(),
-        ));
+        let block = &self.world[index];
+        if let Some(view) = block.get_view() {
+            let rect = ui.clip_rect();
+            let image_size = fidget::render::ImageSize::new(
+                rect.width() as u32,
+                rect.height() as u32,
+            );
+            let entry = self.render.entry(index).or_default();
+            let ctx = ui.ctx().clone();
+            entry.check(view.tree.clone(), image_size, move || {
+                ctx.request_repaint()
+            });
+
+            if let Some(image) = entry.image() {
+                // XXX Expensive copying in the main thread here!
+                let (image_data, image_size) =
+                    image.map(|&[r, g, b]| [r, g, b, u8::MAX]).take();
+                ui.painter().add(egui_wgpu::Callback::new_paint_callback(
+                    rect,
+                    crate::draw::WgpuPainter::new(image_data, image_size),
+                ));
+            }
+        } else {
+            // Manually draw a backdrop indicating that the block has errors
+            let style = ui.style();
+            let painter = ui.painter();
+            let layout = painter.layout(
+                "block has errors".to_owned(),
+                style.text_styles[&egui::TextStyle::Heading].clone(),
+                style.visuals.widgets.noninteractive.text_color(),
+                f32::INFINITY,
+            );
+            let rect = painter.clip_rect();
+            let text_corner = rect.center() - layout.size() / 2.0;
+            painter.rect_filled(rect, 0.0, style.visuals.panel_fill);
+            painter.galley(text_corner, layout, egui::Color32::BLACK);
+        }
     }
 
     fn script_ui(&mut self, ui: &mut egui::Ui, index: BlockIndex) {

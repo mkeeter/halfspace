@@ -1,11 +1,13 @@
 use egui_dnd::dnd;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 mod draw;
 mod gui;
+mod render;
 mod world;
 
-use world::World;
+use render::RenderData;
+use world::{BlockIndex, World};
 
 pub fn main() -> Result<(), eframe::Error> {
     let native_options = eframe::NativeOptions::default();
@@ -21,9 +23,8 @@ struct App {
     data: World,
     tree: egui_dock::DockState<gui::Tab>,
     syntax: egui_extras::syntax_highlighting::SyntectSettings,
+    render: HashMap<BlockIndex, RenderData>,
 
-    /// Pool to execute off-thread evaluation
-    pool: rayon::ThreadPool,
     rx: std::sync::mpsc::Receiver<World>,
     tx: std::sync::mpsc::Sender<World>,
 }
@@ -86,7 +87,7 @@ impl App {
             data: World::new(),
             tree: egui_dock::DockState::new(vec![]),
             syntax,
-            pool: rayon::ThreadPoolBuilder::default().build().unwrap(),
+            render: HashMap::new(),
             tx,
             rx,
         }
@@ -132,6 +133,7 @@ impl eframe::App for App {
                     world: &mut self.data,
                     syntax: &self.syntax,
                     changed: &mut changed,
+                    render: &mut self.render,
                 };
                 egui_dock::DockArea::new(&mut self.tree)
                     .style(egui_dock::Style::from_egui(ctx.style().as_ref()))
@@ -144,7 +146,7 @@ impl eframe::App for App {
             let mut world = self.data.without_state();
             let ctx = ctx.clone();
             let tx = self.tx.clone();
-            self.pool.install(move || {
+            rayon::spawn(move || {
                 world.rebuild();
                 if tx.send(world).is_ok() {
                     ctx.request_repaint();
@@ -180,7 +182,7 @@ impl App {
                 // view open if the block isn't valid, to prevent views from
                 // flicking in and out as a script is edited.
                 let block_defines_view =
-                    block.state.as_ref().is_some_and(|s| s.view);
+                    block.state.as_ref().is_some_and(|s| s.view.is_some());
                 if let Some(v) = view_location {
                     if block.is_valid() && !block_defines_view {
                         self.tree.remove_tab(v);
@@ -237,6 +239,7 @@ impl App {
 
         // Post-processing: edit blocks based on button presses
         changed |= self.data.retain(|index| !to_delete.contains(index));
+        self.render.retain(|index, _| !to_delete.contains(index));
 
         // Draw the "new block" button below a separator
         if !self.data.is_empty() {

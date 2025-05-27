@@ -106,10 +106,22 @@ impl Block {
             state: None,
         }
     }
+
+    /// Checks whether the block is error-free
+    ///
+    /// A block with no state is _invalid_, i.e. returns `false`
     pub fn is_valid(&self) -> bool {
         self.state.as_ref().is_some_and(|s| {
             s.name_error.is_none() && s.script_errors.is_empty()
         })
+    }
+
+    /// Gets the `BlockView`, if the block is free of errors
+    pub fn get_view(&self) -> Option<&BlockView> {
+        self.state
+            .as_ref()
+            .filter(|s| s.name_error.is_none() && s.script_errors.is_empty())
+            .and_then(|s| s.view.as_ref())
     }
 }
 
@@ -159,6 +171,10 @@ pub enum IoValue {
     Output(Value),
 }
 
+pub struct BlockView {
+    pub tree: fidget::context::Tree,
+}
+
 pub struct BlockState {
     /// Output from `print` calls in the script
     pub stdout: String,
@@ -170,8 +186,8 @@ pub struct BlockState {
     pub script_errors: Vec<BlockError>,
     /// Values defined with `input(..)` or `output(..)` calls in the script
     pub io_values: Vec<(String, IoValue)>,
-    /// Does this block define a view?
-    pub view: bool, // XXX this will have more data soon
+    /// Value exported to a view
+    pub view: Option<BlockView>,
 }
 
 impl World {
@@ -251,6 +267,10 @@ impl World {
     pub fn rebuild(&mut self) {
         let mut name_map = HashMap::new();
         let mut engine = rhai::Engine::new();
+        fidget::rhai::tree::register(&mut engine);
+        fidget::rhai::vec::register(&mut engine);
+        fidget::rhai::shapes::register(&mut engine);
+        engine.register_fn("axes", fidget::context::Tree::axes);
         engine.set_fail_on_invalid_map_property(true);
 
         let io_log = Arc::new(RwLock::new(IoLog::default()));
@@ -297,7 +317,7 @@ impl World {
                 debug: HashMap::new(),
                 script_errors: vec![],
                 io_values: vec![],
-                view: false,
+                view: None,
             });
             let state = block.state.as_mut().unwrap();
 
@@ -353,10 +373,9 @@ impl World {
             engine.register_fn(
                 "view",
                 move |ctx: rhai::NativeCallContext,
-                      name: &str|
+                      tree: fidget::context::Tree|
                       -> Result<(), Box<rhai::EvalAltResult>> {
                     let mut view_handle = view_handle.write().unwrap();
-                    view_handle.insert_name(&ctx, name)?;
                     if view_handle.view.is_some() {
                         return Err(rhai::EvalAltResult::ErrorRuntime(
                             "cannot have multiple views in a single block"
@@ -365,7 +384,7 @@ impl World {
                         )
                         .into());
                     }
-                    view_handle.view = Some(name.to_owned());
+                    view_handle.view = Some(tree);
                     Ok(())
                 },
             );
@@ -391,7 +410,7 @@ impl World {
             let (io_names, io_values, io_view) =
                 io_values.write().unwrap().take();
             state.io_values = io_values;
-            state.view = io_view.is_some();
+            state.view = io_view.map(|tree| BlockView { tree });
 
             // Update inputs, which may have been modified
             block.inputs = std::mem::take(&mut input_text.write().unwrap());
@@ -443,7 +462,7 @@ impl IoLog {
 struct IoValues {
     names: HashSet<String>,
     values: Vec<(String, IoValue)>,
-    view: Option<String>,
+    view: Option<fidget::context::Tree>,
 }
 
 impl IoValues {
@@ -470,11 +489,15 @@ impl IoValues {
     }
     fn take(
         &mut self,
-    ) -> (HashSet<String>, Vec<(String, IoValue)>, Option<String>) {
+    ) -> (
+        HashSet<String>,
+        Vec<(String, IoValue)>,
+        Option<fidget::context::Tree>,
+    ) {
         (
             std::mem::take(&mut self.names),
             std::mem::take(&mut self.values),
-            std::mem::take(&mut self.view),
+            self.view.take(),
         )
     }
 }

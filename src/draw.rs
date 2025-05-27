@@ -2,7 +2,12 @@ use eframe::{
     egui,
     egui_wgpu::{self, wgpu},
 };
+use zerocopy::IntoBytes;
 
+/// Universal basic GPU resources
+///
+/// This is constructed *once* and used for every GPU rendering task in the
+/// GUI.
 pub struct WgpuResources {
     rgba_pipeline: wgpu::RenderPipeline,
     rgba_bind_group_layout: wgpu::BindGroupLayout,
@@ -37,7 +42,30 @@ impl WgpuResources {
         let rgba_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("RGBA Bind Group Layout"),
-                entries: &[],
+                entries: &[
+                    // Texture
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float {
+                                filterable: true,
+                            },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    // Sampler
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(
+                            wgpu::SamplerBindingType::Filtering,
+                        ),
+                        count: None,
+                    },
+                ],
             });
 
         // Create render pipeline layouts
@@ -98,15 +126,28 @@ impl WgpuResources {
 }
 
 /// GPU callback
-pub(crate) struct WgpuPainter;
+pub(crate) struct WgpuPainter {
+    image_data: Vec<[u8; 4]>,
+    image_size: fidget::render::ImageSize,
+}
 
 impl WgpuPainter {
-    pub fn new() -> Self {
-        Self
+    pub fn new(
+        image_data: Vec<[u8; 4]>,
+        image_size: fidget::render::ImageSize,
+    ) -> Self {
+        Self {
+            image_data,
+            image_size,
+        }
     }
 }
 
 struct WgpuPainterResources {
+    #[expect(unused)] // kept alive for lifetime purposes
+    rgba_sampler: wgpu::Sampler,
+    #[expect(unused)] // kept alive for lifetime purposes
+    texture: wgpu::Texture,
     bind_group: wgpu::BindGroup,
 }
 
@@ -114,21 +155,90 @@ impl egui_wgpu::CallbackTrait for WgpuPainter {
     fn prepare(
         &self,
         device: &wgpu::Device,
-        _queue: &wgpu::Queue,
+        queue: &wgpu::Queue,
         _screen_descriptor: &egui_wgpu::ScreenDescriptor,
         _egui_encoder: &mut wgpu::CommandEncoder,
         resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
-        if !resources.contains::<WgpuPainterResources>() {
-            let r: &mut WgpuResources = resources.get_mut().unwrap();
-            let bind_group =
-                device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("RGBA Bind Group"),
-                    layout: &r.rgba_bind_group_layout,
-                    entries: &[],
-                });
-            resources.insert(WgpuPainterResources { bind_group });
-        }
+        // Borrow global resources
+        let gr: &mut WgpuResources = resources.get_mut().unwrap();
+
+        let (width, height) =
+            (self.image_size.width(), self.image_size.height());
+        let texture_size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+
+        // XXX allocating a texture on every frame seems expensive!
+
+        // Create the texture
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("RGBA Texture"),
+            size: texture_size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        // Upload RGBA image data
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            self.image_data.as_bytes(),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * width),
+                rows_per_image: Some(height),
+            },
+            texture_size,
+        );
+
+        // Create the texture view
+        let texture_view =
+            texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // Create samplers
+        let rgba_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("RGBA Sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("RGBA Bind Group"),
+            layout: &gr.rgba_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&rgba_sampler),
+                },
+            ],
+        });
+
+        resources.insert(WgpuPainterResources {
+            texture,
+            rgba_sampler,
+            bind_group,
+        });
 
         Vec::new()
     }
