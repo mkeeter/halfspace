@@ -19,6 +19,19 @@ pub fn main() -> Result<(), eframe::Error> {
     )
 }
 
+enum Message {
+    RebuildWorld {
+        world: World,
+        generation: u64,
+    },
+    RenderView {
+        block: BlockIndex,
+        generation: u64,
+        settings: render::RenderSettings,
+        data: Vec<[u8; 4]>,
+    },
+}
+
 struct App {
     data: World,
     tree: egui_dock::DockState<gui::Tab>,
@@ -26,8 +39,8 @@ struct App {
     views: HashMap<BlockIndex, view::ViewData>,
 
     generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
-    rx: std::sync::mpsc::Receiver<(u64, World)>,
-    tx: std::sync::mpsc::Sender<(u64, World)>,
+    rx: std::sync::mpsc::Receiver<Message>,
+    tx: std::sync::mpsc::Sender<Message>,
 }
 
 impl App {
@@ -98,12 +111,28 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Receive new data from the worker thread
-        while let Ok((rx_gen, world)) = self.rx.try_recv() {
-            if rx_gen
-                == self.generation.load(std::sync::atomic::Ordering::Acquire)
-            {
-                self.data = world;
+        // Receive new data from the worker pool
+        while let Ok(m) = self.rx.try_recv() {
+            match m {
+                Message::RebuildWorld { generation, world } => {
+                    if generation
+                        == self
+                            .generation
+                            .load(std::sync::atomic::Ordering::Acquire)
+                    {
+                        self.data = world;
+                    }
+                }
+                Message::RenderView {
+                    block,
+                    generation,
+                    settings,
+                    data,
+                } => {
+                    if let Some(e) = self.views.get_mut(&block) {
+                        e.update(generation, data, settings)
+                    }
+                }
             }
         }
         let mut changed = false;
@@ -140,6 +169,7 @@ impl eframe::App for App {
                     syntax: &self.syntax,
                     changed: &mut changed,
                     views: &mut self.views,
+                    tx: &self.tx,
                 };
                 egui_dock::DockArea::new(&mut self.tree)
                     .style(egui_dock::Style::from_egui(ctx.style().as_ref()))
@@ -152,7 +182,7 @@ impl eframe::App for App {
             let mut world = self.data.without_state();
             let ctx = ctx.clone();
             let tx = self.tx.clone();
-            let expected_gen = self
+            let generation = self
                 .generation
                 .fetch_add(1u64, std::sync::atomic::Ordering::Release)
                 + 1;
@@ -162,9 +192,16 @@ impl eframe::App for App {
                 // started; if so, then skip it entirely.
                 let current_gen =
                     gen_handle.load(std::sync::atomic::Ordering::Acquire);
-                if current_gen == expected_gen {
+                if current_gen == generation {
                     world.rebuild();
-                    if tx.send((expected_gen, world)).is_ok() {
+                    // Re-check generation before sending
+                    let current_gen =
+                        gen_handle.load(std::sync::atomic::Ordering::Acquire);
+                    if current_gen == generation
+                        && tx
+                            .send(Message::RebuildWorld { generation, world })
+                            .is_ok()
+                    {
                         ctx.request_repaint();
                     }
                 }

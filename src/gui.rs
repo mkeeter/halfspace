@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
 use crate::{
+    render::RenderSettings,
     view::ViewData,
     world::{Block, BlockIndex, IoValue, NameError, World},
-    BlockResponse,
+    BlockResponse, Message,
 };
 
 pub struct BoundWorld<'a> {
@@ -11,6 +12,7 @@ pub struct BoundWorld<'a> {
     pub syntax: &'a egui_extras::syntax_highlighting::SyntectSettings,
     pub changed: &'a mut bool,
     pub views: &'a mut HashMap<BlockIndex, ViewData>,
+    pub tx: &'a std::sync::mpsc::Sender<Message>,
 }
 
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
@@ -76,36 +78,34 @@ impl<'a> BoundWorld<'a> {
             return;
         };
         let rect = ui.clip_rect();
-        let image_size = fidget::render::ImageSize::new(
+        let size = fidget::render::ImageSize::new(
             rect.width() as u32,
             rect.height() as u32,
         );
         let entry = self
             .views
             .entry(index)
-            .or_insert_with(|| ViewData::new(image_size));
+            .or_insert_with(|| ViewData::new(size));
         let ctx = ui.ctx().clone();
         let view = entry.canvas.view();
-        // Check the state of the worker thread
-        // XXX move to a single receiver thread for all messages?
-        entry.render.check(
-            block_view.tree.clone(),
-            image_size,
-            view,
-            move || ctx.request_repaint(),
-        );
 
-        let Some(image) = entry.render.image() else {
+        let settings = RenderSettings {
+            tree: block_view.tree.clone(),
+            view,
+            size,
+        };
+        entry.check(index, settings, self.tx.clone(), move || {
+            ctx.request_repaint()
+        });
+
+        // XXX Expensive copying in the main thread here!
+        let Some(image) = entry.image() else {
             self.view_fallback_ui(ui, "render in progress...");
             return;
         };
-
-        // XXX Expensive copying in the main thread here!
-        let (image_data, image_size) =
-            image.map(|&[r, g, b]| [r, g, b, u8::MAX]).take();
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(
             rect,
-            crate::draw::WgpuPainter::new(image_data, image_size),
+            crate::draw::WgpuPainter::new(image.clone()),
         ));
         let r = ui.interact(
             rect,
@@ -129,11 +129,13 @@ impl<'a> BoundWorld<'a> {
             }
         });
         let render_changed = entry.canvas.interact(
-            image_size,
+            size,
             cursor_state,
             ui.ctx().input(|i| i.smooth_scroll_delta.y),
         );
-        println!("render changed: {render_changed}");
+        if render_changed {
+            ui.ctx().request_repaint();
+        }
     }
 
     /// Manually draw a backdrop indicating that the view is invalid

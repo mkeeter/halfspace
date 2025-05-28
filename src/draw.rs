@@ -1,3 +1,4 @@
+use crate::view::ViewImage;
 use eframe::{
     egui,
     egui_wgpu::{self, wgpu},
@@ -127,19 +128,12 @@ impl WgpuResources {
 
 /// GPU callback
 pub(crate) struct WgpuPainter {
-    image_data: Vec<[u8; 4]>,
-    image_size: fidget::render::ImageSize,
+    image: ViewImage,
 }
 
 impl WgpuPainter {
-    pub fn new(
-        image_data: Vec<[u8; 4]>,
-        image_size: fidget::render::ImageSize,
-    ) -> Self {
-        Self {
-            image_data,
-            image_size,
-        }
+    pub fn new(image: ViewImage) -> Self {
+        Self { image }
     }
 }
 
@@ -163,8 +157,10 @@ impl egui_wgpu::CallbackTrait for WgpuPainter {
         // Borrow global resources
         let gr: &mut WgpuResources = resources.get_mut().unwrap();
 
-        let (width, height) =
-            (self.image_size.width(), self.image_size.height());
+        let (width, height) = (
+            self.image.settings.size.width(),
+            self.image.settings.size.height(),
+        );
         let texture_size = wgpu::Extent3d {
             width,
             height,
@@ -194,7 +190,7 @@ impl egui_wgpu::CallbackTrait for WgpuPainter {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            self.image_data.as_bytes(),
+            self.image.data.as_bytes(),
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(4 * width),
