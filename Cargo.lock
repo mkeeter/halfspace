@@ -1824,6 +1824,7 @@ dependencies = [
  "egui_dock",
  "egui_extras",
  "fidget",
+ "nalgebra",
  "rayon",
  "rhai",
  "syntect",

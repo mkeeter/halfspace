@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    render::RenderData,
+    view::ViewData,
     world::{Block, BlockIndex, IoValue, NameError, World},
     BlockResponse,
 };
@@ -10,7 +10,7 @@ pub struct BoundWorld<'a> {
     pub world: &'a mut World,
     pub syntax: &'a egui_extras::syntax_highlighting::SyntectSettings,
     pub changed: &'a mut bool,
-    pub render: &'a mut HashMap<BlockIndex, RenderData>,
+    pub views: &'a mut HashMap<BlockIndex, ViewData>,
 }
 
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
@@ -71,42 +71,85 @@ impl<'a> egui_dock::TabViewer for BoundWorld<'a> {
 impl<'a> BoundWorld<'a> {
     fn view_ui(&mut self, ui: &mut egui::Ui, index: BlockIndex) {
         let block = &self.world[index];
-        if let Some(view) = block.get_view() {
-            let rect = ui.clip_rect();
-            let image_size = fidget::render::ImageSize::new(
-                rect.width() as u32,
-                rect.height() as u32,
-            );
-            let entry = self.render.entry(index).or_default();
-            let ctx = ui.ctx().clone();
-            entry.check(view.tree.clone(), image_size, move || {
-                ctx.request_repaint()
-            });
+        let Some(block_view) = block.get_view() else {
+            self.view_fallback_ui(ui, "block has error");
+            return;
+        };
+        let rect = ui.clip_rect();
+        let image_size = fidget::render::ImageSize::new(
+            rect.width() as u32,
+            rect.height() as u32,
+        );
+        let entry = self
+            .views
+            .entry(index)
+            .or_insert_with(|| ViewData::new(image_size));
+        let ctx = ui.ctx().clone();
+        let view = entry.canvas.view();
+        // Check the state of the worker thread
+        // XXX move to a single receiver thread for all messages?
+        entry.render.check(
+            block_view.tree.clone(),
+            image_size,
+            view,
+            move || ctx.request_repaint(),
+        );
 
-            if let Some(image) = entry.image() {
-                // XXX Expensive copying in the main thread here!
-                let (image_data, image_size) =
-                    image.map(|&[r, g, b]| [r, g, b, u8::MAX]).take();
-                ui.painter().add(egui_wgpu::Callback::new_paint_callback(
-                    rect,
-                    crate::draw::WgpuPainter::new(image_data, image_size),
-                ));
-            }
-        } else {
-            // Manually draw a backdrop indicating that the block has errors
-            let style = ui.style();
-            let painter = ui.painter();
-            let layout = painter.layout(
-                "block has errors".to_owned(),
-                style.text_styles[&egui::TextStyle::Heading].clone(),
-                style.visuals.widgets.noninteractive.text_color(),
-                f32::INFINITY,
-            );
-            let rect = painter.clip_rect();
-            let text_corner = rect.center() - layout.size() / 2.0;
-            painter.rect_filled(rect, 0.0, style.visuals.panel_fill);
-            painter.galley(text_corner, layout, egui::Color32::BLACK);
+        let Some(image) = entry.render.image() else {
+            self.view_fallback_ui(ui, "render in progress...");
+            return;
+        };
+
+        // XXX Expensive copying in the main thread here!
+        let (image_data, image_size) =
+            image.map(|&[r, g, b]| [r, g, b, u8::MAX]).take();
+        ui.painter().add(egui_wgpu::Callback::new_paint_callback(
+            rect,
+            crate::draw::WgpuPainter::new(image_data, image_size),
+        ));
+        let r = ui.interact(
+            rect,
+            index.id().with("block_view_interact"),
+            egui::Sense::click_and_drag(),
+        );
+
+        let cursor_state = match (r.interact_pointer_pos(), r.hover_pos()) {
+            (Some(p), _) => Some((p, true)),
+            (_, Some(p)) => Some((p, false)),
+            (None, None) => None,
         }
+        .map(|(p, drag)| {
+            let p = p - rect.min;
+            fidget::gui::CursorState {
+                screen_pos: nalgebra::Point2::new(
+                    p.x.round() as i32,
+                    p.y.round() as i32,
+                ),
+                drag,
+            }
+        });
+        let render_changed = entry.canvas.interact(
+            image_size,
+            cursor_state,
+            ui.ctx().input(|i| i.smooth_scroll_delta.y),
+        );
+        println!("render changed: {render_changed}");
+    }
+
+    /// Manually draw a backdrop indicating that the view is invalid
+    fn view_fallback_ui(&mut self, ui: &mut egui::Ui, txt: &str) {
+        let style = ui.style();
+        let painter = ui.painter();
+        let layout = painter.layout(
+            txt.to_owned(),
+            style.text_styles[&egui::TextStyle::Heading].clone(),
+            style.visuals.widgets.noninteractive.text_color(),
+            f32::INFINITY,
+        );
+        let rect = painter.clip_rect();
+        let text_corner = rect.center() - layout.size() / 2.0;
+        painter.rect_filled(rect, 0.0, style.visuals.panel_fill);
+        painter.galley(text_corner, layout, egui::Color32::BLACK);
     }
 
     fn script_ui(&mut self, ui: &mut egui::Ui, index: BlockIndex) {

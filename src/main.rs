@@ -4,9 +4,9 @@ use std::collections::{HashMap, HashSet};
 mod draw;
 mod gui;
 mod render;
+mod view;
 mod world;
 
-use render::RenderData;
 use world::{BlockIndex, World};
 
 pub fn main() -> Result<(), eframe::Error> {
@@ -23,7 +23,7 @@ struct App {
     data: World,
     tree: egui_dock::DockState<gui::Tab>,
     syntax: egui_extras::syntax_highlighting::SyntectSettings,
-    render: HashMap<BlockIndex, RenderData>,
+    views: HashMap<BlockIndex, view::ViewData>,
 
     generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
     rx: std::sync::mpsc::Receiver<(u64, World)>,
@@ -88,7 +88,7 @@ impl App {
             data: World::new(),
             tree: egui_dock::DockState::new(vec![]),
             syntax,
-            render: HashMap::new(),
+            views: HashMap::new(),
             generation: std::sync::Arc::new(0.into()),
             tx,
             rx,
@@ -139,7 +139,7 @@ impl eframe::App for App {
                     world: &mut self.data,
                     syntax: &self.syntax,
                     changed: &mut changed,
-                    render: &mut self.render,
+                    views: &mut self.views,
                 };
                 egui_dock::DockArea::new(&mut self.tree)
                     .style(egui_dock::Style::from_egui(ctx.style().as_ref()))
@@ -256,7 +256,7 @@ impl App {
 
         // Post-processing: edit blocks based on button presses
         changed |= self.data.retain(|index| !to_delete.contains(index));
-        self.render.retain(|index, _| !to_delete.contains(index));
+        self.views.retain(|index, _| !to_delete.contains(index));
 
         // Draw the "new block" button below a separator
         if !self.data.is_empty() {
