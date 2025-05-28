@@ -1,3 +1,4 @@
+///! GPU-based image drawing in an `egui` context
 use crate::view::ViewImage;
 use eframe::{
     egui,

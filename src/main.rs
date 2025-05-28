@@ -3,7 +3,6 @@ use std::collections::{HashMap, HashSet};
 
 mod draw;
 mod gui;
-mod render;
 mod view;
 mod world;
 
@@ -27,7 +26,7 @@ enum Message {
     RenderView {
         block: BlockIndex,
         generation: u64,
-        settings: render::RenderSettings,
+        settings: view::RenderSettings,
         data: Vec<[u8; 4]>,
     },
 }
@@ -164,7 +163,7 @@ impl eframe::App for App {
                 painter.rect_filled(rect, 0.0, style.visuals.panel_fill);
                 painter.galley(text_corner, layout, egui::Color32::BLACK);
 
-                let mut bw = gui::BoundWorld {
+                let mut bw = gui::WorldView {
                     world: &mut self.data,
                     syntax: &self.syntax,
                     changed: &mut changed,

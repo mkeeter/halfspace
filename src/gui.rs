@@ -1,13 +1,13 @@
+//! Functions to draw our data into an `egui` context
 use std::collections::HashMap;
 
 use crate::{
-    render::RenderSettings,
-    view::ViewData,
+    view::{RenderSettings, ViewData},
     world::{Block, BlockIndex, IoValue, NameError, World},
     BlockResponse, Message,
 };
 
-pub struct BoundWorld<'a> {
+pub struct WorldView<'a> {
     pub world: &'a mut World,
     pub syntax: &'a egui_extras::syntax_highlighting::SyntectSettings,
     pub changed: &'a mut bool,
@@ -42,7 +42,7 @@ impl Tab {
     }
 }
 
-impl<'a> egui_dock::TabViewer for BoundWorld<'a> {
+impl<'a> egui_dock::TabViewer for WorldView<'a> {
     type Tab = Tab;
 
     fn id(&mut self, tab: &mut Tab) -> egui::Id {
@@ -70,7 +70,7 @@ impl<'a> egui_dock::TabViewer for BoundWorld<'a> {
     }
 }
 
-impl<'a> BoundWorld<'a> {
+impl<'a> WorldView<'a> {
     fn view_ui(&mut self, ui: &mut egui::Ui, index: BlockIndex) {
         let block = &self.world[index];
         let Some(block_view) = block.get_view() else {
