@@ -105,7 +105,7 @@ impl<'a> BoundWorld<'a> {
         };
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(
             rect,
-            crate::draw::WgpuPainter::new(image.clone()),
+            crate::draw::WgpuPainter::new(image.clone(), view),
         ));
         let r = ui.interact(
             rect,
