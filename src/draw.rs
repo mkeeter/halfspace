@@ -226,14 +226,19 @@ impl WgpuResources {
 pub(crate) struct WgpuPainter {
     /// Current view, which may differ from the image's view
     view: fidget::render::View2,
+    size: fidget::render::ImageSize,
 
     /// Image to render
     image: ViewImage,
 }
 
 impl WgpuPainter {
-    pub fn new(image: ViewImage, view: fidget::render::View2) -> Self {
-        Self { image, view }
+    pub fn new(
+        image: ViewImage,
+        size: fidget::render::ImageSize,
+        view: fidget::render::View2,
+    ) -> Self {
+        Self { image, size, view }
     }
 }
 
@@ -320,7 +325,14 @@ impl egui_wgpu::CallbackTrait for WgpuPainter {
 
         // Create the uniform
         let m = self.view.world_to_model().try_inverse().unwrap()
-            * self.image.settings.view.world_to_model();
+            * self.image.settings.view.world_to_model()
+            * nalgebra::Scale2::new(
+                self.image.settings.size.width() as f32
+                    / self.size.width() as f32,
+                self.image.settings.size.height() as f32
+                    / self.size.height() as f32,
+            )
+            .to_homogeneous();
         #[rustfmt::skip]
         let transform = nalgebra::Matrix4::new(
             m[(0, 0)], m[(0, 1)], 0.0, m[(0, 2)],

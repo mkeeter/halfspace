@@ -105,7 +105,7 @@ impl<'a> WorldView<'a> {
         };
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(
             rect,
-            crate::draw::WgpuPainter::new(image.clone(), view),
+            crate::draw::WgpuPainter::new(image.clone(), size, view),
         ));
         let r = ui.interact(
             rect,
