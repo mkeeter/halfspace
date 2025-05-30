@@ -65,7 +65,7 @@ impl ViewData {
         render_time: std::time::Duration,
     ) {
         const TARGET_RENDER_TIME: std::time::Duration =
-            std::time::Duration::from_millis(16);
+            std::time::Duration::from_millis(33);
         const MAX_LEVEL: usize = 10;
 
         // Adjust self.start_level to hit a render time target
@@ -74,7 +74,7 @@ impl ViewData {
         } else if render_time < TARGET_RENDER_TIME * 3 / 4
             && level == self.start_level
         {
-            self.start_level -= 1;
+            self.start_level = self.start_level.saturating_sub(1);
         }
         if generation == self.generation {
             self.image = Some(ViewImage {
@@ -82,6 +82,9 @@ impl ViewData {
                 settings,
                 level,
             });
+            if let Some(task) = &mut self.task {
+                task.done = true;
+            }
             if let Some(next) = level.checked_sub(1) {
                 self.pending = Some(next);
             }
@@ -100,9 +103,12 @@ impl ViewData {
         notify: F,
     ) -> Option<&ViewImage> {
         // If the image settings have changed, then clear `task` (which causes
-        // us to reinitialize it below).
+        // us to reinitialize it below).  Only clear the task if it's not a
+        // max-level render (to preserve responsiveness)
         if let Some(prev) = &self.task {
-            if prev.settings != settings {
+            if prev.settings != settings
+                && (prev.done || prev.level != self.start_level)
+            {
                 self.task = None;
                 self.pending = None;
             }
@@ -135,7 +141,9 @@ impl ViewData {
 
 /// State representing an in-progress render
 pub struct RenderTask {
-    pub settings: RenderSettings,
+    settings: RenderSettings,
+    level: usize,
+    done: bool,
     cancel: fidget::render::CancelToken,
 }
 
@@ -207,7 +215,12 @@ impl RenderTask {
                 notify();
             }
         });
-        Self { settings, cancel }
+        Self {
+            settings,
+            cancel,
+            level,
+            done: false,
+        }
     }
 
     pub fn run(
@@ -224,7 +237,6 @@ impl RenderTask {
                     (s.size.width() / scale).max(1),
                     (s.size.height() / scale).max(1),
                 );
-                let start = std::time::Instant::now();
                 let cfg = fidget::render::ImageRenderConfig {
                     image_size,
                     view: s.view,
