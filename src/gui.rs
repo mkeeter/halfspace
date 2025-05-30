@@ -149,36 +149,27 @@ impl<'a> WorldView<'a> {
         };
 
         // Pop-up box to change render settings
-        let response = ui.button(CAMERA);
-        let popup_id = ui.make_persistent_id(index.id().with("view_editor"));
-        if response.clicked() {
-            ui.memory_mut(|mem| mem.toggle_popup(popup_id));
-        }
-        let below = egui::AboveOrBelow::Below;
-        let close_on_click_outside =
-            egui::popup::PopupCloseBehavior::CloseOnClickOutside;
         let mut tag = ViewCanvasDiscriminants::from(&entry.canvas);
-        egui::popup::popup_above_or_below_widget(
-            ui,
-            popup_id,
-            &response,
-            below,
-            close_on_click_outside,
-            |ui| {
-                egui::ComboBox::from_label("View mode").show_ui(ui, |ui| {
-                    ui.selectable_value(
-                        &mut tag,
-                        ViewCanvasDiscriminants::Bitfield,
-                        "2D bitfield",
-                    );
-                    ui.selectable_value(
-                        &mut tag,
-                        ViewCanvasDiscriminants::SdfApprox,
-                        "2D SDF (approx)",
-                    );
-                });
-            },
-        );
+        let mut reset_camera = false;
+        egui::ComboBox::from_id_salt(index.id().with("view_editor"))
+            .selected_text(CAMERA)
+            .width(40.0)
+            .show_ui(ui, |ui| {
+                ui.selectable_value(
+                    &mut tag,
+                    ViewCanvasDiscriminants::Bitfield,
+                    "2D bitfield",
+                );
+                ui.selectable_value(
+                    &mut tag,
+                    ViewCanvasDiscriminants::SdfApprox,
+                    "2D SDF (approx)",
+                );
+                ui.separator();
+                if ui.button("Reset camera").clicked() {
+                    reset_camera = true;
+                }
+            });
         match (tag, &entry.canvas) {
             (ViewCanvasDiscriminants::SdfApprox, ViewCanvas::Bitfield(c)) => {
                 entry.canvas = ViewCanvas::SdfApprox(*c);
@@ -189,6 +180,14 @@ impl<'a> WorldView<'a> {
                 render_changed = true;
             }
             _ => (),
+        }
+        if reset_camera {
+            match &mut entry.canvas {
+                ViewCanvas::Bitfield(c) | ViewCanvas::SdfApprox(c) => {
+                    *c = fidget::gui::Canvas2::new(c.image_size());
+                    render_changed = true;
+                }
+            }
         }
         if render_changed {
             ui.ctx().request_repaint();
