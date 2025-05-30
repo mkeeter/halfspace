@@ -2,7 +2,10 @@
 use std::collections::HashMap;
 
 use crate::{
-    view::{RenderSettings, ViewData},
+    view::{
+        RenderMode, RenderSettings, RenderSettings2D, ViewCanvas,
+        ViewCanvasDiscriminants, ViewData,
+    },
     world::{Block, BlockIndex, IoValue, NameError, World},
     BlockResponse, Message,
 };
@@ -87,18 +90,26 @@ impl<'a> WorldView<'a> {
             .entry(index)
             .or_insert_with(|| ViewData::new(size));
         let ctx = ui.ctx().clone();
-        let view = entry.canvas.view();
-
+        let view;
+        let mode = match &entry.canvas {
+            ViewCanvas::SdfApprox(c) => {
+                view = c.view();
+                RenderMode::SdfApprox(RenderSettings2D { view, size })
+            }
+            ViewCanvas::Bitfield(c) => {
+                view = c.view();
+                RenderMode::Bitfield(RenderSettings2D { view, size })
+            }
+        };
         let settings = RenderSettings {
             tree: block_view.tree.clone(),
-            view,
-            size,
+            mode,
         };
+
         entry.check(index, settings, self.tx.clone(), move || {
             ctx.request_repaint()
         });
 
-        // XXX Expensive copying in the main thread here!
         let Some(image) = entry.image() else {
             self.view_fallback_ui(ui, "render in progress...");
             return;
@@ -128,11 +139,57 @@ impl<'a> WorldView<'a> {
                 drag,
             }
         });
-        let render_changed = entry.canvas.interact(
-            size,
-            cursor_state,
-            ui.ctx().input(|i| i.smooth_scroll_delta.y),
+        // Send mouse interactions to the canvas
+        let mut render_changed = match &mut entry.canvas {
+            ViewCanvas::SdfApprox(c) | ViewCanvas::Bitfield(c) => c.interact(
+                size,
+                cursor_state,
+                ui.ctx().input(|i| i.smooth_scroll_delta.y),
+            ),
+        };
+
+        // Pop-up box to change render settings
+        let response = ui.button(CAMERA);
+        let popup_id = ui.make_persistent_id(index.id().with("view_editor"));
+        if response.clicked() {
+            ui.memory_mut(|mem| mem.toggle_popup(popup_id));
+        }
+        let below = egui::AboveOrBelow::Below;
+        let close_on_click_outside =
+            egui::popup::PopupCloseBehavior::CloseOnClickOutside;
+        let mut tag = ViewCanvasDiscriminants::from(&entry.canvas);
+        egui::popup::popup_above_or_below_widget(
+            ui,
+            popup_id,
+            &response,
+            below,
+            close_on_click_outside,
+            |ui| {
+                egui::ComboBox::from_label("View mode").show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut tag,
+                        ViewCanvasDiscriminants::Bitfield,
+                        "2D bitfield",
+                    );
+                    ui.selectable_value(
+                        &mut tag,
+                        ViewCanvasDiscriminants::SdfApprox,
+                        "2D SDF (approx)",
+                    );
+                });
+            },
         );
+        match (tag, &entry.canvas) {
+            (ViewCanvasDiscriminants::SdfApprox, ViewCanvas::Bitfield(c)) => {
+                entry.canvas = ViewCanvas::SdfApprox(*c);
+                render_changed = true;
+            }
+            (ViewCanvasDiscriminants::Bitfield, ViewCanvas::SdfApprox(c)) => {
+                entry.canvas = ViewCanvas::Bitfield(*c);
+                render_changed = true;
+            }
+            _ => (),
+        }
         if render_changed {
             ui.ctx().request_repaint();
         }
@@ -443,3 +500,4 @@ const TRASH: &str = "\u{f48e}";
 const PENCIL: &str = "\u{f03eb}";
 const WARN: &str = "\u{f071}";
 const EYE: &str = "\u{f441}";
+const CAMERA: &str = "\u{f03d}";

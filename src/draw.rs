@@ -1,5 +1,5 @@
 //! GPU-based image drawing in an `egui` context
-use crate::view::ViewImage;
+use crate::view::{RenderMode, ViewImage};
 use eframe::{
     egui,
     egui_wgpu::{self, wgpu},
@@ -265,10 +265,11 @@ impl egui_wgpu::CallbackTrait for WgpuPainter {
         // Borrow global resources
         let gr: &mut WgpuResources = resources.get_mut().unwrap();
 
-        let (width, height) = (
-            self.image.settings.size.width(),
-            self.image.settings.size.height(),
-        );
+        let (width, height) = match self.image.settings.mode {
+            RenderMode::SdfApprox(s) | RenderMode::Bitfield(s) => {
+                (s.size.width(), s.size.height())
+            }
+        };
         let texture_size = wgpu::Extent3d {
             width,
             height,
@@ -324,22 +325,25 @@ impl egui_wgpu::CallbackTrait for WgpuPainter {
         });
 
         // Create the uniform
-        let m = self.view.world_to_model().try_inverse().unwrap()
-            * self.image.settings.view.world_to_model()
-            * nalgebra::Scale2::new(
-                self.image.settings.size.width() as f32
-                    / self.size.width() as f32,
-                self.image.settings.size.height() as f32
-                    / self.size.height() as f32,
-            )
-            .to_homogeneous();
-        #[rustfmt::skip]
-        let transform = nalgebra::Matrix4::new(
-            m[(0, 0)], m[(0, 1)], 0.0, m[(0, 2)],
-            m[(1, 0)], m[(1, 1)], 0.0, m[(1, 2)],
-            0.0,         0.0,         1.0, 0.0,
-            0.0,         0.0,         0.0, 1.0,
-        );
+        let transform = match self.image.settings.mode {
+            RenderMode::SdfApprox(s) | RenderMode::Bitfield(s) => {
+                let m = self.view.world_to_model().try_inverse().unwrap()
+                    * s.view.world_to_model()
+                    * nalgebra::Scale2::new(
+                        s.size.width() as f32 / self.size.width() as f32,
+                        s.size.height() as f32 / self.size.height() as f32,
+                    )
+                    .to_homogeneous();
+                #[rustfmt::skip]
+                let transform = nalgebra::Matrix4::new(
+                    m[(0, 0)], m[(0, 1)], 0.0, m[(0, 2)],
+                    m[(1, 0)], m[(1, 1)], 0.0, m[(1, 2)],
+                    0.0,         0.0,         1.0, 0.0,
+                    0.0,         0.0,         0.0, 1.0,
+                );
+                transform
+            }
+        };
         let uniforms = Uniforms {
             transform: transform.into(),
         };

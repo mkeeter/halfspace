@@ -3,12 +3,19 @@ use crate::{BlockIndex, Message};
 /// State associated with a given view in the GUI
 pub struct ViewData {
     pub task: Option<RenderTask>,
-    pub canvas: fidget::gui::Canvas2,
+    pub canvas: ViewCanvas,
     image: Option<ViewImage>,
     generation: u64,
 }
 
-/// Image to be rendered
+/// State associated with the canvas
+#[derive(strum::EnumDiscriminants)]
+pub enum ViewCanvas {
+    SdfApprox(fidget::gui::Canvas2),
+    Bitfield(fidget::gui::Canvas2),
+}
+
+/// Rendered image, along with the settings that generated it
 #[derive(Clone)]
 pub struct ViewImage {
     pub data: Vec<[u8; 4]>,
@@ -19,7 +26,9 @@ impl ViewData {
     pub fn new(image_size: fidget::render::ImageSize) -> Self {
         Self {
             task: None,
-            canvas: fidget::gui::Canvas2::new(image_size),
+            canvas: ViewCanvas::SdfApprox(fidget::gui::Canvas2::new(
+                image_size,
+            )),
             image: None,
             generation: 0,
         }
@@ -81,6 +90,18 @@ impl Drop for RenderTask {
 #[derive(Clone)]
 pub struct RenderSettings {
     pub tree: fidget::context::Tree,
+    pub mode: RenderMode,
+}
+
+/// Image rendering mode (tied to a canvas, so without a tree)
+#[derive(Copy, Clone, PartialEq)]
+pub enum RenderMode {
+    SdfApprox(RenderSettings2D),
+    Bitfield(RenderSettings2D),
+}
+
+#[derive(Copy, Clone, PartialEq)]
+pub struct RenderSettings2D {
     pub view: fidget::render::View2,
     pub size: fidget::render::ImageSize,
 }
@@ -89,9 +110,12 @@ impl std::cmp::PartialEq for RenderSettings {
     fn eq(&self, other: &Self) -> bool {
         // XXX this is expensive tree deduplication!
         let mut ctx = fidget::Context::new();
-        self.size == other.size
-            && self.view.world_to_model() == other.view.world_to_model()
-            && ctx.import(&self.tree) == ctx.import(&other.tree)
+        let mode_matches = match (self.mode, other.mode) {
+            (RenderMode::SdfApprox(a), RenderMode::SdfApprox(b)) => a == b,
+            (RenderMode::Bitfield(a), RenderMode::Bitfield(b)) => a == b,
+            _ => false,
+        };
+        mode_matches && ctx.import(&self.tree) == ctx.import(&other.tree)
     }
 }
 
@@ -107,22 +131,8 @@ impl RenderTask {
         let cancel = fidget::render::CancelToken::new();
         let cancel_ = cancel.clone();
         let settings_ = settings.clone();
-        let tree = settings.tree.clone();
-        let image_size = settings.size;
-        let view = settings.view;
         rayon::spawn(move || {
-            let shape = fidget::vm::VmShape::from(tree);
-            let cfg = fidget::render::ImageRenderConfig {
-                image_size,
-                cancel: cancel_,
-                view,
-                ..Default::default()
-            };
-            if let Some(image) =
-                cfg.run::<_, fidget::render::SdfRenderMode>(shape)
-            {
-                let (data, _size) =
-                    image.map(|&[r, g, b]| [r, g, b, u8::MAX]).take();
+            if let Some(data) = Self::run(&settings_, cancel_) {
                 let _ = tx.send(Message::RenderView {
                     block,
                     generation,
@@ -133,5 +143,37 @@ impl RenderTask {
             }
         });
         Self { settings, cancel }
+    }
+
+    pub fn run(
+        settings: &RenderSettings,
+        cancel: fidget::render::CancelToken,
+    ) -> Option<Vec<[u8; 4]>> {
+        let data = match settings.mode {
+            RenderMode::Bitfield(s) | RenderMode::SdfApprox(s) => {
+                let cfg = fidget::render::ImageRenderConfig {
+                    image_size: s.size,
+                    view: s.view,
+                    cancel,
+                    ..Default::default()
+                };
+                let shape = fidget::vm::VmShape::from(settings.tree.clone());
+                let image = match settings.mode {
+                    RenderMode::Bitfield(..) => {
+                        let image =
+                            cfg.run::<_, fidget::render::BitRenderMode>(shape)?;
+                        image.map(|&b| if b { [u8::MAX; 4] } else { [0; 4] })
+                    }
+                    RenderMode::SdfApprox(..) => {
+                        let image =
+                            cfg.run::<_, fidget::render::SdfRenderMode>(shape)?;
+                        image.map(|&[r, g, b]| [r, g, b, u8::MAX])
+                    }
+                };
+                let (data, _size) = image.take();
+                data
+            }
+        };
+        Some(data)
     }
 }
