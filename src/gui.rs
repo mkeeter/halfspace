@@ -110,11 +110,10 @@ impl<'a> WorldView<'a> {
             mode,
         };
 
-        entry.check(index, settings, self.tx.clone(), move || {
-            ctx.request_repaint()
-        });
+        let notify = move || ctx.request_repaint();
 
-        let Some(image) = entry.image() else {
+        let Some(image) = entry.image(index, settings, self.tx.clone(), notify)
+        else {
             self.view_fallback_ui(ui, "render in progress...");
             return;
         };

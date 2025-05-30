@@ -268,7 +268,10 @@ impl egui_wgpu::CallbackTrait for WgpuPainter {
         let (width, height) = match self.image.settings.mode {
             RenderMode::SdfApprox(s)
             | RenderMode::SdfExact(s)
-            | RenderMode::Bitfield(s) => (s.size.width(), s.size.height()),
+            | RenderMode::Bitfield(s) => (
+                (s.size.width() / (1 << self.image.level)).max(1),
+                (s.size.height() / (1 << self.image.level)).max(1),
+            ),
         };
         let texture_size = wgpu::Extent3d {
             width,

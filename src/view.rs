@@ -1,14 +1,30 @@
 use crate::{BlockIndex, Message};
 
 /// State associated with a given view in the GUI
+///
+/// Each block may have 0 or 1 views.  Views are persistent even when closed;
+/// they're deleted when their block is deleted.
 pub struct ViewData {
+    /// Render task, running in a thread pool
     pub task: Option<RenderTask>,
+
+    /// Interaction canvas
     pub canvas: ViewCanvas,
+
+    /// Current image
     image: Option<ViewImage>,
+
+    /// Initial render depth, used to render faster
+    start_level: usize,
+
+    /// Pending render task, with a new start level
+    pending: Option<usize>,
+
+    /// Monotonic counter to identify the most recent task
     generation: u64,
 }
 
-/// State associated with the canvas
+/// State associated with the canvas (for interactions)
 #[derive(strum::EnumDiscriminants)]
 #[strum_discriminants(name(ViewCanvasType))]
 pub enum ViewCanvas {
@@ -21,6 +37,7 @@ pub enum ViewCanvas {
 #[derive(Clone)]
 pub struct ViewImage {
     pub data: Vec<[u8; 4]>,
+    pub level: usize,
     pub settings: RenderSettings,
 }
 
@@ -33,34 +50,61 @@ impl ViewData {
             )),
             image: None,
             generation: 0,
+            start_level: 0,
+            pending: None,
         }
     }
 
+    /// Callback when a render task is complete
     pub fn update(
         &mut self,
         generation: u64,
+        level: usize,
         data: Vec<[u8; 4]>,
         settings: RenderSettings,
+        render_time: std::time::Duration,
     ) {
+        const TARGET_RENDER_TIME: std::time::Duration =
+            std::time::Duration::from_millis(16);
+        const MAX_LEVEL: usize = 10;
+
+        // Adjust self.start_level to hit a render time target
+        if render_time > TARGET_RENDER_TIME && self.start_level < MAX_LEVEL {
+            self.start_level += 1;
+        } else if render_time < TARGET_RENDER_TIME * 3 / 4
+            && level == self.start_level
+        {
+            self.start_level -= 1;
+        }
         if generation == self.generation {
-            self.image = Some(ViewImage { data, settings });
+            self.image = Some(ViewImage {
+                data,
+                settings,
+                level,
+            });
+            if let Some(next) = level.checked_sub(1) {
+                self.pending = Some(next);
+            }
         }
     }
 
-    pub fn image(&self) -> Option<&ViewImage> {
-        self.image.as_ref()
-    }
-
-    pub fn check<F: FnOnce() + Send + Sync + 'static>(
+    /// Gets the image, kicking off new render jobs if needed
+    ///
+    /// This should be called in the main GUI loop, or whenever `notify` has
+    /// pinged the main loop.
+    pub fn image<F: FnOnce() + Send + Sync + 'static>(
         &mut self,
         block: BlockIndex,
         settings: RenderSettings,
         tx: std::sync::mpsc::Sender<Message>,
         notify: F,
-    ) {
+    ) -> Option<&ViewImage> {
+        // If the image settings have changed, then clear `task` (which causes
+        // us to reinitialize it below).
         if let Some(prev) = &self.task {
             if prev.settings != settings {
                 self.task = None;
+                self.pending = None;
             }
         }
         if self.task.is_none() {
@@ -69,10 +113,23 @@ impl ViewData {
                 block,
                 self.generation,
                 settings,
+                self.start_level,
+                tx,
+                notify,
+            ));
+        } else if let Some(next) = self.pending.take() {
+            self.generation += 1;
+            self.task = Some(RenderTask::spawn(
+                block,
+                self.generation,
+                settings,
+                next,
                 tx,
                 notify,
             ));
         }
+
+        self.image.as_ref()
     }
 }
 
@@ -111,7 +168,7 @@ pub struct RenderSettings2D {
 
 impl std::cmp::PartialEq for RenderSettings {
     fn eq(&self, other: &Self) -> bool {
-        // XXX this is expensive tree deduplication!
+        // XXX this does expensive tree deduplication!
         let mut ctx = fidget::Context::new();
         let mode_matches = match (self.mode, other.mode) {
             (RenderMode::SdfApprox(a), RenderMode::SdfApprox(b)) => a == b,
@@ -129,18 +186,22 @@ impl RenderTask {
         block: BlockIndex,
         generation: u64,
         settings: RenderSettings,
+        level: usize,
         tx: std::sync::mpsc::Sender<Message>,
         notify: F,
     ) -> Self {
         let cancel = fidget::render::CancelToken::new();
         let cancel_ = cancel.clone();
         let settings_ = settings.clone();
+        let start_time = std::time::Instant::now();
         rayon::spawn(move || {
-            if let Some(data) = Self::run(&settings_, cancel_) {
+            if let Some(data) = Self::run(&settings_, level, cancel_) {
                 let _ = tx.send(Message::RenderView {
                     block,
                     generation,
                     settings: settings_,
+                    level,
+                    start_time,
                     data,
                 });
                 notify();
@@ -151,14 +212,21 @@ impl RenderTask {
 
     pub fn run(
         settings: &RenderSettings,
+        level: usize,
         cancel: fidget::render::CancelToken,
     ) -> Option<Vec<[u8; 4]>> {
+        let scale = 1 << level;
         let data = match settings.mode {
             RenderMode::Bitfield(s)
             | RenderMode::SdfApprox(s)
             | RenderMode::SdfExact(s) => {
+                let image_size = fidget::render::ImageSize::new(
+                    (s.size.width() / scale).max(1),
+                    (s.size.height() / scale).max(1),
+                );
+                let start = std::time::Instant::now();
                 let cfg = fidget::render::ImageRenderConfig {
-                    image_size: s.size,
+                    image_size,
                     view: s.view,
                     cancel,
                     ..Default::default()
