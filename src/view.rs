@@ -10,8 +10,10 @@ pub struct ViewData {
 
 /// State associated with the canvas
 #[derive(strum::EnumDiscriminants)]
+#[strum_discriminants(name(ViewCanvasType))]
 pub enum ViewCanvas {
     SdfApprox(fidget::gui::Canvas2),
+    SdfExact(fidget::gui::Canvas2),
     Bitfield(fidget::gui::Canvas2),
 }
 
@@ -97,6 +99,7 @@ pub struct RenderSettings {
 #[derive(Copy, Clone, PartialEq)]
 pub enum RenderMode {
     SdfApprox(RenderSettings2D),
+    SdfExact(RenderSettings2D),
     Bitfield(RenderSettings2D),
 }
 
@@ -112,6 +115,7 @@ impl std::cmp::PartialEq for RenderSettings {
         let mut ctx = fidget::Context::new();
         let mode_matches = match (self.mode, other.mode) {
             (RenderMode::SdfApprox(a), RenderMode::SdfApprox(b)) => a == b,
+            (RenderMode::SdfExact(a), RenderMode::SdfExact(b)) => a == b,
             (RenderMode::Bitfield(a), RenderMode::Bitfield(b)) => a == b,
             _ => false,
         };
@@ -150,7 +154,9 @@ impl RenderTask {
         cancel: fidget::render::CancelToken,
     ) -> Option<Vec<[u8; 4]>> {
         let data = match settings.mode {
-            RenderMode::Bitfield(s) | RenderMode::SdfApprox(s) => {
+            RenderMode::Bitfield(s)
+            | RenderMode::SdfApprox(s)
+            | RenderMode::SdfExact(s) => {
                 let cfg = fidget::render::ImageRenderConfig {
                     image_size: s.size,
                     view: s.view,
@@ -167,6 +173,13 @@ impl RenderTask {
                     RenderMode::SdfApprox(..) => {
                         let image =
                             cfg.run::<_, fidget::render::SdfRenderMode>(shape)?;
+                        image.map(|&[r, g, b]| [r, g, b, u8::MAX])
+                    }
+                    RenderMode::SdfExact(..) => {
+                        let image = cfg
+                            .run::<_, fidget::render::SdfPixelRenderMode>(
+                                shape,
+                            )?;
                         image.map(|&[r, g, b]| [r, g, b, u8::MAX])
                     }
                 };

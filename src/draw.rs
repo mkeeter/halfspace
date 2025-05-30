@@ -266,9 +266,9 @@ impl egui_wgpu::CallbackTrait for WgpuPainter {
         let gr: &mut WgpuResources = resources.get_mut().unwrap();
 
         let (width, height) = match self.image.settings.mode {
-            RenderMode::SdfApprox(s) | RenderMode::Bitfield(s) => {
-                (s.size.width(), s.size.height())
-            }
+            RenderMode::SdfApprox(s)
+            | RenderMode::SdfExact(s)
+            | RenderMode::Bitfield(s) => (s.size.width(), s.size.height()),
         };
         let texture_size = wgpu::Extent3d {
             width,
@@ -326,7 +326,9 @@ impl egui_wgpu::CallbackTrait for WgpuPainter {
 
         // Create the uniform
         let transform = match self.image.settings.mode {
-            RenderMode::SdfApprox(s) | RenderMode::Bitfield(s) => {
+            RenderMode::SdfApprox(s)
+            | RenderMode::SdfExact(s)
+            | RenderMode::Bitfield(s) => {
                 let m = self.view.world_to_model().try_inverse().unwrap()
                     * s.view.world_to_model()
                     * nalgebra::Scale2::new(

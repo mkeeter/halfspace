@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use crate::{
     view::{
         RenderMode, RenderSettings, RenderSettings2D, ViewCanvas,
-        ViewCanvasDiscriminants, ViewData,
+        ViewCanvasType, ViewData,
     },
     world::{Block, BlockIndex, IoValue, NameError, World},
     BlockResponse, Message,
@@ -96,6 +96,10 @@ impl<'a> WorldView<'a> {
                 view = c.view();
                 RenderMode::SdfApprox(RenderSettings2D { view, size })
             }
+            ViewCanvas::SdfExact(c) => {
+                view = c.view();
+                RenderMode::SdfExact(RenderSettings2D { view, size })
+            }
             ViewCanvas::Bitfield(c) => {
                 view = c.view();
                 RenderMode::Bitfield(RenderSettings2D { view, size })
@@ -141,7 +145,9 @@ impl<'a> WorldView<'a> {
         });
         // Send mouse interactions to the canvas
         let mut render_changed = match &mut entry.canvas {
-            ViewCanvas::SdfApprox(c) | ViewCanvas::Bitfield(c) => c.interact(
+            ViewCanvas::SdfApprox(c)
+            | ViewCanvas::SdfExact(c)
+            | ViewCanvas::Bitfield(c) => c.interact(
                 size,
                 cursor_state,
                 ui.ctx().input(|i| i.smooth_scroll_delta.y),
@@ -149,41 +155,59 @@ impl<'a> WorldView<'a> {
         };
 
         // Pop-up box to change render settings
-        let mut tag = ViewCanvasDiscriminants::from(&entry.canvas);
+        let mut tag = ViewCanvasType::from(&entry.canvas);
         let mut reset_camera = false;
         egui::ComboBox::from_id_salt(index.id().with("view_editor"))
             .selected_text(CAMERA)
-            .width(40.0)
+            .width(0.0)
             .show_ui(ui, |ui| {
                 ui.selectable_value(
                     &mut tag,
-                    ViewCanvasDiscriminants::Bitfield,
+                    ViewCanvasType::Bitfield,
                     "2D bitfield",
                 );
                 ui.selectable_value(
                     &mut tag,
-                    ViewCanvasDiscriminants::SdfApprox,
+                    ViewCanvasType::SdfApprox,
                     "2D SDF (approx)",
+                );
+                ui.selectable_value(
+                    &mut tag,
+                    ViewCanvasType::SdfExact,
+                    "2D SDF (exact)",
                 );
                 ui.separator();
                 if ui.button("Reset camera").clicked() {
                     reset_camera = true;
                 }
             });
-        match (tag, &entry.canvas) {
-            (ViewCanvasDiscriminants::SdfApprox, ViewCanvas::Bitfield(c)) => {
-                entry.canvas = ViewCanvas::SdfApprox(*c);
-                render_changed = true;
+        // If we've edited the canvas tag, then update it in the entry
+        if tag != (&entry.canvas).into() {
+            render_changed = true;
+            match (tag, &entry.canvas) {
+                // If both the original and new canvas are 2D, then steal the
+                // GUI canvas from the previous canvas to reuse it.
+                (
+                    ViewCanvasType::SdfExact
+                    | ViewCanvasType::SdfApprox
+                    | ViewCanvasType::Bitfield,
+                    ViewCanvas::Bitfield(c)
+                    | ViewCanvas::SdfExact(c)
+                    | ViewCanvas::SdfApprox(c),
+                ) => {
+                    entry.canvas = match tag {
+                        ViewCanvasType::SdfExact => ViewCanvas::SdfExact(*c),
+                        ViewCanvasType::SdfApprox => ViewCanvas::SdfApprox(*c),
+                        ViewCanvasType::Bitfield => ViewCanvas::Bitfield(*c),
+                    }
+                }
             }
-            (ViewCanvasDiscriminants::Bitfield, ViewCanvas::SdfApprox(c)) => {
-                entry.canvas = ViewCanvas::Bitfield(*c);
-                render_changed = true;
-            }
-            _ => (),
         }
         if reset_camera {
             match &mut entry.canvas {
-                ViewCanvas::Bitfield(c) | ViewCanvas::SdfApprox(c) => {
+                ViewCanvas::Bitfield(c)
+                | ViewCanvas::SdfApprox(c)
+                | ViewCanvas::SdfExact(c) => {
                     *c = fidget::gui::Canvas2::new(c.image_size());
                     render_changed = true;
                 }

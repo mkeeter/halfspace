@@ -324,6 +324,12 @@ impl World {
         // Inputs are evaluated in a separate context with a scope that's
         // accumulated from previous block outputs.
         let input_scope = Arc::new(RwLock::new(rhai::Scope::new()));
+        {
+            let mut i = input_scope.write().unwrap();
+            i.push_constant("x", fidget::context::Tree::x());
+            i.push_constant("y", fidget::context::Tree::y());
+            i.push_constant("z", fidget::context::Tree::z());
+        }
 
         for i in &self.order {
             let block = &mut self.blocks.get_mut(i).unwrap();
@@ -416,6 +422,9 @@ impl World {
                 }
             };
             let mut scope = rhai::Scope::new();
+            scope.push_constant("x", fidget::context::Tree::x());
+            scope.push_constant("y", fidget::context::Tree::y());
+            scope.push_constant("z", fidget::context::Tree::z());
             let r =
                 engine.eval_ast_with_scope::<rhai::Dynamic>(&mut scope, &ast);
 
