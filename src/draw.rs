@@ -329,17 +329,28 @@ impl egui_wgpu::CallbackTrait for WgpuPainter {
             RenderMode::SdfApprox(s)
             | RenderMode::SdfExact(s)
             | RenderMode::Bitfield(s) => {
-                let m = self.view.world_to_model().try_inverse().unwrap()
-                    * s.view.world_to_model()
-                    * nalgebra::Scale2::new(
-                        s.size.width() as f32 / self.size.width() as f32,
-                        s.size.height() as f32 / self.size.height() as f32,
-                    )
-                    .to_homogeneous();
+                // don't blame me, I just twiddled the matrices until things
+                // looked right
+                let aspect_ratio = |size: fidget::render::ImageSize| {
+                    let width = size.width() as f32;
+                    let height = size.height() as f32;
+                    if width > height {
+                        nalgebra::Scale2::new(height / width, 1.0)
+                    } else {
+                        nalgebra::Scale2::new(1.0, width / height)
+                    }
+                };
+                let prev_aspect_ratio = aspect_ratio(s.size);
+                let curr_aspect_ratio = aspect_ratio(self.size);
+                let m =
+                    prev_aspect_ratio.to_homogeneous().try_inverse().unwrap()
+                        * curr_aspect_ratio.to_homogeneous()
+                        * self.view.world_to_model().try_inverse().unwrap()
+                        * s.view.world_to_model();
                 #[rustfmt::skip]
                 let transform = nalgebra::Matrix4::new(
-                    m[(0, 0)], m[(0, 1)], 0.0, m[(0, 2)],
-                    m[(1, 0)], m[(1, 1)], 0.0, m[(1, 2)],
+                    m[(0, 0)], m[(0, 1)], 0.0, m[(0, 2)] * curr_aspect_ratio.x,
+                    m[(1, 0)], m[(1, 1)], 0.0, m[(1, 2)] * curr_aspect_ratio.y,
                     0.0,         0.0,         1.0, 0.0,
                     0.0,         0.0,         0.0, 1.0,
                 );
