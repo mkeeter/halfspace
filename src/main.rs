@@ -111,7 +111,17 @@ impl App {
 }
 
 impl eframe::App for App {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        let wgpu_state = frame.wgpu_render_state().unwrap();
+        if let Some(r) = wgpu_state
+            .renderer
+            .write()
+            .callback_resources
+            .get_mut::<draw::WgpuResources>()
+        {
+            r.reset();
+        }
+
         // Receive new data from the worker pool
         while let Ok(m) = self.rx.try_recv() {
             match m {

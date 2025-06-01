@@ -31,6 +31,7 @@ pub enum ViewCanvas {
     SdfApprox(fidget::gui::Canvas2),
     SdfExact(fidget::gui::Canvas2),
     Bitfield(fidget::gui::Canvas2),
+    Heightmap(fidget::gui::Canvas3),
 }
 
 /// Rendered image, along with the settings that generated it
@@ -170,12 +171,19 @@ pub enum RenderMode {
     SdfApprox(RenderSettings2D),
     SdfExact(RenderSettings2D),
     Bitfield(RenderSettings2D),
+    Heightmap(RenderSettings3D),
 }
 
 #[derive(Copy, Clone, PartialEq)]
 pub struct RenderSettings2D {
     pub view: fidget::render::View2,
     pub size: fidget::render::ImageSize,
+}
+
+#[derive(Copy, Clone, PartialEq)]
+pub struct RenderSettings3D {
+    pub view: fidget::render::View3,
+    pub size: fidget::render::VoxelSize,
 }
 
 impl std::cmp::PartialEq for RenderSettings {
@@ -266,6 +274,43 @@ impl RenderTask {
                             )?;
                         image.map(|&[r, g, b]| [r, g, b, u8::MAX])
                     }
+                    RenderMode::Heightmap(..) => {
+                        unreachable!()
+                    }
+                };
+                let (data, _size) = image.take();
+                data
+            }
+            RenderMode::Heightmap(s) => {
+                let image_size = fidget::render::VoxelSize::new(
+                    (s.size.width() / scale).max(1),
+                    (s.size.height() / scale).max(1),
+                    (s.size.depth() / scale).max(1),
+                );
+                let cfg = fidget::render::VoxelRenderConfig {
+                    image_size,
+                    view: s.view,
+                    cancel,
+                    ..Default::default()
+                };
+                let shape = fidget::vm::VmShape::from(settings.tree.clone());
+                let image = match settings.mode {
+                    RenderMode::Heightmap(..) => {
+                        let image = cfg.run(shape)?;
+                        image.map(|v| {
+                            if v.depth > 0 {
+                                let d = (v.depth as usize * 255
+                                    / image_size.depth() as usize)
+                                    as u8;
+                                [d, d, d, 255]
+                            } else {
+                                [0; 4]
+                            }
+                        })
+                    }
+                    RenderMode::SdfExact(_)
+                    | RenderMode::SdfApprox(_)
+                    | RenderMode::Bitfield(_) => unreachable!(),
                 };
                 let (data, _size) = image.take();
                 data
