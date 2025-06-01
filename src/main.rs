@@ -177,7 +177,6 @@ impl eframe::App for App {
                 let mut bw = gui::WorldView {
                     world: &mut self.data,
                     syntax: &self.syntax,
-                    changed: &mut changed,
                     views: &mut self.views,
                     tx: &self.tx,
                     out: &mut out,
@@ -188,13 +187,21 @@ impl eframe::App for App {
                     .show_leaf_close_all_buttons(false)
                     .show_inside(ui, &mut bw);
                 for (block, flags) in out {
-                    if flags.contains(ViewResponse::FOCUS_ERR) {
-                        let tab = gui::Tab::script(block);
-                        let tab_location = self.tree.find_tab(&tab);
-                        if let Some(tab_location) = tab_location {
-                            self.tree.set_active_tab(tab_location)
-                        } else {
-                            self.tree.push_to_focused_leaf(tab);
+                    for f in flags.iter() {
+                        match f {
+                            ViewResponse::FOCUS_ERR => {
+                                let tab = gui::Tab::script(block);
+                                let tab_location = self.tree.find_tab(&tab);
+                                if let Some(tab_location) = tab_location {
+                                    self.tree.set_active_tab(tab_location)
+                                } else {
+                                    self.tree.push_to_focused_leaf(tab);
+                                }
+                            }
+                            ViewResponse::CHANGED => {
+                                changed = true;
+                            }
+                            _ => panic!("invalid flag"),
                         }
                     }
                 }
@@ -352,7 +359,9 @@ bitflags::bitflags! {
     #[must_use]
     struct ViewResponse: u32 {
         /// Request to focus the edit window
-        const FOCUS_ERR    = (1 << 0);
+        const FOCUS_ERR     = (1 << 0);
+        /// The block has changed
+        const CHANGED       = (1 << 1);
     }
 }
 

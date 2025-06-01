@@ -13,7 +13,6 @@ use crate::{
 pub struct WorldView<'a> {
     pub world: &'a mut World,
     pub syntax: &'a egui_extras::syntax_highlighting::SyntectSettings,
-    pub changed: &'a mut bool,
     pub views: &'a mut HashMap<BlockIndex, ViewData>,
     pub out: &'a mut Vec<(BlockIndex, ViewResponse)>,
     pub tx: &'a std::sync::mpsc::Sender<Message>,
@@ -67,14 +66,12 @@ impl<'a> egui_dock::TabViewer for WorldView<'a> {
 
     /// Draw a block as as editable text pane
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Tab) {
-        match tab.mode {
+        let r = match tab.mode {
             TabMode::Script => self.script_ui(ui, tab.index),
-            TabMode::View => {
-                let r = self.view_ui(ui, tab.index);
-                if !r.is_empty() {
-                    self.out.push((tab.index, r))
-                }
-            }
+            TabMode::View => self.view_ui(ui, tab.index),
+        };
+        if !r.is_empty() {
+            self.out.push((tab.index, r))
         }
     }
 }
@@ -309,8 +306,13 @@ impl<'a> WorldView<'a> {
         painter.galley(text_corner, layout, egui::Color32::BLACK);
     }
 
-    fn script_ui(&mut self, ui: &mut egui::Ui, index: BlockIndex) {
+    fn script_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        index: BlockIndex,
+    ) -> ViewResponse {
         let block = &mut self.world[index];
+        let mut out = ViewResponse::empty();
         let theme =
             egui_extras::syntax_highlighting::CodeTheme::from_style(ui.style());
         let mut layouter = |ui: &egui::Ui, buf: &str, wrap_width: f32| {
@@ -335,7 +337,9 @@ impl<'a> WorldView<'a> {
                 .desired_width(f32::INFINITY)
                 .layouter(&mut layouter),
         );
-        *self.changed |= r.changed();
+        if r.changed() {
+            out |= ViewResponse::CHANGED;
+        }
         if let Some(state) = &mut block.state {
             if !state.stdout.is_empty() {
                 ui.label("Output");
@@ -364,6 +368,7 @@ impl<'a> WorldView<'a> {
                 });
             }
         }
+        out
     }
 }
 
