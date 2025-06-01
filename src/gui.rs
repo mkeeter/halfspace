@@ -7,7 +7,7 @@ use crate::{
         ViewCanvasType, ViewData,
     },
     world::{Block, BlockIndex, IoValue, NameError, World},
-    BlockResponse, Message,
+    BlockResponse, Message, ViewResponse,
 };
 
 pub struct WorldView<'a> {
@@ -15,6 +15,7 @@ pub struct WorldView<'a> {
     pub syntax: &'a egui_extras::syntax_highlighting::SyntectSettings,
     pub changed: &'a mut bool,
     pub views: &'a mut HashMap<BlockIndex, ViewData>,
+    pub out: &'a mut Vec<(BlockIndex, ViewResponse)>,
     pub tx: &'a std::sync::mpsc::Sender<Message>,
 }
 
@@ -68,27 +69,51 @@ impl<'a> egui_dock::TabViewer for WorldView<'a> {
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Tab) {
         match tab.mode {
             TabMode::Script => self.script_ui(ui, tab.index),
-            TabMode::View => self.view_ui(ui, tab.index),
+            TabMode::View => {
+                let r = self.view_ui(ui, tab.index);
+                if !r.is_empty() {
+                    self.out.push((tab.index, r))
+                }
+            }
         }
     }
 }
 
 impl<'a> WorldView<'a> {
-    fn view_ui(&mut self, ui: &mut egui::Ui, index: BlockIndex) {
+    fn view_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        index: BlockIndex,
+    ) -> ViewResponse {
+        // Is the block valid?
+        // Does the block have a current view?
+        // Does the view list have an entry for this block?
+        // Does that entry have a valid image?
+        //
+        // Many things to consider...
+        let mut out = ViewResponse::empty();
         let block = &self.world[index];
-        let Some(block_view) = block.get_view() else {
-            self.view_fallback_ui(ui, "block has error");
-            return;
-        };
+        let block_view = block.get_view();
         let rect = ui.clip_rect();
         let size = fidget::render::ImageSize::new(
             rect.width() as u32,
             rect.height() as u32,
         );
-        let entry = self
-            .views
-            .entry(index)
-            .or_insert_with(|| ViewData::new(size));
+        let entry = self.views.entry(index);
+        // If the block does not define a view, and there is no previous view
+        // associated with this block, then we can't do anything.
+        if block_view.is_none()
+            && matches!(entry, std::collections::hash_map::Entry::Vacant(..))
+        {
+            self.view_fallback_ui(ui, "block has errors...");
+            return out;
+        }
+
+        // At this point, either we have a block view, or we have a previous
+        // view from this block.  We'll either get the previous entry or insert
+        // a new empty one.
+        let entry = entry.or_insert_with(|| ViewData::new(size));
+
         let ctx = ui.ctx().clone();
         let view;
         let mode = match &entry.canvas {
@@ -105,22 +130,38 @@ impl<'a> WorldView<'a> {
                 RenderMode::Bitfield(RenderSettings2D { view, size })
             }
         };
-        let settings = RenderSettings {
-            tree: block_view.tree.clone(),
-            mode,
+        // If we have a block view, then use it (or fall back to the previous
+        // image, drawing it in a valid state).  Otherwise, fall back to the
+        // previous image, drawing it in an *invalid* state (with a red border).
+        let (image, valid) = if let Some(block_view) = block_view {
+            let settings = RenderSettings {
+                tree: block_view.tree.clone(),
+                mode,
+            };
+
+            let notify = move || ctx.request_repaint();
+
+            let Some(image) =
+                entry.image(index, settings, self.tx.clone(), notify)
+            else {
+                self.view_fallback_ui(ui, "render in progress...");
+                return out;
+            };
+            (image, true)
+        } else if let Some(prev_image) = entry.prev_image() {
+            (prev_image, false)
+        } else {
+            // XXX can we actually get here?
+            self.view_fallback_ui(ui, "no previous image");
+            return out;
         };
 
-        let notify = move || ctx.request_repaint();
-
-        let Some(image) = entry.image(index, settings, self.tx.clone(), notify)
-        else {
-            self.view_fallback_ui(ui, "render in progress...");
-            return;
-        };
+        // This is the magic that triggers the GPU callback
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(
             rect,
             crate::draw::WgpuPainter::new(image.clone(), size, view),
         ));
+
         let r = ui.interact(
             rect,
             index.id().with("block_view_interact"),
@@ -152,6 +193,40 @@ impl<'a> WorldView<'a> {
                 ui.ctx().input(|i| i.smooth_scroll_delta.y),
             ),
         };
+
+        if !valid {
+            ui.painter().rect_stroke(
+                rect,
+                0.0,
+                egui::Stroke {
+                    width: 4.0,
+                    color: ui.style().visuals.error_fg_color,
+                },
+                egui::StrokeKind::Inside,
+            );
+            ui.with_layout(
+                egui::Layout::right_to_left(egui::Align::TOP),
+                |ui| {
+                    let r = ui
+                        .add(
+                            egui::Label::new(
+                                egui::RichText::new(WARN)
+                                    .color(egui::Color32::WHITE)
+                                    .background_color(
+                                        ui.style().visuals.error_fg_color,
+                                    ),
+                            )
+                            .sense(egui::Sense::CLICK),
+                        )
+                        .on_hover_ui(|ui| {
+                            ui.label("script contains errors");
+                        });
+                    if r.clicked() {
+                        out |= ViewResponse::FOCUS_ERR;
+                    }
+                },
+            );
+        }
 
         // Pop-up box to change render settings
         let mut tag = ViewCanvasType::from(&entry.canvas);
@@ -215,6 +290,7 @@ impl<'a> WorldView<'a> {
         if render_changed {
             ui.ctx().request_repaint();
         }
+        out
     }
 
     /// Manually draw a backdrop indicating that the view is invalid
@@ -371,10 +447,9 @@ fn block_body(ui: &mut egui::Ui, index: BlockIndex, block: &mut Block) -> bool {
                         egui::Layout::right_to_left(egui::Align::Center),
                         |ui| {
                             if let Err(err) = &value {
-                                ui.label(
-                                    egui::RichText::new(WARN).color(
-                                        ui.style().visuals.error_fg_color,
-                                    ),
+                                ui.colored_label(
+                                    ui.style().visuals.error_fg_color,
+                                    WARN,
                                 )
                                 .on_hover_ui(
                                     |ui| {

@@ -137,6 +137,10 @@ impl ViewData {
 
         self.image.as_ref()
     }
+
+    pub fn prev_image(&self) -> Option<&ViewImage> {
+        self.image.as_ref()
+    }
 }
 
 /// State representing an in-progress render

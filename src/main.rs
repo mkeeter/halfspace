@@ -173,18 +173,31 @@ impl eframe::App for App {
                 painter.rect_filled(rect, 0.0, style.visuals.panel_fill);
                 painter.galley(text_corner, layout, egui::Color32::BLACK);
 
+                let mut out = vec![];
                 let mut bw = gui::WorldView {
                     world: &mut self.data,
                     syntax: &self.syntax,
                     changed: &mut changed,
                     views: &mut self.views,
                     tx: &self.tx,
+                    out: &mut out,
                 };
                 egui_dock::DockArea::new(&mut self.tree)
                     .style(egui_dock::Style::from_egui(ctx.style().as_ref()))
                     .show_leaf_collapse_buttons(false)
                     .show_leaf_close_all_buttons(false)
                     .show_inside(ui, &mut bw);
+                for (block, flags) in out {
+                    if flags.contains(ViewResponse::FOCUS_ERR) {
+                        let tab = gui::Tab::script(block);
+                        let tab_location = self.tree.find_tab(&tab);
+                        if let Some(tab_location) = tab_location {
+                            self.tree.set_active_tab(tab_location)
+                        } else {
+                            self.tree.push_to_focused_leaf(tab);
+                        }
+                    }
+                }
             });
         if changed {
             // Send the world to a worker thread for re-evaluation
@@ -330,6 +343,16 @@ bitflags::bitflags! {
         const FOCUS_ERR     = (1 << 3);
         /// The block has changed
         const CHANGED       = (1 << 4);
+    }
+}
+
+bitflags::bitflags! {
+    /// Represents a set of flags.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    #[must_use]
+    struct ViewResponse: u32 {
+        /// Request to focus the edit window
+        const FOCUS_ERR    = (1 << 0);
     }
 }
 
