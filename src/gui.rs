@@ -212,7 +212,11 @@ impl<'a> WorldView<'a> {
                 c.interact(
                     size,
                     cursor_state,
-                    ui.ctx().input(|i| i.smooth_scroll_delta.y),
+                    if r.hover_pos().is_some() {
+                        ui.ctx().input(|i| i.smooth_scroll_delta.y)
+                    } else {
+                        0.0
+                    },
                 )
             }
             ViewCanvas::Heightmap(c) => {
