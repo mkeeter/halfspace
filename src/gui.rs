@@ -154,6 +154,7 @@ impl<'a> WorldView<'a> {
             };
             (image, true)
         } else if let Some(prev_image) = entry.prev_image() {
+            println!("drawing previous image");
             (prev_image, false)
         } else {
             // XXX can we actually get here?
@@ -173,12 +174,20 @@ impl<'a> WorldView<'a> {
                         index,
                         image.clone(),
                         size,
-                        s.view,
+                        s.view, // XXX this is wrong
                     ),
                 ));
             }
             RenderMode::Heightmap(s) => {
-                todo!()
+                ui.painter().add(egui_wgpu::Callback::new_paint_callback(
+                    rect,
+                    crate::draw::WgpuHeightmapPainter::new(
+                        index,
+                        image.clone(),
+                        size,
+                        s.view, // XXX this is wrong
+                    ),
+                ));
             }
         }
 
@@ -186,6 +195,11 @@ impl<'a> WorldView<'a> {
             rect,
             index.id().with("block_view_interact"),
             egui::Sense::click_and_drag(),
+        );
+        println!(
+            "interacting: {:?} {:?}",
+            r.interact_pointer_pos(),
+            r.hover_pos()
         );
 
         // Send mouse interactions to the canvas
@@ -262,6 +276,7 @@ impl<'a> WorldView<'a> {
                 )
             }
         };
+        println!("render changed: {render_changed}");
 
         if !valid {
             ui.painter().rect_stroke(

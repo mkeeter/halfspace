@@ -70,12 +70,12 @@ impl ViewData {
         const MAX_LEVEL: usize = 10;
 
         // Adjust self.start_level to hit a render time target
-        if render_time > TARGET_RENDER_TIME && self.start_level < MAX_LEVEL {
-            self.start_level += 1;
-        } else if render_time < TARGET_RENDER_TIME * 3 / 4
-            && level == self.start_level
-        {
-            self.start_level = self.start_level.saturating_sub(1);
+        if level == self.start_level {
+            if render_time > TARGET_RENDER_TIME && level < MAX_LEVEL {
+                self.start_level += 1;
+            } else if render_time < TARGET_RENDER_TIME * 3 / 4 {
+                self.start_level = self.start_level.saturating_sub(1);
+            }
         }
         if generation == self.generation {
             self.image = Some(ViewImage {
@@ -190,13 +190,8 @@ impl std::cmp::PartialEq for RenderSettings {
     fn eq(&self, other: &Self) -> bool {
         // XXX this does expensive tree deduplication!
         let mut ctx = fidget::Context::new();
-        let mode_matches = match (self.mode, other.mode) {
-            (RenderMode::SdfApprox(a), RenderMode::SdfApprox(b)) => a == b,
-            (RenderMode::SdfExact(a), RenderMode::SdfExact(b)) => a == b,
-            (RenderMode::Bitfield(a), RenderMode::Bitfield(b)) => a == b,
-            _ => false,
-        };
-        mode_matches && ctx.import(&self.tree) == ctx.import(&other.tree)
+        self.mode == other.mode
+            && ctx.import(&self.tree) == ctx.import(&other.tree)
     }
 }
 

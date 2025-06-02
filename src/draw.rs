@@ -501,3 +501,150 @@ impl egui_wgpu::CallbackTrait for WgpuBitmapPainter {
         render_pass.draw(0..6, 0..1);
     }
 }
+
+////////////////////////////////////////////////////////////////////////////////
+
+/// GPU callback for painting heightmaps
+///
+/// This is identical to the `BitmapPainter` except that it takes a 3D view
+pub(crate) struct WgpuHeightmapPainter {
+    /// Current view, which may differ from the image's view
+    view: fidget::render::View3,
+    size: fidget::render::ImageSize,
+
+    /// Index of the block being rendered
+    index: BlockIndex,
+
+    /// Image to render
+    image: ViewImage,
+}
+
+impl WgpuHeightmapPainter {
+    pub fn new(
+        index: BlockIndex,
+        image: ViewImage,
+        size: fidget::render::ImageSize,
+        view: fidget::render::View3,
+    ) -> Self {
+        Self {
+            index,
+            image,
+            size,
+            view,
+        }
+    }
+}
+
+impl egui_wgpu::CallbackTrait for WgpuHeightmapPainter {
+    fn prepare(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        _screen_descriptor: &egui_wgpu::ScreenDescriptor,
+        _egui_encoder: &mut wgpu::CommandEncoder,
+        resources: &mut egui_wgpu::CallbackResources,
+    ) -> Vec<wgpu::CommandBuffer> {
+        let gr: &mut WgpuResources = resources.get_mut().unwrap();
+
+        let (width, height) = match self.image.settings.mode {
+            RenderMode::Heightmap(s) => (
+                (s.size.width() / (1 << self.image.level)).max(1),
+                (s.size.height() / (1 << self.image.level)).max(1),
+            ),
+            _ => panic!("invalid painter"),
+        };
+        let texture_size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+
+        let (texture, uniform_buffer) =
+            gr.get_bitmap_resources(device, self.index, texture_size);
+
+        // Upload RGBA image data
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            self.image.data.as_bytes(),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * width),
+                rows_per_image: Some(height),
+            },
+            texture_size,
+        );
+
+        // Create the uniform
+        let transform = match self.image.settings.mode {
+            RenderMode::Heightmap(s) => {
+                // don't blame me, I just twiddled the matrices until things
+                // looked right
+                let aspect_ratio = |width: u32, height: u32| {
+                    let width = width as f32;
+                    let height = height as f32;
+                    if width > height {
+                        nalgebra::Scale3::new(height / width, 1.0, 1.0)
+                    } else {
+                        nalgebra::Scale3::new(1.0, width / height, 1.0)
+                    }
+                };
+                let prev_aspect_ratio =
+                    aspect_ratio(s.size.width(), s.size.height());
+                let curr_aspect_ratio =
+                    aspect_ratio(self.size.width(), self.size.height());
+                let m =
+                    prev_aspect_ratio.to_homogeneous().try_inverse().unwrap()
+                        * curr_aspect_ratio.to_homogeneous()
+                        * self.view.world_to_model().try_inverse().unwrap()
+                        * s.view.world_to_model();
+                #[rustfmt::skip]
+                let transform = nalgebra::Matrix4::new(
+                    m[(0, 0)], m[(0, 1)], m[(0, 2)], m[(0, 3)] * curr_aspect_ratio.x,
+                    m[(1, 0)], m[(1, 1)], m[(1, 2)], m[(1, 3)] * curr_aspect_ratio.y,
+                    m[(2, 0)], m[(2, 1)], m[(2, 2)], m[(2, 3)],
+                    0.0,         0.0,         0.0, 1.0,
+                );
+                transform
+            }
+            _ => unreachable!(),
+        };
+        let uniforms = Uniforms {
+            transform: transform.into(),
+        };
+        let mut writer = queue
+            .write_buffer_with(
+                uniform_buffer,
+                0,
+                (std::mem::size_of_val(&uniforms) as u64)
+                    .try_into()
+                    .unwrap(),
+            )
+            .unwrap();
+        writer.copy_from_slice(uniforms.as_bytes());
+
+        Vec::new()
+    }
+
+    fn paint(
+        &self,
+        _info: egui::PaintCallbackInfo,
+        render_pass: &mut wgpu::RenderPass<'static>,
+        resources: &egui_wgpu::CallbackResources,
+    ) {
+        let rs: &WgpuResources = resources.get().unwrap();
+        let bs = &rs.bound_bitmaps[&self.index];
+
+        render_pass.set_pipeline(&rs.clear_pipeline);
+        render_pass.set_bind_group(0, &bs.clear_bind_group, &[]);
+        render_pass.draw(0..6, 0..1);
+
+        render_pass.set_pipeline(&rs.rgba_pipeline);
+        render_pass.set_bind_group(0, &bs.rgba_bind_group, &[]);
+        render_pass.draw(0..6, 0..1);
+    }
+}

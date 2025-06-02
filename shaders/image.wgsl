@@ -41,6 +41,7 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 
     var output: VertexOutput;
     output.position = uniforms.transform * vec4<f32>(pos[vertex_index], 0.0, 1.0);
+    output.position.z = 0.0; // XXX this is a hack
     output.tex_coords = uv[vertex_index];
     return output;
 }
