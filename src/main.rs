@@ -211,6 +211,9 @@ impl eframe::App for App {
                             ViewResponse::CHANGED => {
                                 changed = true;
                             }
+                            ViewResponse::REDRAW => {
+                                ui.ctx().request_repaint();
+                            }
                             _ => panic!("invalid flag"),
                         }
                     }
@@ -372,6 +375,8 @@ bitflags::bitflags! {
         const FOCUS_ERR     = (1 << 0);
         /// The block has changed
         const CHANGED       = (1 << 1);
+        /// The UI should be repainted
+        const REDRAW        = (1 << 2);
     }
 }
 
