@@ -396,11 +396,9 @@ impl egui_wgpu::CallbackTrait for WgpuBitmapPainter {
         let gr: &mut WgpuResources = resources.get_mut().unwrap();
 
         let (width, height) = match self.image.settings.mode {
-            RenderMode::SdfApprox(s)
-            | RenderMode::SdfExact(s)
-            | RenderMode::Bitfield(s) => (
-                (s.size.width() / (1 << self.image.level)).max(1),
-                (s.size.height() / (1 << self.image.level)).max(1),
+            RenderMode::Render2 { size, .. } => (
+                (size.width() / (1 << self.image.level)).max(1),
+                (size.height() / (1 << self.image.level)).max(1),
             ),
             _ => panic!("invalid render mode for bitmap painter"),
         };
@@ -432,9 +430,7 @@ impl egui_wgpu::CallbackTrait for WgpuBitmapPainter {
 
         // Create the uniform
         let transform = match self.image.settings.mode {
-            RenderMode::SdfApprox(s)
-            | RenderMode::SdfExact(s)
-            | RenderMode::Bitfield(s) => {
+            RenderMode::Render2 { size, view, .. } => {
                 // don't blame me, I just twiddled the matrices until things
                 // looked right
                 let aspect_ratio = |size: fidget::render::ImageSize| {
@@ -446,13 +442,13 @@ impl egui_wgpu::CallbackTrait for WgpuBitmapPainter {
                         nalgebra::Scale2::new(1.0, width / height)
                     }
                 };
-                let prev_aspect_ratio = aspect_ratio(s.size);
+                let prev_aspect_ratio = aspect_ratio(size);
                 let curr_aspect_ratio = aspect_ratio(self.size);
                 let m =
                     prev_aspect_ratio.to_homogeneous().try_inverse().unwrap()
                         * curr_aspect_ratio.to_homogeneous()
                         * self.view.world_to_model().try_inverse().unwrap()
-                        * s.view.world_to_model();
+                        * view.world_to_model();
                 #[rustfmt::skip]
                 let transform = nalgebra::Matrix4::new(
                     m[(0, 0)], m[(0, 1)], 0.0, m[(0, 2)] * curr_aspect_ratio.x,
@@ -462,9 +458,7 @@ impl egui_wgpu::CallbackTrait for WgpuBitmapPainter {
                 );
                 transform
             }
-            RenderMode::Heightmap(_) => {
-                panic!("invalid render mode for bitmap painter");
-            }
+            _ => unreachable!(),
         };
         let uniforms = Uniforms {
             transform: transform.into(),
@@ -547,9 +541,9 @@ impl egui_wgpu::CallbackTrait for WgpuHeightmapPainter {
         let gr: &mut WgpuResources = resources.get_mut().unwrap();
 
         let (width, height) = match self.image.settings.mode {
-            RenderMode::Heightmap(s) => (
-                (s.size.width() / (1 << self.image.level)).max(1),
-                (s.size.height() / (1 << self.image.level)).max(1),
+            RenderMode::Render3 { size, .. } => (
+                (size.width() / (1 << self.image.level)).max(1),
+                (size.height() / (1 << self.image.level)).max(1),
             ),
             _ => panic!("invalid painter"),
         };
@@ -581,7 +575,7 @@ impl egui_wgpu::CallbackTrait for WgpuHeightmapPainter {
 
         // Create the uniform
         let transform = match self.image.settings.mode {
-            RenderMode::Heightmap(s) => {
+            RenderMode::Render3 { size, view, .. } => {
                 // don't blame me, I just twiddled the matrices until things
                 // looked right
                 let aspect_ratio = |width: u32, height: u32| {
@@ -594,14 +588,14 @@ impl egui_wgpu::CallbackTrait for WgpuHeightmapPainter {
                     }
                 };
                 let prev_aspect_ratio =
-                    aspect_ratio(s.size.width(), s.size.height());
+                    aspect_ratio(size.width(), size.height());
                 let curr_aspect_ratio =
                     aspect_ratio(self.size.width(), self.size.height());
                 let m =
                     prev_aspect_ratio.to_homogeneous().try_inverse().unwrap()
                         * curr_aspect_ratio.to_homogeneous()
                         * self.view.world_to_model().try_inverse().unwrap()
-                        * s.view.world_to_model();
+                        * view.world_to_model();
                 #[rustfmt::skip]
                 let transform = nalgebra::Matrix4::new(
                     m[(0, 0)], m[(0, 1)], m[(0, 2)], m[(0, 3)] * curr_aspect_ratio.x,

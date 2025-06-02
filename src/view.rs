@@ -25,13 +25,28 @@ pub struct ViewData {
 }
 
 /// State associated with the canvas (for interactions)
-#[derive(strum::EnumDiscriminants)]
-#[strum_discriminants(name(ViewCanvasType))]
+#[derive(Copy, Clone)]
 pub enum ViewCanvas {
-    SdfApprox(fidget::gui::Canvas2),
-    SdfExact(fidget::gui::Canvas2),
-    Bitfield(fidget::gui::Canvas2),
-    Heightmap(fidget::gui::Canvas3),
+    Canvas2 {
+        canvas: fidget::gui::Canvas2,
+        mode: ViewMode2,
+    },
+    Canvas3 {
+        canvas: fidget::gui::Canvas3,
+        mode: ViewMode3,
+    },
+}
+
+#[derive(Copy, Clone, PartialEq)]
+pub enum ViewMode2 {
+    SdfApprox,
+    SdfExact,
+    Bitfield,
+}
+
+#[derive(Copy, Clone, PartialEq)]
+pub enum ViewMode3 {
+    Heightmap,
 }
 
 /// Rendered image, along with the settings that generated it
@@ -46,9 +61,10 @@ impl ViewData {
     pub fn new(image_size: fidget::render::ImageSize) -> Self {
         Self {
             task: None,
-            canvas: ViewCanvas::SdfApprox(fidget::gui::Canvas2::new(
-                image_size,
-            )),
+            canvas: ViewCanvas::Canvas2 {
+                canvas: fidget::gui::Canvas2::new(image_size),
+                mode: ViewMode2::SdfApprox,
+            },
             image: None,
             generation: 0,
             start_level: 0,
@@ -168,22 +184,16 @@ pub struct RenderSettings {
 /// Image rendering mode (tied to a canvas, so without a tree)
 #[derive(Copy, Clone, PartialEq)]
 pub enum RenderMode {
-    SdfApprox(RenderSettings2D),
-    SdfExact(RenderSettings2D),
-    Bitfield(RenderSettings2D),
-    Heightmap(RenderSettings3D),
-}
-
-#[derive(Copy, Clone, PartialEq)]
-pub struct RenderSettings2D {
-    pub view: fidget::render::View2,
-    pub size: fidget::render::ImageSize,
-}
-
-#[derive(Copy, Clone, PartialEq)]
-pub struct RenderSettings3D {
-    pub view: fidget::render::View3,
-    pub size: fidget::render::VoxelSize,
+    Render2 {
+        mode: ViewMode2,
+        view: fidget::render::View2,
+        size: fidget::render::ImageSize,
+    },
+    Render3 {
+        mode: ViewMode3,
+        view: fidget::render::View3,
+        size: fidget::render::VoxelSize,
+    },
 }
 
 impl std::cmp::PartialEq for RenderSettings {
@@ -237,60 +247,55 @@ impl RenderTask {
     ) -> Option<Vec<[u8; 4]>> {
         let scale = 1 << level;
         let data = match settings.mode {
-            RenderMode::Bitfield(s)
-            | RenderMode::SdfApprox(s)
-            | RenderMode::SdfExact(s) => {
+            RenderMode::Render2 { mode, view, size } => {
                 let image_size = fidget::render::ImageSize::new(
-                    (s.size.width() / scale).max(1),
-                    (s.size.height() / scale).max(1),
+                    (size.width() / scale).max(1),
+                    (size.height() / scale).max(1),
                 );
                 let cfg = fidget::render::ImageRenderConfig {
                     image_size,
-                    view: s.view,
+                    view,
                     cancel,
                     ..Default::default()
                 };
                 let shape = fidget::vm::VmShape::from(settings.tree.clone());
-                let image = match settings.mode {
-                    RenderMode::Bitfield(..) => {
+                let image = match mode {
+                    ViewMode2::Bitfield => {
                         let image =
                             cfg.run::<_, fidget::render::BitRenderMode>(shape)?;
                         image.map(|&b| if b { [u8::MAX; 4] } else { [0; 4] })
                     }
-                    RenderMode::SdfApprox(..) => {
+                    ViewMode2::SdfApprox => {
                         let image =
                             cfg.run::<_, fidget::render::SdfRenderMode>(shape)?;
                         image.map(|&[r, g, b]| [r, g, b, u8::MAX])
                     }
-                    RenderMode::SdfExact(..) => {
+                    ViewMode2::SdfExact => {
                         let image = cfg
                             .run::<_, fidget::render::SdfPixelRenderMode>(
                                 shape,
                             )?;
                         image.map(|&[r, g, b]| [r, g, b, u8::MAX])
                     }
-                    RenderMode::Heightmap(..) => {
-                        unreachable!()
-                    }
                 };
                 let (data, _size) = image.take();
                 data
             }
-            RenderMode::Heightmap(s) => {
+            RenderMode::Render3 { mode, view, size } => {
                 let image_size = fidget::render::VoxelSize::new(
-                    (s.size.width() / scale).max(1),
-                    (s.size.height() / scale).max(1),
-                    (s.size.depth() / scale).max(1),
+                    (size.width() / scale).max(1),
+                    (size.height() / scale).max(1),
+                    (size.depth() / scale).max(1),
                 );
                 let cfg = fidget::render::VoxelRenderConfig {
                     image_size,
-                    view: s.view,
+                    view,
                     cancel,
                     ..Default::default()
                 };
                 let shape = fidget::vm::VmShape::from(settings.tree.clone());
-                let image = match settings.mode {
-                    RenderMode::Heightmap(..) => {
+                let image = match mode {
+                    ViewMode3::Heightmap => {
                         let image = cfg.run(shape)?;
                         image.map(|v| {
                             if v.depth > 0 {
@@ -303,9 +308,6 @@ impl RenderTask {
                             }
                         })
                     }
-                    RenderMode::SdfExact(_)
-                    | RenderMode::SdfApprox(_)
-                    | RenderMode::Bitfield(_) => unreachable!(),
                 };
                 let (data, _size) = image.take();
                 data

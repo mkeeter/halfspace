@@ -3,8 +3,7 @@ use std::collections::HashMap;
 
 use crate::{
     view::{
-        RenderMode, RenderSettings, RenderSettings2D, RenderSettings3D,
-        ViewCanvas, ViewCanvasType, ViewData,
+        RenderMode, RenderSettings, ViewCanvas, ViewData, ViewMode2, ViewMode3,
     },
     world::{Block, BlockIndex, IoValue, NameError, World},
     BlockResponse, Message, ViewResponse,
@@ -115,28 +114,25 @@ impl<'a> WorldView<'a> {
         // If we have a block view, then use it (or fall back to the previous
         // image, drawing it in a valid state).  Otherwise, fall back to the
         // previous image, drawing it in an *invalid* state (with a red border).
+        let current_canvas = entry.canvas;
         let (image, valid) = if let Some(block_view) = block_view {
             let mode = match &entry.canvas {
-                ViewCanvas::SdfApprox(c) => {
-                    let view = c.view();
-                    RenderMode::SdfApprox(RenderSettings2D { view, size })
-                }
-                ViewCanvas::SdfExact(c) => {
-                    let view = c.view();
-                    RenderMode::SdfExact(RenderSettings2D { view, size })
-                }
-                ViewCanvas::Bitfield(c) => {
-                    let view = c.view();
-                    RenderMode::Bitfield(RenderSettings2D { view, size })
-                }
-                ViewCanvas::Heightmap(c) => {
-                    let view = c.view();
-                    let size = fidget::render::VoxelSize::new(
-                        size.width(),
-                        size.height(),
-                        size.width().max(size.height()),
-                    );
-                    RenderMode::Heightmap(RenderSettings3D { view, size })
+                ViewCanvas::Canvas2 { canvas, mode } => RenderMode::Render2 {
+                    view: canvas.view(),
+                    size,
+                    mode: *mode,
+                },
+                ViewCanvas::Canvas3 { canvas, mode } => {
+                    RenderMode::Render3 {
+                        view: canvas.view(),
+                        size: fidget::render::VoxelSize::new(
+                            size.width(),
+                            size.height(),
+                            // XXX select depth?
+                            size.width().max(size.height()),
+                        ),
+                        mode: *mode,
+                    }
                 }
             };
             let settings = RenderSettings {
@@ -154,7 +150,6 @@ impl<'a> WorldView<'a> {
             };
             (image, true)
         } else if let Some(prev_image) = entry.prev_image() {
-            println!("drawing previous image");
             (prev_image, false)
         } else {
             // XXX can we actually get here?
@@ -164,30 +159,48 @@ impl<'a> WorldView<'a> {
 
         // This is the magic that triggers the GPU callback.  We pick a render
         // mode based on the selected image's settings
-        match image.settings.mode {
-            RenderMode::Bitfield(s)
-            | RenderMode::SdfApprox(s)
-            | RenderMode::SdfExact(s) => {
+        match (image.settings.mode, current_canvas) {
+            (
+                RenderMode::Render2 {
+                    mode: image_mode, ..
+                },
+                ViewCanvas::Canvas2 {
+                    mode: canvas_mode,
+                    canvas,
+                },
+            ) if image_mode == canvas_mode => {
                 ui.painter().add(egui_wgpu::Callback::new_paint_callback(
                     rect,
                     crate::draw::WgpuBitmapPainter::new(
                         index,
                         image.clone(),
                         size,
-                        s.view, // XXX this is wrong
+                        canvas.view(),
                     ),
                 ));
             }
-            RenderMode::Heightmap(s) => {
+            (
+                RenderMode::Render3 {
+                    mode: image_mode, ..
+                },
+                ViewCanvas::Canvas3 {
+                    mode: canvas_mode,
+                    canvas,
+                },
+            ) if image_mode == canvas_mode => {
                 ui.painter().add(egui_wgpu::Callback::new_paint_callback(
                     rect,
                     crate::draw::WgpuHeightmapPainter::new(
                         index,
                         image.clone(),
                         size,
-                        s.view, // XXX this is wrong
+                        canvas.view(),
                     ),
                 ));
+            }
+            _ => {
+                self.view_fallback_ui(ui, "no previous image for this mode");
+                return out;
             }
         }
 
@@ -196,17 +209,10 @@ impl<'a> WorldView<'a> {
             index.id().with("block_view_interact"),
             egui::Sense::click_and_drag(),
         );
-        println!(
-            "interacting: {:?} {:?}",
-            r.interact_pointer_pos(),
-            r.hover_pos()
-        );
 
         // Send mouse interactions to the canvas
         let mut render_changed = match &mut entry.canvas {
-            ViewCanvas::SdfApprox(c)
-            | ViewCanvas::SdfExact(c)
-            | ViewCanvas::Bitfield(c) => {
+            ViewCanvas::Canvas2 { canvas, .. } => {
                 let cursor_state =
                     match (r.interact_pointer_pos(), r.hover_pos()) {
                         (Some(p), _) => Some((p, true)),
@@ -223,7 +229,7 @@ impl<'a> WorldView<'a> {
                             drag,
                         }
                     });
-                c.interact(
+                canvas.interact(
                     size,
                     cursor_state,
                     if r.hover_pos().is_some() {
@@ -233,7 +239,7 @@ impl<'a> WorldView<'a> {
                     },
                 )
             }
-            ViewCanvas::Heightmap(c) => {
+            ViewCanvas::Canvas3 { canvas, .. } => {
                 let size = fidget::render::VoxelSize::new(
                     size.width(),
                     size.height(),
@@ -269,16 +275,149 @@ impl<'a> WorldView<'a> {
                         }
                     });
 
-                c.interact(
+                canvas.interact(
                     size,
                     cursor_state,
                     ui.ctx().input(|i| i.smooth_scroll_delta.y),
                 )
             }
         };
-        println!("render changed: {render_changed}");
 
-        if !valid {
+        let mut view_edit_button = |ui: &mut egui::Ui| {
+            // Pop-up box to change render settings
+            #[derive(Copy, Clone, PartialEq, Eq)]
+            enum ViewCanvasType {
+                SdfApprox,
+                SdfExact,
+                Bitfield,
+                Heightmap,
+            }
+            let initial_tag = match &entry.canvas {
+                ViewCanvas::Canvas2 {
+                    mode: ViewMode2::Bitfield,
+                    ..
+                } => ViewCanvasType::Bitfield,
+                ViewCanvas::Canvas2 {
+                    mode: ViewMode2::SdfApprox,
+                    ..
+                } => ViewCanvasType::SdfApprox,
+                ViewCanvas::Canvas2 {
+                    mode: ViewMode2::SdfExact,
+                    ..
+                } => ViewCanvasType::SdfExact,
+                ViewCanvas::Canvas3 {
+                    mode: ViewMode3::Heightmap,
+                    ..
+                } => ViewCanvasType::Heightmap,
+            };
+            let mut tag = initial_tag;
+            let mut reset_camera = false;
+            egui::ComboBox::from_id_salt(index.id().with("view_editor"))
+                .selected_text(CAMERA)
+                .width(0.0)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut tag,
+                        ViewCanvasType::Bitfield,
+                        "2D bitfield",
+                    );
+                    ui.selectable_value(
+                        &mut tag,
+                        ViewCanvasType::SdfApprox,
+                        "2D SDF (approx)",
+                    );
+                    ui.selectable_value(
+                        &mut tag,
+                        ViewCanvasType::SdfExact,
+                        "2D SDF (exact)",
+                    );
+                    ui.separator();
+                    ui.selectable_value(
+                        &mut tag,
+                        ViewCanvasType::Heightmap,
+                        "3D heightmap",
+                    );
+                    ui.separator();
+                    if ui.button("Reset camera").clicked() {
+                        reset_camera = true;
+                    }
+                });
+            // If we've edited the canvas tag, then update it in the entry
+            if tag != initial_tag {
+                render_changed = true;
+                let mut next_canvas = match tag {
+                    ViewCanvasType::SdfExact
+                    | ViewCanvasType::SdfApprox
+                    | ViewCanvasType::Bitfield => ViewCanvas::Canvas2 {
+                        canvas: fidget::gui::Canvas2::new(size),
+                        mode: match tag {
+                            ViewCanvasType::SdfExact => ViewMode2::SdfExact,
+                            ViewCanvasType::SdfApprox => ViewMode2::SdfApprox,
+                            ViewCanvasType::Bitfield => ViewMode2::Bitfield,
+                            _ => unreachable!(),
+                        },
+                    },
+                    ViewCanvasType::Heightmap => {
+                        let size = fidget::render::VoxelSize::new(
+                            size.width(),
+                            size.height(),
+                            size.width().max(size.height()), // XXX select depth?
+                        );
+                        ViewCanvas::Canvas3 {
+                            canvas: fidget::gui::Canvas3::new(size),
+                            mode: match tag {
+                                ViewCanvasType::Heightmap => {
+                                    ViewMode3::Heightmap
+                                }
+                                _ => unreachable!(),
+                            },
+                        }
+                    }
+                };
+                match (&mut next_canvas, &mut entry.canvas) {
+                    (
+                        ViewCanvas::Canvas2 {
+                            canvas: next_canvas,
+                            ..
+                        },
+                        ViewCanvas::Canvas2 {
+                            canvas: prev_canvas,
+                            ..
+                        },
+                    ) => std::mem::swap(next_canvas, prev_canvas),
+                    (
+                        ViewCanvas::Canvas3 {
+                            canvas: next_canvas,
+                            ..
+                        },
+                        ViewCanvas::Canvas3 {
+                            canvas: prev_canvas,
+                            ..
+                        },
+                    ) => std::mem::swap(next_canvas, prev_canvas),
+                    _ => (), // TODO do some swapping if we do 2D <-> 3D?
+                }
+                entry.canvas = next_canvas;
+            }
+            if reset_camera {
+                match &mut entry.canvas {
+                    ViewCanvas::Canvas2 { canvas, .. } => {
+                        *canvas =
+                            fidget::gui::Canvas2::new(canvas.image_size());
+                        render_changed = true;
+                    }
+                    ViewCanvas::Canvas3 { canvas, .. } => {
+                        *canvas =
+                            fidget::gui::Canvas3::new(canvas.image_size());
+                        render_changed = true;
+                    }
+                }
+            }
+        };
+
+        if valid {
+            view_edit_button(ui)
+        } else {
             ui.painter().rect_stroke(
                 rect,
                 0.0,
@@ -308,103 +447,16 @@ impl<'a> WorldView<'a> {
                     if r.clicked() {
                         out |= ViewResponse::FOCUS_ERR;
                     }
+                    ui.with_layout(
+                        egui::Layout::left_to_right(egui::Align::TOP),
+                        |ui| {
+                            view_edit_button(ui);
+                        },
+                    );
                 },
             );
         }
 
-        // Pop-up box to change render settings
-        let mut tag = ViewCanvasType::from(&entry.canvas);
-        let mut reset_camera = false;
-        egui::ComboBox::from_id_salt(index.id().with("view_editor"))
-            .selected_text(CAMERA)
-            .width(0.0)
-            .show_ui(ui, |ui| {
-                ui.selectable_value(
-                    &mut tag,
-                    ViewCanvasType::Bitfield,
-                    "2D bitfield",
-                );
-                ui.selectable_value(
-                    &mut tag,
-                    ViewCanvasType::SdfApprox,
-                    "2D SDF (approx)",
-                );
-                ui.selectable_value(
-                    &mut tag,
-                    ViewCanvasType::SdfExact,
-                    "2D SDF (exact)",
-                );
-                ui.selectable_value(
-                    &mut tag,
-                    ViewCanvasType::Heightmap,
-                    "3D heightmap",
-                );
-                ui.separator();
-                if ui.button("Reset camera").clicked() {
-                    reset_camera = true;
-                }
-            });
-        // If we've edited the canvas tag, then update it in the entry
-        if tag != (&entry.canvas).into() {
-            render_changed = true;
-            match (tag, &entry.canvas) {
-                // If both the original and new canvas are 2D, then steal the
-                // GUI canvas from the previous canvas to reuse it.
-                (
-                    ViewCanvasType::SdfExact
-                    | ViewCanvasType::SdfApprox
-                    | ViewCanvasType::Bitfield,
-                    ViewCanvas::Bitfield(c)
-                    | ViewCanvas::SdfExact(c)
-                    | ViewCanvas::SdfApprox(c),
-                ) => {
-                    entry.canvas = match tag {
-                        ViewCanvasType::SdfExact => ViewCanvas::SdfExact(*c),
-                        ViewCanvasType::SdfApprox => ViewCanvas::SdfApprox(*c),
-                        ViewCanvasType::Bitfield => ViewCanvas::Bitfield(*c),
-                        ViewCanvasType::Heightmap => unreachable!(),
-                    }
-                }
-                // we've gone from 2D to 3D (or vice versa), and therefore can't
-                // reuse the canvas (TODO maybe reuse some of it?)
-                (ViewCanvasType::SdfExact, _) => {
-                    entry.canvas =
-                        ViewCanvas::SdfExact(fidget::gui::Canvas2::new(size))
-                }
-                (ViewCanvasType::SdfApprox, _) => {
-                    entry.canvas =
-                        ViewCanvas::SdfApprox(fidget::gui::Canvas2::new(size))
-                }
-                (ViewCanvasType::Bitfield, _) => {
-                    entry.canvas =
-                        ViewCanvas::Bitfield(fidget::gui::Canvas2::new(size))
-                }
-                (ViewCanvasType::Heightmap, _) => {
-                    // TODO control depth here?
-                    let size = fidget::render::VoxelSize::new(
-                        size.width(),
-                        size.height(),
-                        size.width().max(size.height()),
-                    );
-                    entry.canvas =
-                        ViewCanvas::Heightmap(fidget::gui::Canvas3::new(size))
-                }
-            }
-        }
-        if reset_camera {
-            match &mut entry.canvas {
-                ViewCanvas::Bitfield(c)
-                | ViewCanvas::SdfApprox(c)
-                | ViewCanvas::SdfExact(c) => {
-                    *c = fidget::gui::Canvas2::new(c.image_size());
-                    render_changed = true;
-                }
-                ViewCanvas::Heightmap(c) => {
-                    *c = fidget::gui::Canvas3::new(c.image_size());
-                    render_changed = true;
-                }
-            }
-        }
         if render_changed {
             ui.ctx().request_repaint();
         }
