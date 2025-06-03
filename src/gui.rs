@@ -101,8 +101,15 @@ impl<'a> WorldView<'a> {
         if block_view.is_none()
             && matches!(entry, std::collections::hash_map::Entry::Vacant(..))
         {
-            Self::view_fallback_ui(ui, "block has errors...");
-            return out;
+            return out
+                | Self::view_fallback_ui(
+                    ui,
+                    index,
+                    None,
+                    size,
+                    ERROR,
+                    Some("block has errors and no previous view"),
+                );
         }
 
         // At this point, either we have a block view, or we have a previous
@@ -145,16 +152,30 @@ impl<'a> WorldView<'a> {
             let Some(image) =
                 entry.image(index, settings, self.tx.clone(), notify)
             else {
-                Self::view_fallback_ui(ui, "render in progress...");
-                return out;
+                return out
+                    | Self::view_fallback_ui(
+                        ui,
+                        index,
+                        Some(entry),
+                        size,
+                        HOURGLASS,
+                        None,
+                    );
             };
             (image, true)
         } else if let Some(prev_image) = entry.prev_image() {
             (prev_image, false)
         } else {
             // XXX can we actually get here?
-            Self::view_fallback_ui(ui, "no previous image");
-            return out;
+            return out
+                | Self::view_fallback_ui(
+                    ui,
+                    index,
+                    Some(entry),
+                    size,
+                    ERROR,
+                    Some("block has errors and no previous image"),
+                );
         };
 
         // This is the magic that triggers the GPU callback.  We pick a render
@@ -199,9 +220,29 @@ impl<'a> WorldView<'a> {
                 ));
             }
             _ => {
-                Self::view_fallback_ui(ui, "no previous image for this mode");
-                out |= Self::view_edit_button(ui, index, entry, size);
-                return out;
+                return out
+                    | if entry.task.as_ref().is_some_and(|t| !t.done()) {
+                        Self::view_fallback_ui(
+                            ui,
+                            index,
+                            Some(entry),
+                            size,
+                            HOURGLASS,
+                            None,
+                        )
+                    } else {
+                        Self::view_fallback_ui(
+                            ui,
+                            index,
+                            Some(entry),
+                            size,
+                            ERROR,
+                            Some(
+                                "block has errors and no previous \
+                                 image in this mode",
+                            ),
+                        )
+                    }
             }
         }
 
@@ -468,12 +509,24 @@ impl<'a> WorldView<'a> {
     }
 
     /// Manually draw a backdrop indicating that the view is invalid
-    fn view_fallback_ui(ui: &mut egui::Ui, txt: &str) {
+    fn view_fallback_ui(
+        ui: &mut egui::Ui,
+        index: BlockIndex,
+        entry: Option<&mut ViewData>,
+        size: fidget::render::ImageSize,
+        inner_text: &str,
+        error_text: Option<&str>,
+    ) -> ViewResponse {
+        let mut out = ViewResponse::empty();
+
         let style = ui.style();
         let painter = ui.painter();
+
+        let mut t = style.text_styles[&egui::TextStyle::Heading].clone();
+        t.size *= 2.0;
         let layout = painter.layout(
-            txt.to_owned(),
-            style.text_styles[&egui::TextStyle::Heading].clone(),
+            inner_text.to_owned(),
+            t,
             style.visuals.widgets.noninteractive.text_color(),
             f32::INFINITY,
         );
@@ -481,6 +534,53 @@ impl<'a> WorldView<'a> {
         let text_corner = rect.center() - layout.size() / 2.0;
         painter.rect_filled(rect, 0.0, style.visuals.panel_fill);
         painter.galley(text_corner, layout, egui::Color32::BLACK);
+
+        if let Some(error_text) = error_text {
+            ui.painter().rect_stroke(
+                rect,
+                0.0,
+                egui::Stroke {
+                    width: 4.0,
+                    color: ui.style().visuals.error_fg_color,
+                },
+                egui::StrokeKind::Inside,
+            );
+            ui.with_layout(
+                egui::Layout::right_to_left(egui::Align::TOP),
+                |ui| {
+                    let r = ui
+                        .add(
+                            egui::Label::new(
+                                egui::RichText::new(WARN)
+                                    .color(egui::Color32::WHITE)
+                                    .background_color(
+                                        ui.style().visuals.error_fg_color,
+                                    ),
+                            )
+                            .sense(egui::Sense::CLICK),
+                        )
+                        .on_hover_ui(|ui| {
+                            ui.label(error_text);
+                        });
+                    if r.clicked() {
+                        out |= ViewResponse::FOCUS_ERR;
+                    }
+                    if let Some(entry) = entry {
+                        ui.with_layout(
+                            egui::Layout::left_to_right(egui::Align::TOP),
+                            |ui| {
+                                out |= Self::view_edit_button(
+                                    ui, index, entry, size,
+                                );
+                            },
+                        );
+                    }
+                },
+            );
+        } else if let Some(entry) = entry {
+            out |= Self::view_edit_button(ui, index, entry, size);
+        }
+        out
     }
 
     fn script_ui(
@@ -780,3 +880,5 @@ const PENCIL: &str = "\u{f03eb}";
 const WARN: &str = "\u{f071}";
 const EYE: &str = "\u{f441}";
 const CAMERA: &str = "\u{f03d}";
+const HOURGLASS: &str = "\u{f252}";
+const ERROR: &str = "\u{ea87}";

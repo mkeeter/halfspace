@@ -174,6 +174,12 @@ impl Drop for RenderTask {
     }
 }
 
+impl RenderTask {
+    pub fn done(&self) -> bool {
+        self.done
+    }
+}
+
 /// Settings for rendering an image
 #[derive(Clone)]
 pub struct RenderSettings {
