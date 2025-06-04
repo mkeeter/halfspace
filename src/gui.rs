@@ -64,7 +64,7 @@ impl<'a> egui_dock::TabViewer for WorldView<'a> {
         egui::WidgetText::from(&name)
     }
 
-    /// Draw a block as as editable text pane
+    /// Draw a dock tab as either a script or view pane
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Tab) {
         let r = match tab.mode {
             TabMode::Script => self.script_ui(ui, tab.index),

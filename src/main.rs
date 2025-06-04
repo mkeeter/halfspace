@@ -77,7 +77,7 @@ struct App {
     tx: std::sync::mpsc::Sender<Message>,
 }
 
-/// Serialization-friendly state
+/// Serialization-friendly subset of state
 #[derive(Clone, Serialize, Deserialize)]
 struct AppState {
     data: World,
@@ -229,10 +229,13 @@ impl App {
         f.read_exact(&mut data)?;
 
         let cfg = bincode::config::standard();
-        let state: AppState = bincode::serde::decode_from_slice(&data, cfg)
-            .map_err(ReadError::DecodeError)?
-            .0;
+        let (state, _size) = bincode::serde::decode_from_slice(&data, cfg)
+            .map_err(ReadError::DecodeError)?;
+        self.restore_from_state(state);
+        Ok(())
+    }
 
+    fn restore_from_state(&mut self, state: AppState) {
         self.data = state.data;
         self.tree = state.tree;
         self.views = state
@@ -246,8 +249,6 @@ impl App {
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx = tx; // use a new channel to orphan previous tasks
         self.rx = rx;
-
-        Ok(())
     }
 
     fn start_world_rebuild(&self, ctx: &egui::Context) {
@@ -498,7 +499,7 @@ impl App {
         let last = self.data.order.last().cloned();
         // XXX there is a drag-and-drop implementation that's built into egui,
         // see `egui_demo_lib/src/demo/drag_and_drop.rs`
-        dnd(ui, "dnd").show_vec(
+        let r = dnd(ui, "dnd").show_vec(
             &mut self.data.order,
             |ui, index, handle, state| {
                 let script_index = gui::Tab::script(*index);
@@ -566,6 +567,9 @@ impl App {
                 changed |= r.contains(BlockResponse::CHANGED);
             },
         );
+        if r.final_update().is_some() {
+            changed = true;
+        }
 
         // Post-processing: edit blocks based on button presses
         changed |= self.data.retain(|index| !to_delete.contains(index));
