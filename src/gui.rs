@@ -629,18 +629,18 @@ impl<'a> WorldView<'a> {
         if r.changed() {
             out |= ViewResponse::CHANGED;
         }
-        if let Some(state) = &mut block.state {
-            if !state.stdout.is_empty() {
+        if let Some(block_data) = &mut block.data {
+            if !block_data.stdout.is_empty() {
                 ui.label("Output");
                 ui.add(
-                    egui::TextEdit::multiline(&mut state.stdout)
+                    egui::TextEdit::multiline(&mut block_data.stdout)
                         .interactive(false)
                         .desired_width(f32::INFINITY),
                 );
             }
-            if !state.script_errors.is_empty() {
+            if !block_data.script_errors.is_empty() {
                 ui.label("Errors");
-                let mut text = state
+                let mut text = block_data
                     .script_errors
                     .iter()
                     .map(|e| e.message.as_str())
@@ -686,11 +686,7 @@ pub fn draggable_block(
 ) -> BlockResponse {
     let mut response = BlockResponse::empty();
     let padding = ui.spacing().icon_width + ui.spacing().icon_spacing;
-    if block
-        .state
-        .as_ref()
-        .is_some_and(|s| !s.io_values.is_empty())
-    {
+    if block.data.as_ref().is_some_and(|s| !s.io_values.is_empty()) {
         egui::collapsing_header::CollapsingState::load_with_default_open(
             ui.ctx(),
             index.id(),
@@ -719,9 +715,9 @@ pub fn draggable_block(
 #[must_use]
 fn block_body(ui: &mut egui::Ui, index: BlockIndex, block: &mut Block) -> bool {
     let mut changed = false;
-    let state = block.state.as_ref().unwrap();
+    let block_data = block.data.as_ref().unwrap();
     let padding = ui.spacing().icon_width + ui.spacing().icon_spacing;
-    for (name, value) in &state.io_values {
+    for (name, value) in &block_data.io_values {
         ui.horizontal(|ui| {
             ui.add_space(padding);
             ui.label(name);
@@ -797,8 +793,8 @@ fn draggable_block_header(
                 response = BlockResponse::TOGGLE_VIEW;
             }
         }
-        if let Some(state) = &block.state {
-            if let Some(e) = state.name_error {
+        if let Some(block_data) = &block.data {
+            if let Some(e) = block_data.name_error {
                 let err = match e {
                     NameError::DuplicateName => "duplicate name",
                     NameError::InvalidIdentifier => "invalid identifier",
@@ -810,7 +806,7 @@ fn draggable_block_header(
                 .on_hover_ui(|ui| {
                     ui.label(err);
                 });
-            } else if !state.script_errors.is_empty() {
+            } else if !block_data.script_errors.is_empty() {
                 let r = ui
                     .add(
                         egui::Label::new(

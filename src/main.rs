@@ -80,9 +80,9 @@ struct App {
 /// Serialization-friendly subset of state
 #[derive(Clone, Serialize, Deserialize)]
 struct AppState {
-    data: World,
+    data: world::WorldState,
     tree: egui_dock::DockState<gui::Tab>,
-    views: HashMap<BlockIndex, view::ViewMode>,
+    views: HashMap<BlockIndex, view::ViewState>,
 }
 
 impl App {
@@ -154,7 +154,7 @@ impl App {
     /// Returns a serializable state
     fn state(&self) -> AppState {
         AppState {
-            data: self.data.clone(),
+            data: self.data.state(),
             tree: self.tree.clone(),
             views: self
                 .views
@@ -236,7 +236,7 @@ impl App {
     }
 
     fn restore_from_state(&mut self, state: AppState) {
-        self.data = state.data;
+        self.data = state.data.into();
         self.tree = state.tree;
         self.views = state
             .views
@@ -253,7 +253,7 @@ impl App {
 
     fn start_world_rebuild(&self, ctx: &egui::Context) {
         // Send the world to a worker thread for re-evaluation
-        let mut world = self.data.without_state();
+        let world = self.data.state();
         let ctx = ctx.clone();
         let tx = self.tx.clone();
         let generation = self
@@ -267,7 +267,7 @@ impl App {
             let current_gen =
                 gen_handle.load(std::sync::atomic::Ordering::Acquire);
             if current_gen == generation {
-                world.rebuild();
+                let world = World::build_from_state(world);
                 // Re-check generation before sending
                 let current_gen =
                     gen_handle.load(std::sync::atomic::Ordering::Acquire);
@@ -513,7 +513,7 @@ impl App {
                 // view open if the block isn't valid, to prevent views from
                 // flicking in and out as a script is edited.
                 let block_defines_view =
-                    block.state.as_ref().is_some_and(|s| s.view.is_some());
+                    block.data.as_ref().is_some_and(|s| s.view.is_some());
                 if let Some(v) = view_location {
                     if block.is_valid() && !block_defines_view {
                         self.tree.remove_tab(v);

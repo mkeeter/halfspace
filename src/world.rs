@@ -86,28 +86,45 @@ impl Value {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone)]
 pub struct Block {
     pub name: String,
     pub script: String,
 
-    #[serde(skip)]
-    pub state: Option<BlockState>,
+    pub data: Option<BlockData>,
 
     /// Map from input name to expression
     ///
-    /// This does not live in the `BlockState` because it must be persistent;
+    /// This does not live in the `BlockData` because it must be persistent;
     /// the resulting values _are_ stored in the block state.
     pub inputs: HashMap<String, String>,
 }
 
-impl Block {
-    fn without_state(&self) -> Self {
+/// Serialization-friendly subset of block state
+#[derive(Clone, Serialize, Deserialize)]
+pub struct BlockState {
+    pub name: String,
+    pub script: String,
+    pub inputs: HashMap<String, String>,
+}
+
+impl From<BlockState> for Block {
+    fn from(value: BlockState) -> Self {
         Self {
+            name: value.name,
+            script: value.script,
+            inputs: value.inputs,
+            data: None,
+        }
+    }
+}
+
+impl Block {
+    fn state(&self) -> BlockState {
+        BlockState {
             name: self.name.clone(),
             script: self.script.clone(),
             inputs: self.inputs.clone(),
-            state: None,
         }
     }
 
@@ -115,14 +132,14 @@ impl Block {
     ///
     /// A block with no state is _invalid_, i.e. returns `false`
     pub fn is_valid(&self) -> bool {
-        self.state.as_ref().is_some_and(|s| {
+        self.data.as_ref().is_some_and(|s| {
             s.name_error.is_none() && s.script_errors.is_empty()
         })
     }
 
     /// Gets the `BlockView`, if the block is free of errors
     pub fn get_view(&self) -> Option<&BlockView> {
-        self.state
+        self.data
             .as_ref()
             .filter(|s| s.name_error.is_none() && s.script_errors.is_empty())
             .and_then(|s| s.view.as_ref())
@@ -138,11 +155,36 @@ impl BlockIndex {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone)]
 pub struct World {
     next_index: u64,
     pub order: Vec<BlockIndex>,
     pub blocks: HashMap<BlockIndex, Block>,
+}
+
+/// Serialization-friendly subset of world state
+///
+/// This is identical to [`World`], but with [`Block`] replaced with
+/// [`BlockState`] (to avoid the un-serializable [`BlockData`])
+#[derive(Clone, Serialize, Deserialize)]
+pub struct WorldState {
+    next_index: u64,
+    pub order: Vec<BlockIndex>,
+    pub blocks: HashMap<BlockIndex, BlockState>,
+}
+
+impl From<WorldState> for World {
+    fn from(value: WorldState) -> Self {
+        Self {
+            next_index: value.next_index,
+            order: value.order,
+            blocks: value
+                .blocks
+                .into_iter()
+                .map(|(k, v)| (k, v.into()))
+                .collect(),
+        }
+    }
 }
 
 impl std::ops::Index<BlockIndex> for World {
@@ -183,7 +225,7 @@ pub struct BlockView {
 }
 
 #[derive(Clone)]
-pub struct BlockState {
+pub struct BlockData {
     /// Output from `print` calls in the script
     pub stdout: String,
     /// Output from `debug` calls in the script, pinned to specific lines
@@ -251,28 +293,40 @@ impl World {
                 name,
                 script: "".to_owned(),
                 inputs: HashMap::new(),
-                state: None,
+                data: None,
             },
         );
         self.order.push(index);
         true
     }
 
-    /// Returns a copy without `BlockState`, suitable for re-evaluation
-    pub fn without_state(&self) -> Self {
-        Self {
+    /// Returns a version of the world without transient state
+    ///
+    /// (used for serialization and evaluation)
+    pub fn state(&self) -> WorldState {
+        WorldState {
             next_index: self.next_index,
             order: self.order.clone(),
-            blocks: self
-                .blocks
-                .iter()
-                .map(|(k, v)| (*k, v.without_state()))
-                .collect(),
+            blocks: self.blocks.iter().map(|(k, v)| (*k, v.state())).collect(),
         }
     }
 
-    /// Rebuilds the entire world, populating [`BlockState`] for each block
-    pub fn rebuild(&mut self) {
+    /// Rebuilds the entire world, populating [`BlockData`] for each block
+    pub fn build_from_state(state: WorldState) -> Self {
+        let mut world = World {
+            next_index: state.next_index,
+            order: state.order,
+            blocks: state
+                .blocks
+                .into_iter()
+                .map(|(k, v)| (k, v.into()))
+                .collect(),
+        };
+        world.rebuild();
+        world
+    }
+
+    fn rebuild(&mut self) {
         let mut name_map = HashMap::new();
         let mut engine = rhai::Engine::new();
         fidget::rhai::tree::register(&mut engine);
@@ -341,7 +395,7 @@ impl World {
 
         for i in &self.order {
             let block = &mut self.blocks.get_mut(i).unwrap();
-            block.state = Some(BlockState {
+            block.data = Some(BlockData {
                 stdout: String::new(),
                 name_error: None,
                 debug: HashMap::new(),
@@ -349,17 +403,17 @@ impl World {
                 io_values: vec![],
                 view: None,
             });
-            let state = block.state.as_mut().unwrap();
+            let data = block.data.as_mut().unwrap();
 
             // Check that the name is valid
             if !rhai::is_valid_identifier(&block.name) {
-                state.name_error = Some(NameError::InvalidIdentifier);
+                data.name_error = Some(NameError::InvalidIdentifier);
                 continue;
             }
             // Bind from the name to a block index (if available)
             match name_map.entry(block.name.clone()) {
                 std::collections::hash_map::Entry::Occupied(..) => {
-                    state.name_error = Some(NameError::DuplicateName);
+                    data.name_error = Some(NameError::DuplicateName);
                     continue;
                 }
                 std::collections::hash_map::Entry::Vacant(v) => {
@@ -427,7 +481,7 @@ impl World {
             let ast = match engine.compile(&block.script) {
                 Ok(ast) => ast,
                 Err(e) => {
-                    state.script_errors.push(BlockError {
+                    data.script_errors.push(BlockError {
                         message: e.to_string(),
                         line: e.position().line(),
                     });
@@ -443,18 +497,18 @@ impl World {
 
             // Update block state based on actions taken by the script
             let (stdout, debug) = io_log.write().unwrap().take();
-            state.stdout = stdout.join("\n");
-            state.debug = debug;
+            data.stdout = stdout.join("\n");
+            data.debug = debug;
             let (io_names, io_values, io_view) =
                 io_values.write().unwrap().take();
-            state.io_values = io_values;
-            state.view = io_view.map(|tree| BlockView { tree });
+            data.io_values = io_values;
+            data.view = io_view.map(|tree| BlockView { tree });
 
             // Update inputs, which may have been modified
             block.inputs = std::mem::take(&mut input_text.write().unwrap());
 
             // Write outputs into the shared input scope
-            let obj: rhai::Map = state
+            let obj: rhai::Map = data
                 .io_values
                 .iter()
                 .filter_map(|(name, value)| match value {
@@ -467,7 +521,7 @@ impl World {
             input_scope.write().unwrap().push(&block.name, obj);
 
             if let Err(e) = r {
-                state.script_errors.push(BlockError {
+                data.script_errors.push(BlockError {
                     message: e.to_string(),
                     line: e.position().line(),
                 });
