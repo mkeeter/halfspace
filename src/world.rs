@@ -364,13 +364,18 @@ impl World {
             let input_text_handle = input_text.clone();
             let input_handle = io_values.clone();
             let input_fn = move |ctx: rhai::NativeCallContext,
-                                 name: &str|
+                                 name: rhai::Dynamic|
                   -> Result<
                 rhai::Dynamic,
                 Box<rhai::EvalAltResult>,
             > {
+                let name = if let Ok(c) = name.as_char() {
+                    format!("{c}")
+                } else {
+                    name.into_string()?
+                };
                 let mut input_handle = input_handle.write().unwrap();
-                input_handle.insert_name(&ctx, name)?;
+                input_handle.insert_name(&ctx, &name)?;
 
                 let mut input_text_lock = input_text_handle.write().unwrap();
                 let txt = input_text_lock
