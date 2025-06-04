@@ -8,6 +8,7 @@ use crate::{
     world::{Block, BlockIndex, IoValue, NameError, World},
     BlockResponse, Message, ViewResponse,
 };
+use serde::{Deserialize, Serialize};
 
 pub struct WorldView<'a> {
     pub world: &'a mut World,
@@ -17,13 +18,13 @@ pub struct WorldView<'a> {
     pub tx: &'a std::sync::mpsc::Sender<Message>,
 }
 
-#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, Serialize, Deserialize)]
 enum TabMode {
     Script,
     View,
 }
 
-#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Tab {
     index: BlockIndex,
     mode: TabMode,

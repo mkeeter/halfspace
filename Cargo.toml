@@ -21,6 +21,7 @@ fidget = { git = "https://github.com/mkeeter/fidget" }
 nalgebra = "0.33.2"
 rayon = "1.10.0"
 rhai = { version = "1.21", features = ["sync", "internals"] }
+serde = "1"
 strum = { version = "0.27.1", features = ["derive"] }
 syntect = "5.2.0"
 zerocopy = { version = "0.8.25", features = ["derive"] }

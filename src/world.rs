@@ -7,6 +7,7 @@ use fidget::{
     context::Tree,
     shapes::{Vec2, Vec3},
 };
+use serde::{Deserialize, Serialize};
 
 #[allow(unused)]
 #[derive(Clone)]
@@ -85,9 +86,12 @@ impl Value {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Block {
     pub name: String,
     pub script: String,
+
+    #[serde(skip)]
     pub state: Option<BlockState>,
 
     /// Map from input name to expression
@@ -125,7 +129,7 @@ impl Block {
     }
 }
 
-#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, Serialize, Deserialize)]
 pub struct BlockIndex(u64);
 
 impl BlockIndex {
@@ -134,6 +138,7 @@ impl BlockIndex {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 pub struct World {
     next_index: u64,
     pub order: Vec<BlockIndex>,
@@ -166,15 +171,18 @@ pub enum NameError {
     DuplicateName,
 }
 
+#[derive(Clone)]
 pub enum IoValue {
     Input(Result<Value, String>),
     Output(Value),
 }
 
+#[derive(Clone)]
 pub struct BlockView {
     pub tree: fidget::context::Tree,
 }
 
+#[derive(Clone)]
 pub struct BlockState {
     /// Output from `print` calls in the script
     pub stdout: String,

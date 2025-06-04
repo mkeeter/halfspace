@@ -1827,6 +1827,7 @@ dependencies = [
  "nalgebra",
  "rayon",
  "rhai",
+ "serde",
  "strum 0.27.1",
  "syntect",
  "zerocopy",

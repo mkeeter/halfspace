@@ -1,5 +1,7 @@
 use egui_dnd::dnd;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::io::Write;
 
 mod draw;
 mod gui;
@@ -35,13 +37,22 @@ enum Message {
 
 struct App {
     data: World,
+    generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
+
+    file: Option<std::fs::File>,
+
     tree: egui_dock::DockState<gui::Tab>,
     syntax: egui_extras::syntax_highlighting::SyntectSettings,
     views: HashMap<BlockIndex, view::ViewData>,
 
-    generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
     rx: std::sync::mpsc::Receiver<Message>,
     tx: std::sync::mpsc::Sender<Message>,
+}
+
+/// Serialization-friendly state
+#[derive(Clone, Serialize, Deserialize)]
+struct AppState {
+    data: World,
 }
 
 impl App {
@@ -101,12 +112,37 @@ impl App {
         Self {
             data: World::new(),
             tree: egui_dock::DockState::new(vec![]),
+            file: None,
             syntax,
             views: HashMap::new(),
             generation: std::sync::Arc::new(0.into()),
             tx,
             rx,
         }
+    }
+
+    /// Returns a serializable state
+    fn state(&self) -> AppState {
+        AppState {
+            data: self.data.clone(),
+        }
+    }
+
+    /// Writes to the file in `self.file`
+    ///
+    /// # Panics
+    /// If `self.file` is `None`
+    fn write_to_file(&mut self) -> std::io::Result<()> {
+        let state = self.state();
+        let cfg = bincode::config::standard();
+        let state_data = bincode::serde::encode_to_vec(&state, cfg).unwrap();
+        let f = self.file.as_mut().unwrap();
+        f.write_all(b"HALF")?;
+        const FILE_VERSION: u32 = 1;
+        f.write_all(&FILE_VERSION.to_le_bytes())?;
+        f.write_all(&state_data)?;
+        f.flush()?;
+        Ok(())
     }
 }
 
@@ -154,11 +190,42 @@ impl eframe::App for App {
                 }
             }
         }
-        let mut changed = false;
+        let mut out = AppResponse::empty();
+        ctx.input_mut(|i| {
+            if i.consume_shortcut(&egui::KeyboardShortcut {
+                modifiers: egui::Modifiers::MAC_CMD,
+                logical_key: egui::Key::Q,
+            }) {
+                out |= AppResponse::QUIT;
+            }
+            if i.consume_shortcut(&egui::KeyboardShortcut {
+                modifiers: egui::Modifiers::MAC_CMD,
+                logical_key: egui::Key::S,
+            }) {
+                out |= AppResponse::SAVE;
+            }
+        });
+
         egui::SidePanel::left("left_panel")
             .min_width(250.0)
             .show(ctx, |ui| {
-                changed |= self.left(ui);
+                egui::menu::bar(ui, |ui| {
+                    ui.menu_button("File", |ui| {
+                        if ui.button("Save").clicked() {
+                            out |= AppResponse::SAVE;
+                        }
+                        if ui.button("Quit").clicked() {
+                            out |= AppResponse::QUIT;
+                        }
+                    });
+                });
+                ui.separator();
+
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    if self.left(ui) {
+                        out |= AppResponse::WORLD_CHANGED;
+                    }
+                });
             });
 
         egui::CentralPanel::default()
@@ -183,20 +250,20 @@ impl eframe::App for App {
                 painter.rect_filled(rect, 0.0, style.visuals.panel_fill);
                 painter.galley(text_corner, layout, egui::Color32::BLACK);
 
-                let mut out = vec![];
+                let mut io_out = vec![];
                 let mut bw = gui::WorldView {
                     world: &mut self.data,
                     syntax: &self.syntax,
                     views: &mut self.views,
                     tx: &self.tx,
-                    out: &mut out,
+                    out: &mut io_out,
                 };
                 egui_dock::DockArea::new(&mut self.tree)
                     .style(egui_dock::Style::from_egui(ctx.style().as_ref()))
                     .show_leaf_collapse_buttons(false)
                     .show_leaf_close_all_buttons(false)
                     .show_inside(ui, &mut bw);
-                for (block, flags) in out {
+                for (block, flags) in io_out {
                     for f in flags.iter() {
                         match f {
                             ViewResponse::FOCUS_ERR => {
@@ -209,7 +276,7 @@ impl eframe::App for App {
                                 }
                             }
                             ViewResponse::CHANGED => {
-                                changed = true;
+                                out |= AppResponse::WORLD_CHANGED;
                             }
                             ViewResponse::REDRAW => {
                                 ui.ctx().request_repaint();
@@ -219,35 +286,62 @@ impl eframe::App for App {
                     }
                 }
             });
-        if changed {
-            // Send the world to a worker thread for re-evaluation
-            let mut world = self.data.without_state();
-            let ctx = ctx.clone();
-            let tx = self.tx.clone();
-            let generation = self
-                .generation
-                .fetch_add(1u64, std::sync::atomic::Ordering::Release)
-                + 1;
-            let gen_handle = self.generation.clone();
-            rayon::spawn(move || {
-                // The world may have moved on before this script evaluation
-                // started; if so, then skip it entirely.
-                let current_gen =
-                    gen_handle.load(std::sync::atomic::Ordering::Acquire);
-                if current_gen == generation {
-                    world.rebuild();
-                    // Re-check generation before sending
-                    let current_gen =
-                        gen_handle.load(std::sync::atomic::Ordering::Acquire);
-                    if current_gen == generation
-                        && tx
-                            .send(Message::RebuildWorld { generation, world })
-                            .is_ok()
-                    {
-                        ctx.request_repaint();
-                    }
+        for f in out.iter() {
+            match f {
+                AppResponse::WORLD_CHANGED => {
+                    // Send the world to a worker thread for re-evaluation
+                    let mut world = self.data.without_state();
+                    let ctx = ctx.clone();
+                    let tx = self.tx.clone();
+                    let generation = self
+                        .generation
+                        .fetch_add(1u64, std::sync::atomic::Ordering::Release)
+                        + 1;
+                    let gen_handle = self.generation.clone();
+                    rayon::spawn(move || {
+                        // The world may have moved on before this script
+                        // evaluation started; if so, then skip it entirely.
+                        let current_gen = gen_handle
+                            .load(std::sync::atomic::Ordering::Acquire);
+                        if current_gen == generation {
+                            world.rebuild();
+                            // Re-check generation before sending
+                            let current_gen = gen_handle
+                                .load(std::sync::atomic::Ordering::Acquire);
+                            if current_gen == generation
+                                && tx
+                                    .send(Message::RebuildWorld {
+                                        generation,
+                                        world,
+                                    })
+                                    .is_ok()
+                            {
+                                ctx.request_repaint();
+                            }
+                        }
+                    })
                 }
-            });
+                AppResponse::QUIT => {
+                    std::process::exit(0);
+                }
+                AppResponse::SAVE => {
+                    if self.file.is_none() {
+                        for i in 0..100 {
+                            if let Ok(f) = std::fs::File::create_new(format!(
+                                "model_{i}.half"
+                            )) {
+                                self.file = Some(f);
+                                break;
+                            }
+                        }
+                        if self.file.is_none() {
+                            panic!("could not create file");
+                        }
+                    }
+                    self.write_to_file();
+                }
+                _ => panic!("invalid flag"),
+            }
         }
     }
 }
@@ -377,6 +471,20 @@ bitflags::bitflags! {
         const CHANGED       = (1 << 1);
         /// The UI should be repainted
         const REDRAW        = (1 << 2);
+    }
+}
+
+bitflags::bitflags! {
+    /// Flags representing changes in the `App`
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    #[must_use]
+    struct AppResponse: u32 {
+        /// Request to save the model
+        const SAVE          = (1 << 0);
+        /// Request to quit the application
+        const QUIT          = (1 << 1);
+        /// The world should be re-evaluate
+        const WORLD_CHANGED = (1 << 2);
     }
 }
 
