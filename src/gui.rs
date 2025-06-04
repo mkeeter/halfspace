@@ -387,6 +387,7 @@ impl<'a> WorldView<'a> {
             SdfExact,
             Bitfield,
             Heightmap,
+            Shaded,
         }
         let initial_tag = match &entry.canvas {
             ViewCanvas::Canvas2 {
@@ -405,6 +406,10 @@ impl<'a> WorldView<'a> {
                 mode: ViewMode3::Heightmap,
                 ..
             } => ViewCanvasType::Heightmap,
+            ViewCanvas::Canvas3 {
+                mode: ViewMode3::Shaded,
+                ..
+            } => ViewCanvasType::Shaded,
         };
         let mut tag = initial_tag;
         let mut reset_camera = false;
@@ -433,6 +438,11 @@ impl<'a> WorldView<'a> {
                     ViewCanvasType::Heightmap,
                     "3D heightmap",
                 );
+                ui.selectable_value(
+                    &mut tag,
+                    ViewCanvasType::Shaded,
+                    "3D shaded",
+                );
                 ui.separator();
                 if ui.button("Reset camera").clicked() {
                     reset_camera = true;
@@ -453,7 +463,7 @@ impl<'a> WorldView<'a> {
                         _ => unreachable!(),
                     },
                 },
-                ViewCanvasType::Heightmap => {
+                ViewCanvasType::Heightmap | ViewCanvasType::Shaded => {
                     let size = fidget::render::VoxelSize::new(
                         size.width(),
                         size.height(),
@@ -463,6 +473,7 @@ impl<'a> WorldView<'a> {
                         canvas: fidget::gui::Canvas3::new(size),
                         mode: match tag {
                             ViewCanvasType::Heightmap => ViewMode3::Heightmap,
+                            ViewCanvasType::Shaded => ViewMode3::Shaded,
                             _ => unreachable!(),
                         },
                     }
@@ -724,7 +735,7 @@ fn block_body(ui: &mut egui::Ui, index: BlockIndex, block: &mut Block) -> bool {
                 }
                 IoValue::Input(value) => {
                     let s = block.inputs.get_mut(name).unwrap();
-                    let input_id = index.id().with("input_edit");
+                    let input_id = index.id().with("input_edit").with(name);
                     ui.with_layout(
                         egui::Layout::right_to_left(egui::Align::Center),
                         |ui| {

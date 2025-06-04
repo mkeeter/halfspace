@@ -47,6 +47,7 @@ pub enum ViewMode2 {
 #[derive(Copy, Clone, PartialEq)]
 pub enum ViewMode3 {
     Heightmap,
+    Shaded,
 }
 
 /// Rendered image, along with the settings that generated it
@@ -300,19 +301,42 @@ impl RenderTask {
                     ..Default::default()
                 };
                 let shape = fidget::vm::VmShape::from(settings.tree.clone());
+                let image = cfg.run(shape)?;
                 let image = match mode {
-                    ViewMode3::Heightmap => {
-                        let image = cfg.run(shape)?;
-                        image.map(|v| {
-                            if v.depth > 0 {
-                                let d = (v.depth as usize * 255
-                                    / image_size.depth() as usize)
-                                    as u8;
-                                [d, d, d, 255]
-                            } else {
-                                [0; 4]
-                            }
-                        })
+                    ViewMode3::Heightmap => image.map(|v| {
+                        if v.depth > 0 {
+                            let d = (v.depth as usize * 255
+                                / image_size.depth() as usize)
+                                as u8;
+                            [d, d, d, 255]
+                        } else {
+                            [0; 4]
+                        }
+                    }),
+                    ViewMode3::Shaded => {
+                        // XXX this should all happen on the GPU, probably
+                        let threads = Some(&fidget::render::ThreadPool::Global);
+                        let image = fidget::render::effects::denoise_normals(
+                            &image, threads,
+                        );
+                        let color = fidget::render::effects::apply_shading(
+                            &image, true, threads,
+                        );
+                        let mut out: fidget::render::Image<[u8; 4], _> =
+                            fidget::render::Image::new(image_size);
+                        out.apply_effect(
+                            |x, y| {
+                                let p = image[(y, x)];
+                                if p.depth > 0 {
+                                    let c = color[(y, x)];
+                                    [c[0], c[1], c[2], 255]
+                                } else {
+                                    [0, 0, 0, 0]
+                                }
+                            },
+                            threads,
+                        );
+                        out
                     }
                 };
                 let (data, _size) = image.take();
