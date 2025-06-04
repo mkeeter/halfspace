@@ -86,7 +86,6 @@ impl Value {
     }
 }
 
-#[derive(Clone)]
 pub struct Block {
     pub name: String,
     pub script: String,
@@ -101,11 +100,11 @@ pub struct Block {
 }
 
 /// Serialization-friendly subset of block state
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct BlockState {
-    pub name: String,
-    pub script: String,
-    pub inputs: HashMap<String, String>,
+    name: String,
+    script: String,
+    inputs: HashMap<String, String>,
 }
 
 impl From<BlockState> for Block {
@@ -155,7 +154,6 @@ impl BlockIndex {
     }
 }
 
-#[derive(Clone)]
 pub struct World {
     next_index: u64,
     pub order: Vec<BlockIndex>,
@@ -166,7 +164,7 @@ pub struct World {
 ///
 /// This is identical to [`World`], but with [`Block`] replaced with
 /// [`BlockState`] (to avoid the un-serializable [`BlockData`])
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct WorldState {
     next_index: u64,
     pub order: Vec<BlockIndex>,
@@ -224,6 +222,10 @@ pub struct BlockView {
     pub tree: fidget::context::Tree,
 }
 
+/// Transient block data (e.g. evaluation results)
+///
+/// This data is _not_ saved or serialized; it can be recalculated on-demand
+/// from the world's state.
 #[derive(Clone)]
 pub struct BlockData {
     /// Output from `print` calls in the script
