@@ -16,7 +16,7 @@ eframe = { version = "0.31.1", features = ["wgpu"] }
 egui = "0.31.1"
 egui-wgpu = "0.31.1"
 egui_dnd = "0.12.0"
-egui_dock = "0.16.0"
+egui_dock = { version = "0.16.0", features = ["serde"] }
 egui_extras = { git = "https://github.com/mkeeter/egui", features = ["syntect"], branch = "custom-syntect-settings-0.31.1-backport" }
 env_logger = "0.11.8"
 fidget = { git = "https://github.com/mkeeter/fidget" }

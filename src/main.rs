@@ -40,6 +40,7 @@ pub fn main() -> Result<(), eframe::Error> {
                 app.file = Some(f);
                 if file_length != 0 {
                     app.load_from_file()?;
+                    app.start_world_rebuild(&cc.egui_ctx);
                 }
             }
             Ok(Box::new(app))
@@ -80,6 +81,8 @@ struct App {
 #[derive(Clone, Serialize, Deserialize)]
 struct AppState {
     data: World,
+    tree: egui_dock::DockState<gui::Tab>,
+    views: HashMap<BlockIndex, view::ViewMode>,
 }
 
 impl App {
@@ -152,6 +155,12 @@ impl App {
     fn state(&self) -> AppState {
         AppState {
             data: self.data.clone(),
+            tree: self.tree.clone(),
+            views: self
+                .views
+                .iter()
+                .map(|(k, v)| (*k, v.canvas.into()))
+                .collect(),
         }
     }
 
@@ -225,15 +234,51 @@ impl App {
             .0;
 
         self.data = state.data;
+        self.tree = state.tree;
+        self.views = state
+            .views
+            .into_iter()
+            .map(|(k, v)| (k, view::ViewData::from(view::ViewCanvas::from(v))))
+            .collect();
         self.generation
             .store(0, std::sync::atomic::Ordering::Relaxed);
-        self.tree = egui_dock::DockState::new(vec![]);
         self.views = HashMap::new();
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx = tx; // use a new channel to orphan previous tasks
         self.rx = rx;
 
         Ok(())
+    }
+
+    fn start_world_rebuild(&self, ctx: &egui::Context) {
+        // Send the world to a worker thread for re-evaluation
+        let mut world = self.data.without_state();
+        let ctx = ctx.clone();
+        let tx = self.tx.clone();
+        let generation = self
+            .generation
+            .fetch_add(1u64, std::sync::atomic::Ordering::Release)
+            + 1;
+        let gen_handle = self.generation.clone();
+        rayon::spawn(move || {
+            // The world may have moved on before this script
+            // evaluation started; if so, then skip it entirely.
+            let current_gen =
+                gen_handle.load(std::sync::atomic::Ordering::Acquire);
+            if current_gen == generation {
+                world.rebuild();
+                // Re-check generation before sending
+                let current_gen =
+                    gen_handle.load(std::sync::atomic::Ordering::Acquire);
+                if current_gen == generation
+                    && tx
+                        .send(Message::RebuildWorld { generation, world })
+                        .is_ok()
+                {
+                    ctx.request_repaint();
+                }
+            }
+        })
     }
 }
 
@@ -404,37 +449,7 @@ impl eframe::App for App {
         for f in out.iter() {
             match f {
                 AppResponse::WORLD_CHANGED => {
-                    // Send the world to a worker thread for re-evaluation
-                    let mut world = self.data.without_state();
-                    let ctx = ctx.clone();
-                    let tx = self.tx.clone();
-                    let generation = self
-                        .generation
-                        .fetch_add(1u64, std::sync::atomic::Ordering::Release)
-                        + 1;
-                    let gen_handle = self.generation.clone();
-                    rayon::spawn(move || {
-                        // The world may have moved on before this script
-                        // evaluation started; if so, then skip it entirely.
-                        let current_gen = gen_handle
-                            .load(std::sync::atomic::Ordering::Acquire);
-                        if current_gen == generation {
-                            world.rebuild();
-                            // Re-check generation before sending
-                            let current_gen = gen_handle
-                                .load(std::sync::atomic::Ordering::Acquire);
-                            if current_gen == generation
-                                && tx
-                                    .send(Message::RebuildWorld {
-                                        generation,
-                                        world,
-                                    })
-                                    .is_ok()
-                            {
-                                ctx.request_repaint();
-                            }
-                        }
-                    })
+                    self.start_world_rebuild(ctx);
                 }
                 AppResponse::QUIT => {
                     std::process::exit(0);

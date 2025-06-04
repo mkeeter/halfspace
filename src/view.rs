@@ -1,4 +1,5 @@
 use crate::{BlockIndex, Message};
+use serde::{Deserialize, Serialize};
 
 /// State associated with a given view in the GUI
 ///
@@ -24,6 +25,40 @@ pub struct ViewData {
     generation: u64,
 }
 
+impl From<ViewCanvas> for ViewData {
+    fn from(canvas: ViewCanvas) -> Self {
+        Self {
+            task: None,
+            canvas,
+            image: None,
+            start_level: 0,
+            pending: None,
+            generation: 0,
+        }
+    }
+}
+
+impl From<ViewMode> for ViewCanvas {
+    fn from(value: ViewMode) -> Self {
+        match value {
+            // Use dummy sizes for the canvas; they'll be updated on the first
+            // drawing pass.
+            ViewMode::View2(mode) => Self::Canvas2 {
+                canvas: fidget::gui::Canvas2::new(
+                    fidget::render::ImageSize::new(64, 64),
+                ),
+                mode,
+            },
+            ViewMode::View3(mode) => Self::Canvas3 {
+                canvas: fidget::gui::Canvas3::new(
+                    fidget::render::VoxelSize::new(64, 64, 64),
+                ),
+                mode,
+            },
+        }
+    }
+}
+
 /// State associated with the canvas (for interactions)
 #[derive(Copy, Clone)]
 pub enum ViewCanvas {
@@ -37,14 +72,30 @@ pub enum ViewCanvas {
     },
 }
 
-#[derive(Copy, Clone, PartialEq)]
+impl From<ViewCanvas> for ViewMode {
+    fn from(value: ViewCanvas) -> Self {
+        match value {
+            ViewCanvas::Canvas2 { mode, .. } => ViewMode::View2(mode),
+            ViewCanvas::Canvas3 { mode, .. } => ViewMode::View3(mode),
+        }
+    }
+}
+
+/// Standalone serializable view mode
+#[derive(Copy, Clone, Serialize, Deserialize)]
+pub enum ViewMode {
+    View2(ViewMode2),
+    View3(ViewMode3),
+}
+
+#[derive(Copy, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ViewMode2 {
     SdfApprox,
     SdfExact,
     Bitfield,
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ViewMode3 {
     Heightmap,
     Shaded,
