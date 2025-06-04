@@ -1,7 +1,9 @@
+use clap::Parser;
 use egui_dnd::dnd;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::io::Write;
+use std::io::{Read, Seek, Write};
+use zerocopy::IntoBytes;
 
 mod draw;
 mod gui;
@@ -10,13 +12,38 @@ mod world;
 
 use world::{BlockIndex, World};
 
-pub fn main() -> Result<(), eframe::Error> {
-    let native_options = eframe::NativeOptions::default();
+/// An experimental CAD tool
+#[derive(clap::Parser, Debug)]
+#[clap(author, version, about, long_about = None)]
+struct Args {
+    /// File to edit (created if not present)
+    target: Option<std::path::PathBuf>,
+}
 
+pub fn main() -> Result<(), eframe::Error> {
+    env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or("info"),
+    )
+    .init();
+    let args = Args::parse();
+
+    let native_options = eframe::NativeOptions::default();
     eframe::run_native(
         "halfspace",
         native_options,
-        Box::new(|cc| Ok(Box::new(App::new(cc)))),
+        Box::new(|cc| {
+            let mut app = App::new(cc);
+            if let Some(f) = args.target {
+                let mut f = create_rw_file(f)?;
+                f.seek(std::io::SeekFrom::End(0))?;
+                let file_length = f.stream_position()?;
+                app.file = Some(f);
+                if file_length != 0 {
+                    app.load_from_file()?;
+                }
+            }
+            Ok(Box::new(app))
+        }),
     )
 }
 
@@ -137,13 +164,101 @@ impl App {
         let cfg = bincode::config::standard();
         let state_data = bincode::serde::encode_to_vec(&state, cfg).unwrap();
         let f = self.file.as_mut().unwrap();
-        f.write_all(b"HALF")?;
-        const FILE_VERSION: u32 = 1;
-        f.write_all(&FILE_VERSION.to_le_bytes())?;
+        f.rewind()?;
+        f.set_len(0)?;
+        f.write_all(FILE_MAGIC.as_bytes())?;
+        f.write_all(FILE_VERSION.as_bytes())?;
+        f.write_all((state_data.len() as u64).as_bytes())?;
         f.write_all(&state_data)?;
         f.flush()?;
         Ok(())
     }
+
+    /// Loads from the file in `self.file`
+    ///
+    /// # Panics
+    /// If `self.file` is `None`
+    fn load_from_file(&mut self) -> Result<(), ReadError> {
+        let f = self.file.as_mut().unwrap();
+
+        f.seek(std::io::SeekFrom::End(0))?;
+        let file_length = f.stream_position()?;
+        let Some(data_length) = file_length.checked_sub(HEADER_LENGTH as u64)
+        else {
+            return Err(ReadError::TooShort);
+        };
+
+        f.rewind()?;
+        let mut magic = [0u8; 4];
+        f.read_exact(&mut magic)?;
+        if magic != FILE_MAGIC {
+            return Err(ReadError::BadMagic {
+                expected: FILE_MAGIC,
+                actual: magic,
+            });
+        }
+        let mut file_version = 0u32;
+        f.read_exact(file_version.as_mut_bytes())?;
+        if file_version != FILE_VERSION {
+            return Err(ReadError::BadVersion {
+                expected: FILE_VERSION,
+                actual: file_version,
+            });
+        }
+        let mut expected_len = 0u64;
+        f.read_exact(expected_len.as_mut_bytes())?;
+        if expected_len != data_length {
+            return Err(ReadError::BadFileSize {
+                expected: expected_len,
+                actual: data_length,
+            });
+        }
+        if expected_len > 4 * 1024u64.pow(3) {
+            return Err(ReadError::SuspiciouslyLarge(expected_len));
+        }
+        let mut data = vec![0u8; expected_len as usize];
+        f.read_exact(&mut data)?;
+
+        let cfg = bincode::config::standard();
+        let state: AppState = bincode::serde::decode_from_slice(&data, cfg)
+            .map_err(ReadError::DecodeError)?
+            .0;
+
+        self.data = state.data;
+        self.generation
+            .store(0, std::sync::atomic::Ordering::Relaxed);
+        self.tree = egui_dock::DockState::new(vec![]);
+        self.views = HashMap::new();
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.tx = tx; // use a new channel to orphan previous tasks
+        self.rx = rx;
+
+        Ok(())
+    }
+}
+
+const FILE_VERSION: u32 = 1;
+const FILE_MAGIC: [u8; 4] = *b"HALF";
+const HEADER_LENGTH: usize = 4 + 4 + 8; // magic, version, length
+
+#[derive(thiserror::Error, Debug)]
+enum ReadError {
+    #[error("file is too short to contain the mandatory header")]
+    TooShort,
+    #[error(
+        "file has a bad magic header: expected {expected:?}, found {actual:?}"
+    )]
+    BadMagic { expected: [u8; 4], actual: [u8; 4] },
+    #[error("file has a bad version: expected {expected}, found {actual}")]
+    BadVersion { expected: u32, actual: u32 },
+    #[error("file has a bad size: expected {expected}, found {actual}")]
+    BadFileSize { expected: u64, actual: u64 },
+    #[error("io error encountered when loading file")]
+    IoError(#[from] std::io::Error),
+    #[error("file is suspiciously large ({0} bytes)")]
+    SuspiciouslyLarge(u64),
+    #[error("bincode failed to parse the file")]
+    DecodeError(bincode::error::DecodeError),
 }
 
 impl eframe::App for App {
@@ -327,9 +442,9 @@ impl eframe::App for App {
                 AppResponse::SAVE => {
                     if self.file.is_none() {
                         for i in 0..100 {
-                            if let Ok(f) = std::fs::File::create_new(format!(
-                                "model_{i}.half"
-                            )) {
+                            if let Ok(f) =
+                                create_rw_file(format!("model_{i}.half"))
+                            {
                                 self.file = Some(f);
                                 break;
                             }
@@ -338,12 +453,22 @@ impl eframe::App for App {
                             panic!("could not create file");
                         }
                     }
-                    self.write_to_file();
+                    self.write_to_file().unwrap();
                 }
                 _ => panic!("invalid flag"),
             }
         }
     }
+}
+
+fn create_rw_file<P: AsRef<std::path::Path>>(
+    p: P,
+) -> std::io::Result<std::fs::File> {
+    std::fs::File::options()
+        .create(true)
+        .append(true)
+        .read(true)
+        .open(p)
 }
 
 impl App {

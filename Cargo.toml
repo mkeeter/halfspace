@@ -11,19 +11,23 @@ readme = "README.md"
 [dependencies]
 bincode = { version = "2", features = ["serde"] }
 bitflags = "2.9.1"
+clap = "4.5.39"
 eframe = { version = "0.31.1", features = ["wgpu"] }
 egui = "0.31.1"
 egui-wgpu = "0.31.1"
 egui_dnd = "0.12.0"
 egui_dock = "0.16.0"
 egui_extras = { git = "https://github.com/mkeeter/egui", features = ["syntect"], branch = "custom-syntect-settings-0.31.1-backport" }
+env_logger = "0.11.8"
 fidget = { git = "https://github.com/mkeeter/fidget" }
+log = "0.4.27"
 nalgebra = "0.33.2"
 rayon = "1.10.0"
 rhai = { version = "1.21", features = ["sync", "internals"] }
 serde = "1"
 strum = { version = "0.27.1", features = ["derive"] }
 syntect = "5.2.0"
+thiserror = "2.0.12"
 zerocopy = { version = "0.8.25", features = ["derive"] }
 
 [build-dependencies]

@@ -228,15 +228,19 @@ impl RenderTask {
         let start_time = std::time::Instant::now();
         rayon::spawn(move || {
             if let Some(data) = Self::run(&settings_, level, cancel_) {
-                let _ = tx.send(Message::RenderView {
-                    block,
-                    generation,
-                    settings: settings_,
-                    level,
-                    start_time,
-                    data,
-                });
-                notify();
+                if tx
+                    .send(Message::RenderView {
+                        block,
+                        generation,
+                        settings: settings_,
+                        level,
+                        start_time,
+                        data,
+                    })
+                    .is_ok()
+                {
+                    notify();
+                }
             }
         });
         Self {
