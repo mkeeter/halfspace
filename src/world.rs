@@ -329,7 +329,57 @@ impl World {
     }
 
     fn rebuild(&mut self) {
+        // Steal order so that we can mutate self; we'll swap it back later
+        let order = std::mem::take(&mut self.order);
+
+        // Inputs are evaluated in a separate context with a scope that's
+        // accumulated from previous block outputs.
+        let mut input_scope = rhai::Scope::new();
+        input_scope.push_constant("x", fidget::context::Tree::x());
+        input_scope.push_constant("y", fidget::context::Tree::y());
+        input_scope.push_constant("z", fidget::context::Tree::z());
+
+        // We maintain a separate map of block names to detect duplicates
         let mut name_map = HashMap::new();
+        for i in &order {
+            input_scope = self.rebuild_block(*i, input_scope, &mut name_map);
+        }
+        self.order = order;
+    }
+
+    fn rebuild_block(
+        &mut self,
+        i: BlockIndex,
+        input_scope: rhai::Scope<'static>,
+        name_map: &mut HashMap<String, BlockIndex>,
+    ) -> rhai::Scope<'static> {
+        let block = self.blocks.get_mut(&i).unwrap();
+        block.data = Some(BlockData {
+            stdout: String::new(),
+            name_error: None,
+            debug: HashMap::new(),
+            script_errors: vec![],
+            io_values: vec![],
+            view: None,
+        });
+        let data = block.data.as_mut().unwrap();
+
+        // Check that the name is valid
+        if !rhai::is_valid_identifier(&block.name) {
+            data.name_error = Some(NameError::InvalidIdentifier);
+            return input_scope;
+        }
+        // Bind from the name to a block index (if available)
+        match name_map.entry(block.name.clone()) {
+            std::collections::hash_map::Entry::Occupied(..) => {
+                data.name_error = Some(NameError::DuplicateName);
+                return input_scope;
+            }
+            std::collections::hash_map::Entry::Vacant(v) => {
+                v.insert(i);
+            }
+        }
+
         let mut engine = rhai::Engine::new();
         fidget::rhai::tree::register(&mut engine);
         fidget::rhai::vec::register(&mut engine);
@@ -353,213 +403,101 @@ impl World {
             }
         });
 
-        let io_log = Arc::new(RwLock::new(IoLog::default()));
-        let io_debug = io_log.clone();
-        engine.on_debug(move |x, _src, pos| {
-            io_debug
-                .write()
-                .unwrap()
-                .debug
-                .entry(pos.line().unwrap())
-                .or_default()
-                .push(x.to_owned())
-        });
-        let io_print = io_log.clone();
-        engine.on_print(move |s| {
-            io_print.write().unwrap().stdout.push(s.to_owned())
-        });
-
-        let io_values = Arc::new(RwLock::new(IoValues::default()));
-        let output_handle = io_values.clone();
-        engine.register_fn(
-            "output",
-            move |ctx: rhai::NativeCallContext,
-                  name: &str,
-                  v: rhai::Dynamic|
-                  -> Result<(), Box<rhai::EvalAltResult>> {
-                let mut out = output_handle.write().unwrap();
-                out.insert_name(&ctx, name)?;
-                out.values
-                    .push((name.to_owned(), IoValue::Output(Value::from(v))));
-                Ok(())
-            },
-        );
-
-        // Inputs are evaluated in a separate context with a scope that's
-        // accumulated from previous block outputs.
-        let input_scope = Arc::new(RwLock::new(rhai::Scope::new()));
-        {
-            let mut i = input_scope.write().unwrap();
-            i.push_constant("x", fidget::context::Tree::x());
-            i.push_constant("y", fidget::context::Tree::y());
-            i.push_constant("z", fidget::context::Tree::z());
-        }
-
-        for i in &self.order {
-            let block = &mut self.blocks.get_mut(i).unwrap();
-            block.data = Some(BlockData {
-                stdout: String::new(),
-                name_error: None,
-                debug: HashMap::new(),
-                script_errors: vec![],
-                io_values: vec![],
-                view: None,
-            });
-            let data = block.data.as_mut().unwrap();
-
-            // Check that the name is valid
-            if !rhai::is_valid_identifier(&block.name) {
-                data.name_error = Some(NameError::InvalidIdentifier);
-                continue;
-            }
-            // Bind from the name to a block index (if available)
-            match name_map.entry(block.name.clone()) {
-                std::collections::hash_map::Entry::Occupied(..) => {
-                    data.name_error = Some(NameError::DuplicateName);
-                    continue;
-                }
-                std::collections::hash_map::Entry::Vacant(v) => {
-                    v.insert(*i);
-                }
-            }
-
-            let input_scope_handle = input_scope.clone();
-            let input_text = Arc::new(RwLock::new(block.inputs.clone()));
-            let input_text_handle = input_text.clone();
-            let input_handle = io_values.clone();
-            let input_fn = move |ctx: rhai::NativeCallContext,
-                                 name: rhai::Dynamic|
-                  -> Result<
-                rhai::Dynamic,
-                Box<rhai::EvalAltResult>,
-            > {
-                let name = if let Ok(c) = name.as_char() {
-                    format!("{c}")
-                } else {
-                    name.into_string()?
-                };
-                let mut input_handle = input_handle.write().unwrap();
-                input_handle.insert_name(&ctx, &name)?;
-
-                let mut input_text_lock = input_text_handle.write().unwrap();
-                let txt = input_text_lock
-                    .entry(name.to_owned())
-                    .or_insert("0".to_owned());
-                let e = ctx.engine();
-                let mut scope = input_scope_handle.write().unwrap();
-                let v = e.eval_expression_with_scope::<rhai::Dynamic>(
-                    &mut scope, txt,
-                );
-                let i = match &v {
-                    Ok(value) => Ok(Value::from(value.clone())),
-                    Err(e) => Err(e.to_string()),
-                };
-                input_handle
-                    .values
-                    .push((name.to_owned(), IoValue::Input(i)));
-                v.map_err(|_| "error in input expression".into())
-            };
-            engine.register_fn("input", input_fn);
-            let view_handle = io_values.clone();
-            engine.register_fn(
-                "view",
-                move |ctx: rhai::NativeCallContext,
-                      tree: fidget::context::Tree|
-                      -> Result<(), Box<rhai::EvalAltResult>> {
-                    let mut view_handle = view_handle.write().unwrap();
-                    if view_handle.view.is_some() {
-                        return Err(rhai::EvalAltResult::ErrorRuntime(
-                            "cannot have multiple views in a single block"
-                                .into(),
-                            ctx.position(),
-                        )
-                        .into());
-                    }
-                    view_handle.view = Some(tree);
-                    Ok(())
-                },
-            );
-
-            let ast = match engine.compile(&block.script) {
-                Ok(ast) => ast,
-                Err(e) => {
-                    data.script_errors.push(BlockError {
-                        message: e.to_string(),
-                        line: e.position().line(),
-                    });
-                    continue;
-                }
-            };
-            let mut scope = rhai::Scope::new();
-            scope.push_constant("x", fidget::context::Tree::x());
-            scope.push_constant("y", fidget::context::Tree::y());
-            scope.push_constant("z", fidget::context::Tree::z());
-            let r =
-                engine.eval_ast_with_scope::<rhai::Dynamic>(&mut scope, &ast);
-
-            // Update block state based on actions taken by the script
-            let (stdout, debug) = io_log.write().unwrap().take();
-            data.stdout = stdout.join("\n");
-            data.debug = debug;
-            let (io_names, io_values, io_view) =
-                io_values.write().unwrap().take();
-            data.io_values = io_values;
-            data.view = io_view.map(|tree| BlockView { tree });
-
-            // Update inputs, which may have been modified
-            block.inputs = std::mem::take(&mut input_text.write().unwrap());
-
-            // Write outputs into the shared input scope
-            let obj: rhai::Map = data
-                .io_values
-                .iter()
-                .filter_map(|(name, value)| match value {
-                    IoValue::Output(value) => {
-                        Some((name.into(), value.to_dynamic()))
-                    }
-                    IoValue::Input(..) => None,
-                })
-                .collect();
-            input_scope.write().unwrap().push(&block.name, obj);
-
-            if let Err(e) = r {
+        let ast = match engine.compile(&block.script) {
+            Ok(ast) => ast,
+            Err(e) => {
                 data.script_errors.push(BlockError {
                     message: e.to_string(),
                     line: e.position().line(),
                 });
-            } else {
-                // If the script evaluated successfully, filter out any input
-                // fields which haven't been used in the script.
-                block.inputs.retain(|k, _| io_names.contains(k));
+                return input_scope;
             }
+        };
+
+        // Build the data used during block evaluation
+        let eval_data = Arc::new(RwLock::new(BlockEvalData::new(
+            std::mem::take(&mut block.inputs),
+            input_scope,
+        )));
+        BlockEvalData::bind(&eval_data, &mut engine);
+
+        // Local scope for evaluating the body of the script
+        let mut scope = rhai::Scope::new();
+        scope.push_constant("x", fidget::context::Tree::x());
+        scope.push_constant("y", fidget::context::Tree::y());
+        scope.push_constant("z", fidget::context::Tree::z());
+        let r = engine.eval_ast_with_scope::<rhai::Dynamic>(&mut scope, &ast);
+
+        // Update block state based on actions taken by the script
+        let eval_data = std::mem::take(&mut *eval_data.write().unwrap());
+        data.stdout = eval_data.stdout.join("\n");
+        data.debug = eval_data.debug;
+        data.io_values = eval_data.values;
+        data.view = eval_data.view.map(|tree| BlockView { tree });
+
+        // Update inputs, which may have been modified
+        block.inputs = eval_data.inputs;
+
+        // Write outputs into the shared input scope
+        let obj: rhai::Map = data
+            .io_values
+            .iter()
+            .filter_map(|(name, value)| match value {
+                IoValue::Output(value) => {
+                    Some((name.into(), value.to_dynamic()))
+                }
+                IoValue::Input(..) => None,
+            })
+            .collect();
+        let mut input_scope = eval_data.scope;
+        input_scope.push(&block.name, obj);
+
+        if let Err(e) = r {
+            data.script_errors.push(BlockError {
+                message: e.to_string(),
+                line: e.position().line(),
+            });
+        } else {
+            // If the script evaluated successfully, filter out any input
+            // fields which haven't been used in the script.
+            block.inputs.retain(|k, _| eval_data.new_inputs.contains(k));
         }
+
+        input_scope
     }
 }
 
-/// Helper `struct` to accumulate `print` and `debug` calls
+/// Handle to intermediate block data during evaluation
 #[derive(Default)]
-struct IoLog {
-    stdout: Vec<String>,
-    debug: HashMap<usize, Vec<String>>,
-}
-impl IoLog {
-    fn take(&mut self) -> (Vec<String>, HashMap<usize, Vec<String>>) {
-        (
-            std::mem::take(&mut self.stdout),
-            std::mem::take(&mut self.debug),
-        )
-    }
-}
-
-/// Helper struct to record `input`, `output`, and `view` calls
-#[derive(Default)]
-struct IoValues {
+struct BlockEvalData {
     names: HashSet<String>,
     values: Vec<(String, IoValue)>,
     view: Option<fidget::context::Tree>,
+
+    stdout: Vec<String>,
+    debug: HashMap<usize, Vec<String>>,
+    inputs: HashMap<String, String>,
+    new_inputs: HashSet<String>,
+    scope: rhai::Scope<'static>,
 }
 
-impl IoValues {
+impl BlockEvalData {
+    fn new(
+        inputs: HashMap<String, String>,
+        scope: rhai::Scope<'static>,
+    ) -> Self {
+        Self {
+            names: HashSet::new(),
+            values: vec![],
+            view: None,
+            stdout: vec![],
+            debug: HashMap::new(),
+            inputs,
+            new_inputs: HashSet::new(),
+            scope,
+        }
+    }
+
     fn insert_name(
         &mut self,
         ctx: &rhai::NativeCallContext,
@@ -581,17 +519,107 @@ impl IoValues {
             Ok(())
         }
     }
-    fn take(
+
+    fn output(
         &mut self,
-    ) -> (
-        HashSet<String>,
-        Vec<(String, IoValue)>,
-        Option<fidget::context::Tree>,
-    ) {
-        (
-            std::mem::take(&mut self.names),
-            std::mem::take(&mut self.values),
-            self.view.take(),
-        )
+        ctx: rhai::NativeCallContext,
+        name: &str,
+        v: rhai::Dynamic,
+    ) -> Result<(), Box<rhai::EvalAltResult>> {
+        self.insert_name(&ctx, name)?;
+        self.values
+            .push((name.to_owned(), IoValue::Output(Value::from(v))));
+        Ok(())
+    }
+
+    fn input(
+        &mut self,
+        ctx: rhai::NativeCallContext,
+        name: rhai::Dynamic,
+    ) -> Result<rhai::Dynamic, Box<rhai::EvalAltResult>> {
+        let name = if let Ok(c) = name.as_char() {
+            format!("{c}")
+        } else {
+            name.into_string()?
+        };
+        self.insert_name(&ctx, &name)?;
+
+        let txt = self.inputs.entry(name.to_owned()).or_insert("0".to_owned());
+        self.new_inputs.insert(name.to_owned());
+        let e = ctx.engine();
+        let v =
+            e.eval_expression_with_scope::<rhai::Dynamic>(&mut self.scope, txt);
+        let i = match &v {
+            Ok(value) => Ok(Value::from(value.clone())),
+            Err(e) => Err(e.to_string()),
+        };
+        self.values.push((name.to_owned(), IoValue::Input(i)));
+        v.map_err(|_| "error in input expression".into())
+    }
+
+    fn view(
+        &mut self,
+
+        ctx: rhai::NativeCallContext,
+        tree: fidget::context::Tree,
+    ) -> Result<(), Box<rhai::EvalAltResult>> {
+        if self.view.is_some() {
+            return Err(rhai::EvalAltResult::ErrorRuntime(
+                "cannot have multiple views in a single block".into(),
+                ctx.position(),
+            )
+            .into());
+        }
+        self.view = Some(tree);
+        Ok(())
+    }
+
+    /// Binds `input`, `output`, `view`, `print`, and `debug`
+    fn bind(eval_data: &Arc<RwLock<Self>>, engine: &mut rhai::Engine) {
+        let eval_data_ = eval_data.clone();
+        engine.on_debug(move |x, _src, pos| {
+            eval_data_
+                .write()
+                .unwrap()
+                .debug
+                .entry(pos.line().unwrap())
+                .or_default()
+                .push(x.to_owned())
+        });
+        let eval_data_ = eval_data.clone();
+        engine.on_print(move |s| {
+            eval_data_.write().unwrap().stdout.push(s.to_owned())
+        });
+
+        let eval_data_ = eval_data.clone();
+        engine.register_fn(
+            "input",
+            move |ctx: rhai::NativeCallContext, name: rhai::Dynamic| {
+                let mut eval_data = eval_data_.write().unwrap();
+                eval_data.input(ctx, name)
+            },
+        );
+
+        let eval_data_ = eval_data.clone();
+        engine.register_fn(
+            "output",
+            move |ctx: rhai::NativeCallContext,
+                  name: &str,
+                  v: rhai::Dynamic|
+                  -> Result<(), Box<rhai::EvalAltResult>> {
+                eval_data_.write().unwrap().output(ctx, name, v)
+            },
+        );
+
+        let eval_data_ = eval_data.clone();
+        engine.register_fn(
+            "view",
+            move |ctx: rhai::NativeCallContext,
+                  tree: fidget::context::Tree|
+                  -> Result<(), Box<rhai::EvalAltResult>> {
+                let mut eval_data = eval_data_.write().unwrap();
+                eval_data.view(ctx, tree)
+            },
+        );
     }
 }
