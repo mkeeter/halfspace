@@ -381,11 +381,48 @@ impl eframe::App for App {
                 });
                 ui.separator();
 
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    if self.left(ui) {
-                        out |= AppResponse::WORLD_CHANGED;
-                    }
-                });
+                ui.with_layout(
+                    egui::Layout::bottom_up(egui::Align::LEFT),
+                    |ui| {
+                        // Draw the "new block" button at the bottom
+                        ui.add_space(5.0);
+                        egui::ComboBox::from_id_salt("new_script_block")
+                            .selected_text(gui::NEW_BLOCK)
+                            .width(0.0)
+                            .show_ui(ui, |ui| {
+                                let mut index = usize::MAX;
+                                let mut prev_category = None;
+                                for (i, s) in
+                                    self.library.shapes.iter().enumerate()
+                                {
+                                    if prev_category
+                                        .is_some_and(|c| c != s.category)
+                                    {
+                                        ui.separator();
+                                    }
+                                    ui.selectable_value(&mut index, i, &s.name);
+                                    prev_category = Some(s.category);
+                                }
+                                if index != usize::MAX {
+                                    let b = &self.library.shapes[index];
+                                    if self.data.new_block_from(b) {
+                                        out |= AppResponse::WORLD_CHANGED;
+                                    }
+                                }
+                            });
+                        ui.separator();
+                        ui.with_layout(
+                            egui::Layout::top_down(egui::Align::LEFT),
+                            |ui| {
+                                egui::ScrollArea::vertical().show(ui, |ui| {
+                                    if self.block_list(ui) {
+                                        out |= AppResponse::WORLD_CHANGED;
+                                    }
+                                });
+                            },
+                        );
+                    },
+                );
             });
 
         egui::CentralPanel::default()
@@ -489,11 +526,11 @@ fn create_rw_file<P: AsRef<std::path::Path>>(
 }
 
 impl App {
-    /// Draws the left side panel
+    /// Draws the list of blocks
     ///
     /// Returns `true` if anything changed
     #[must_use]
-    fn left(&mut self, ui: &mut egui::Ui) -> bool {
+    fn block_list(&mut self, ui: &mut egui::Ui) -> bool {
         // Draw blocks
         let mut to_delete = HashSet::new();
         let mut changed = false;
@@ -576,30 +613,6 @@ impl App {
         changed |= self.data.retain(|index| !to_delete.contains(index));
         self.views.retain(|index, _| !to_delete.contains(index));
 
-        // Draw the "new block" button below a separator
-        // XXX this should be pinned to the bottom and the region should be
-        // scrollable
-        if !self.data.is_empty() {
-            ui.separator();
-        }
-        egui::ComboBox::from_id_salt("new_script_block")
-            .selected_text(gui::NEW_BLOCK)
-            .width(0.0)
-            .show_ui(ui, |ui| {
-                let mut index = usize::MAX;
-                let mut prev_category = None;
-                for (i, s) in self.library.shapes.iter().enumerate() {
-                    if prev_category.is_some_and(|c| c != s.category) {
-                        ui.separator();
-                    }
-                    ui.selectable_value(&mut index, i, &s.name);
-                    prev_category = Some(s.category);
-                }
-                if index != usize::MAX {
-                    let b = &self.library.shapes[index];
-                    changed |= self.data.new_block_from(b);
-                }
-            });
         changed
     }
 }
