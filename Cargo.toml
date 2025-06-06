@@ -19,7 +19,9 @@ egui_dnd = "0.12.0"
 egui_dock = { version = "0.16.0", features = ["serde"] }
 egui_extras = { git = "https://github.com/mkeeter/egui", features = ["syntect"], branch = "custom-syntect-settings-0.31.1-backport" }
 env_logger = "0.11.8"
+facet = "0.27.12"
 fidget = { git = "https://github.com/mkeeter/fidget" }
+heck = "0.5"
 log = "0.4.27"
 nalgebra = "0.33.2"
 rayon = "1.10.0"

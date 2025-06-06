@@ -7,6 +7,7 @@ use fidget::{
     context::Tree,
     shapes::{Vec2, Vec3},
 };
+use heck::ToSnakeCase;
 use serde::{Deserialize, Serialize};
 
 #[allow(unused)]
@@ -278,16 +279,7 @@ impl World {
     pub fn new_empty_block(&mut self) -> bool {
         let index = BlockIndex(self.next_index);
         self.next_index += 1;
-        let names = self
-            .blocks
-            .values()
-            .map(|b| b.name.as_str())
-            .collect::<HashSet<_>>();
-        // XXX this is Accidentally Quadratic if you add a bunch of blocks
-        let name = std::iter::once("block".to_owned())
-            .chain((0..).map(|i| format!("block_{i:03}")))
-            .find(|name| !names.contains(name.as_str()))
-            .unwrap();
+        let name = self.next_name_with_prefix("script");
 
         self.blocks.insert(
             index,
@@ -295,6 +287,41 @@ impl World {
                 name,
                 script: "".to_owned(),
                 inputs: HashMap::new(),
+                data: None,
+            },
+        );
+        self.order.push(index);
+        true
+    }
+
+    fn next_name_with_prefix(&self, s: &str) -> String {
+        // XXX this is Accidentally Quadratic if you add a bunch of blocks
+        let names = self
+            .blocks
+            .values()
+            .map(|b| b.name.as_str())
+            .collect::<HashSet<_>>();
+
+        std::iter::once(s.to_owned())
+            .chain((0..).map(|i| format!("{s}_{i:03}")))
+            .find(|name| !names.contains(name.as_str()))
+            .unwrap()
+    }
+
+    #[must_use]
+    pub fn new_block_from(
+        &mut self,
+        s: &crate::shapes::ShapeDefinition,
+    ) -> bool {
+        let index = BlockIndex(self.next_index);
+        self.next_index += 1;
+        let name = self.next_name_with_prefix(&s.name.to_snake_case());
+        self.blocks.insert(
+            index,
+            Block {
+                name,
+                script: s.script.clone(),
+                inputs: s.inputs.clone(),
                 data: None,
             },
         );

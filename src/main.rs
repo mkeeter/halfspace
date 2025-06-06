@@ -7,6 +7,7 @@ use zerocopy::IntoBytes;
 
 mod draw;
 mod gui;
+mod shapes;
 mod view;
 mod world;
 
@@ -66,6 +67,7 @@ enum Message {
 struct App {
     data: World,
     generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    library: shapes::ShapeLibrary,
 
     file: Option<std::fs::File>,
 
@@ -134,13 +136,10 @@ impl App {
             style.interaction.show_tooltips_only_when_still = false;
         });
 
-        // Customize egui here with cc.egui_ctx.set_fonts and cc.egui_ctx.set_visuals.
-        // Restore app state using cc.storage (requires the "persistence" feature).
-        // Use the cc.gl (a glow::Context) to create graphics shaders and buffers that you can use
-        // for e.g. egui::PaintCallback.
         let (tx, rx) = std::sync::mpsc::channel();
         Self {
             data: World::new(),
+            library: shapes::ShapeLibrary::build(),
             tree: egui_dock::DockState::new(vec![]),
             file: None,
             syntax,
@@ -447,6 +446,8 @@ impl eframe::App for App {
                     }
                 }
             });
+
+        // Handle app-level actions
         for f in out.iter() {
             match f {
                 AppResponse::WORLD_CHANGED => {
@@ -576,12 +577,27 @@ impl App {
         self.views.retain(|index, _| !to_delete.contains(index));
 
         // Draw the "new block" button below a separator
+        // XXX this should be pinned to the bottom and the region should be
+        // scrollable
         if !self.data.is_empty() {
             ui.separator();
         }
         if ui.button(gui::NEW_BLOCK).clicked() {
             changed |= self.data.new_empty_block();
         }
+        egui::ComboBox::from_id_salt("new_script_block")
+            .selected_text("new block")
+            .width(0.0)
+            .show_ui(ui, |ui| {
+                let mut index = usize::MAX;
+                for (i, s) in self.library.shapes.iter().enumerate() {
+                    ui.selectable_value(&mut index, i, &s.name);
+                }
+                if index != usize::MAX {
+                    let b = &self.library.shapes[index];
+                    changed |= self.data.new_block_from(b);
+                }
+            });
         changed
     }
 }
