@@ -20,18 +20,38 @@ impl ShapeLibrary {
             names: HashSet::new(),
             lib: ShapeLibrary { shapes: vec![] },
         };
+        v.names.insert("Script".to_owned());
+        v.lib.shapes.push(ShapeDefinition {
+            name: "Script".to_owned(),
+            script: "".to_owned(),
+            inputs: HashMap::new(),
+            category: ShapeCategory::Halfspace,
+        });
         visit_shapes(&mut v);
         v.lib
     }
 }
 
+#[derive(Copy, Clone, PartialEq)]
+pub enum ShapeCategory {
+    Halfspace,
+    Fidget,
+}
+
 pub struct ShapeDefinition {
     /// Name of the shape type (typically capitalized)
     pub name: String,
+
     /// Script to use when building this shape as a block
     pub script: String,
+
     /// Inputs to populate when building this shape as a block
     pub inputs: HashMap<String, String>,
+
+    /// Category of shape
+    ///
+    /// The UI adds separator between categories in the selection menu
+    pub category: ShapeCategory,
 }
 
 impl ShapeVisitor for Visitor {
@@ -53,7 +73,9 @@ impl ShapeVisitor for Visitor {
         let facet::Type::User(facet::UserType::Struct(s)) = T::SHAPE.ty else {
             panic!("must be a struct-shaped type");
         };
-        let mut script = format!("// auto-generated script for {shape_name}\n");
+        let mut script = format!(
+            "// auto-generated script for fidget::shapes::{shape_name}\n"
+        );
         let mut inputs: HashMap<String, String> = HashMap::new();
         for f in s.fields {
             let field_name = f.name;
@@ -80,6 +102,10 @@ impl ShapeVisitor for Visitor {
                 panic!("unknown type ID for {}", f.shape().type_identifier)
             };
             i.insert(t.to_owned());
+            script += "\n";
+            for line in f.doc {
+                script += &format!("// {line}\n");
+            }
             script += &format!("let {field_name} = input(\"{field_name}\");\n");
         }
         let obj = format!(
@@ -91,12 +117,13 @@ impl ShapeVisitor for Visitor {
                 .join(", ")
         );
         script +=
-            &format!("let out = {}({obj});\n", shape_name.to_snake_case());
+            &format!("\nlet out = {}({obj});\n", shape_name.to_snake_case());
         script += "output(\"out\", out);\nview(out);";
         self.lib.shapes.push(ShapeDefinition {
             name: shape_name.to_owned(),
             script,
             inputs,
+            category: ShapeCategory::Fidget,
         });
     }
 }

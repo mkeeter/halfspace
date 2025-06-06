@@ -582,16 +582,18 @@ impl App {
         if !self.data.is_empty() {
             ui.separator();
         }
-        if ui.button(gui::NEW_BLOCK).clicked() {
-            changed |= self.data.new_empty_block();
-        }
         egui::ComboBox::from_id_salt("new_script_block")
-            .selected_text("new block")
+            .selected_text(gui::NEW_BLOCK)
             .width(0.0)
             .show_ui(ui, |ui| {
                 let mut index = usize::MAX;
+                let mut prev_category = None;
                 for (i, s) in self.library.shapes.iter().enumerate() {
+                    if prev_category.is_some_and(|c| c != s.category) {
+                        ui.separator();
+                    }
                     ui.selectable_value(&mut index, i, &s.name);
+                    prev_category = Some(s.category);
                 }
                 if index != usize::MAX {
                     let b = &self.library.shapes[index];
