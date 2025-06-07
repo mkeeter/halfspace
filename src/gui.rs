@@ -194,7 +194,7 @@ impl<'a> WorldView<'a> {
             ) => {
                 ui.painter().add(egui_wgpu::Callback::new_paint_callback(
                     rect,
-                    crate::painters::WgpuBitmapPainter::new(
+                    crate::painters::WgpuBitfieldPainter::new(
                         index,
                         image.clone(),
                         size,

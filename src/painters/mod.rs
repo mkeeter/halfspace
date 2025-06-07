@@ -2,12 +2,12 @@
 
 use eframe::egui_wgpu::wgpu;
 
-mod bitmap;
+mod bitfield;
 mod clear;
 mod heightmap;
 mod sdf;
 
-pub use bitmap::WgpuBitmapPainter;
+pub use bitfield::WgpuBitfieldPainter;
 pub use heightmap::WgpuHeightmapPainter;
 pub use sdf::WgpuSdfPainter;
 
@@ -16,7 +16,7 @@ pub use sdf::WgpuSdfPainter;
 /// This is constructed *once* and used for every GPU rendering task in the
 /// GUI.
 pub struct WgpuResources {
-    bitmap: bitmap::BitmapResources,
+    bitfield: bitfield::BitfieldResources,
     heightmap: heightmap::HeightmapResources,
     clear: clear::ClearResources,
     sdf: sdf::SdfResources,
@@ -31,7 +31,7 @@ pub struct Uniforms {
 
 impl WgpuResources {
     pub fn reset(&mut self) {
-        self.bitmap.reset();
+        self.bitfield.reset();
         self.heightmap.reset();
         self.sdf.reset();
     }
@@ -50,13 +50,13 @@ impl WgpuResources {
         let clear = clear::ClearResources::new(device, target_format);
         let heightmap =
             heightmap::HeightmapResources::new(device, target_format);
-        let bitmap = bitmap::BitmapResources::new(device, target_format);
+        let bitfield = bitfield::BitfieldResources::new(device, target_format);
         let sdf = sdf::SdfResources::new(device, target_format);
 
         WgpuResources {
             clear,
             heightmap,
-            bitmap,
+            bitfield,
             sdf,
         }
     }

@@ -341,14 +341,19 @@ impl RenderTask {
                 let shape = fidget::vm::VmShape::from(settings.tree.clone());
                 let tmp = cfg.run(shape)?;
                 match mode {
-                    ViewMode2::Bitfield => ImageData::Rgba(
-                        fidget::render::effects::to_rgba_bitmap(
-                            tmp,
-                            true,
-                            cfg.threads,
-                        )
-                        .into_iter()
-                        .collect(),
+                    ViewMode2::Bitfield => ImageData::Distance(
+                        tmp.into_iter()
+                            .map(|d| match d.distance() {
+                                Ok(d) => d,
+                                Err(e) => {
+                                    if e.inside {
+                                        -f32::INFINITY
+                                    } else {
+                                        f32::INFINITY
+                                    }
+                                }
+                            })
+                            .collect(),
                     ),
                     ViewMode2::Sdf => ImageData::Distance(
                         tmp.into_iter()

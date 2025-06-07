@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use zerocopy::IntoBytes;
 
 /// GPU callback
-pub struct WgpuBitmapPainter {
+pub struct WgpuBitfieldPainter {
     /// Current view, which may differ from the image's view
     view: fidget::render::View2,
     size: fidget::render::ImageSize,
@@ -24,14 +24,14 @@ pub struct WgpuBitmapPainter {
     image: ViewImage,
 }
 
-impl WgpuBitmapPainter {
+impl WgpuBitfieldPainter {
     pub fn new(
         index: BlockIndex,
         image: ViewImage,
         size: fidget::render::ImageSize,
         view: fidget::render::View2,
     ) -> Self {
-        assert!(matches!(image.data, ImageData::Rgba(..)));
+        assert!(matches!(image.data, ImageData::Distance(..)));
         Self {
             index,
             image,
@@ -41,15 +41,15 @@ impl WgpuBitmapPainter {
     }
 }
 
-pub(crate) struct BitmapResources {
+pub(crate) struct BitfieldResources {
     pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
 
-    spare_bitmaps: HashMap<wgpu::Extent3d, Vec<BitmapData>>,
-    bound_bitmaps: HashMap<BlockIndex, BitmapData>,
+    spare_bitmaps: HashMap<wgpu::Extent3d, Vec<BitfieldData>>,
+    bound_bitmaps: HashMap<BlockIndex, BitfieldData>,
 }
 
-impl BitmapResources {
+impl BitfieldResources {
     pub fn new(
         device: &wgpu::Device,
         target_format: wgpu::TextureFormat,
@@ -61,7 +61,7 @@ impl BitmapResources {
                 source: wgpu::ShaderSource::Wgsl(
                     include_str!(concat!(
                         env!("CARGO_MANIFEST_DIR"),
-                        "/shaders/image.wgsl"
+                        "/shaders/bitfield.wgsl"
                     ))
                     .into(),
                 ),
@@ -197,7 +197,7 @@ impl BitmapResources {
                     mip_level_count: 1,
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    format: wgpu::TextureFormat::R32Float,
                     usage: wgpu::TextureUsages::TEXTURE_BINDING
                         | wgpu::TextureUsages::COPY_DST,
                     view_formats: &[],
@@ -252,7 +252,7 @@ impl BitmapResources {
                         ],
                     });
 
-                BitmapData {
+                BitfieldData {
                     sampler,
                     texture,
                     bind_group,
@@ -277,7 +277,7 @@ impl BitmapResources {
 }
 
 /// Resources used to render a single bitmap
-pub(crate) struct BitmapData {
+pub(crate) struct BitfieldData {
     #[expect(unused)] // kept alive for lifetime purposes
     sampler: wgpu::Sampler,
 
@@ -291,7 +291,7 @@ pub(crate) struct BitmapData {
     bind_group: wgpu::BindGroup,
 }
 
-impl egui_wgpu::CallbackTrait for WgpuBitmapPainter {
+impl egui_wgpu::CallbackTrait for WgpuBitfieldPainter {
     fn prepare(
         &self,
         device: &wgpu::Device,
@@ -316,7 +316,7 @@ impl egui_wgpu::CallbackTrait for WgpuBitmapPainter {
         };
 
         let (texture, uniform_buffer) =
-            gr.bitmap.get_data(device, self.index, texture_size);
+            gr.bitfield.get_data(device, self.index, texture_size);
 
         // Upload bitmap image data
         queue.write_texture(
@@ -393,6 +393,6 @@ impl egui_wgpu::CallbackTrait for WgpuBitmapPainter {
         let rs: &WgpuResources = resources.get().unwrap();
 
         rs.clear.paint(render_pass);
-        rs.bitmap.paint(render_pass, self.index);
+        rs.bitfield.paint(render_pass, self.index);
     }
 }
