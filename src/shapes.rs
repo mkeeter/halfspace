@@ -87,13 +87,25 @@ impl ShapeVisitor for Visitor {
 
             // Same set of types as `fidget::rhai::shapes::Type`
             let t = if f.shape().id == fidget::shapes::Vec2::SHAPE.id {
-                "[0, 0]"
+                if field_name == "upper" || field_name == "scale" {
+                    "[1, 1]"
+                } else {
+                    "[0, 0]"
+                }
             } else if f.shape().id == fidget::shapes::Vec3::SHAPE.id {
-                "[0, 0, 0]"
+                if field_name == "upper" || field_name == "scale" {
+                    "[1, 1, 1]"
+                } else {
+                    "[0, 0, 0]"
+                }
             } else if f.shape().id == fidget::shapes::Vec4::SHAPE.id {
                 "[0, 0, 0, 0]"
             } else if f.shape().id == f64::SHAPE.id {
-                "0"
+                if field_name == "radius" || field_name == "scale" {
+                    "1"
+                } else {
+                    "0"
+                }
             } else if f.shape().id == fidget::context::Tree::SHAPE.id {
                 "x"
             } else if f.shape().id == Vec::<fidget::context::Tree>::SHAPE.id {
