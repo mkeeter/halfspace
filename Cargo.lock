@@ -1876,6 +1876,7 @@ dependencies = [
  "heck",
  "log",
  "nalgebra",
+ "pollster",
  "rayon",
  "rhai",
  "serde",

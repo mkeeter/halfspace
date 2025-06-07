@@ -1,4 +1,5 @@
 use clap::Parser;
+use eframe::egui_wgpu::wgpu;
 use egui_dnd::dnd;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -21,6 +22,46 @@ struct Args {
     target: Option<std::path::PathBuf>,
 }
 
+/// Manually open a WebGPU session with `float32-filterable`
+pub fn wgpu_setup() -> egui_wgpu::WgpuSetupExisting {
+    let instance = wgpu::Instance::default();
+
+    let adapter = pollster::block_on(instance.request_adapter(
+        &wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: None,
+            force_fallback_adapter: false,
+        },
+    ))
+    .expect("Failed to find an appropriate adapter");
+
+    let adapter_features = adapter.features();
+    assert!(
+        adapter_features.contains(wgpu::Features::FLOAT32_FILTERABLE),
+        "Adapter does not support float32-filterable"
+    );
+
+    let required_features = wgpu::Features::FLOAT32_FILTERABLE;
+
+    let (device, queue) = pollster::block_on(adapter.request_device(
+        &wgpu::DeviceDescriptor {
+            label: Some("Device with float32-filterable"),
+            required_features,
+            required_limits: wgpu::Limits::default(),
+            memory_hints: wgpu::MemoryHints::default(),
+        },
+        None,
+    ))
+    .expect("Failed to create device");
+
+    egui_wgpu::WgpuSetupExisting {
+        instance,
+        adapter,
+        device,
+        queue,
+    }
+}
+
 pub fn main() -> Result<(), eframe::Error> {
     env_logger::Builder::from_env(
         env_logger::Env::default().default_filter_or("info"),
@@ -28,7 +69,8 @@ pub fn main() -> Result<(), eframe::Error> {
     .init();
     let args = Args::parse();
 
-    let native_options = eframe::NativeOptions::default();
+    let mut native_options = eframe::NativeOptions::default();
+    native_options.wgpu_options.wgpu_setup = wgpu_setup().into();
     eframe::run_native(
         "halfspace",
         native_options,
@@ -91,7 +133,6 @@ impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // Install custom render pipelines
         let wgpu_state = cc.wgpu_render_state.as_ref().unwrap();
-        println!("{:?}", wgpu_state.device.features());
         painters::WgpuResources::install(wgpu_state);
 
         let mut fonts = egui::FontDefinitions::default();
