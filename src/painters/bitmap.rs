@@ -1,7 +1,7 @@
+//! Painter drawing bitmap bitmaps in a 2D view
 use super::{Uniforms, WgpuResources};
-///! Painter drawing bitmap bitmaps in a 2D view
 use crate::{
-    view::{RenderMode, ViewImage},
+    view::{ImageData, RenderMode, ViewImage},
     world::BlockIndex,
 };
 use eframe::{
@@ -31,6 +31,7 @@ impl WgpuBitmapPainter {
         size: fidget::render::ImageSize,
         view: fidget::render::View2,
     ) -> Self {
+        assert!(matches!(image.data, ImageData::Rgba(..)));
         Self {
             index,
             image,
@@ -315,8 +316,7 @@ impl egui_wgpu::CallbackTrait for WgpuBitmapPainter {
         };
 
         let (texture, uniform_buffer) =
-            gr.bitmap_resources
-                .get_data(device, self.index, texture_size);
+            gr.bitmap.get_data(device, self.index, texture_size);
 
         // Upload bitmap image data
         queue.write_texture(
@@ -392,7 +392,7 @@ impl egui_wgpu::CallbackTrait for WgpuBitmapPainter {
     ) {
         let rs: &WgpuResources = resources.get().unwrap();
 
-        rs.clear_resources.paint(render_pass);
-        rs.bitmap_resources.paint(render_pass, self.index);
+        rs.clear.paint(render_pass);
+        rs.bitmap.paint(render_pass, self.index);
     }
 }

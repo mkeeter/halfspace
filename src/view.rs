@@ -103,9 +103,27 @@ pub enum ViewMode3 {
 /// Rendered image, along with the settings that generated it
 #[derive(Clone)]
 pub struct ViewImage {
-    pub data: Vec<[u8; 4]>,
+    // XXX there are ways for ImageData and RenderSettings to get out of
+    // sync with each other; do we need a new data structure?
+    pub data: ImageData,
     pub level: usize,
     pub settings: RenderSettings,
+}
+
+#[derive(Clone)]
+pub enum ImageData {
+    Rgba(Vec<[u8; 4]>),
+    Distance(Vec<f32>),
+}
+
+impl ImageData {
+    pub fn as_bytes(&self) -> &[u8] {
+        use zerocopy::IntoBytes;
+        match self {
+            ImageData::Rgba(v) => v.as_bytes(),
+            ImageData::Distance(v) => v.as_bytes(),
+        }
+    }
 }
 
 impl ViewData {
@@ -128,7 +146,7 @@ impl ViewData {
         &mut self,
         generation: u64,
         level: usize,
-        data: Vec<[u8; 4]>,
+        data: ImageData,
         settings: RenderSettings,
         render_time: std::time::Duration,
     ) {
@@ -305,7 +323,7 @@ impl RenderTask {
         settings: &RenderSettings,
         level: usize,
         cancel: fidget::render::CancelToken,
-    ) -> Option<Vec<[u8; 4]>> {
+    ) -> Option<ImageData> {
         let scale = 1 << level;
         let data = match settings.mode {
             RenderMode::Render2 { mode, view, size } => {
@@ -322,23 +340,22 @@ impl RenderTask {
                 };
                 let shape = fidget::vm::VmShape::from(settings.tree.clone());
                 let tmp = cfg.run(shape)?;
-                let image = match mode {
-                    ViewMode2::Bitfield => {
+                match mode {
+                    ViewMode2::Bitfield => ImageData::Rgba(
                         fidget::render::effects::to_rgba_bitmap(
                             tmp,
                             true,
                             cfg.threads,
                         )
-                    }
-                    ViewMode2::Sdf => {
-                        fidget::render::effects::to_rgba_distance(
-                            tmp,
-                            cfg.threads,
-                        )
-                    }
-                };
-                let (data, _size) = image.take();
-                data
+                        .into_iter()
+                        .collect(),
+                    ),
+                    ViewMode2::Sdf => ImageData::Distance(
+                        tmp.into_iter()
+                            .map(|d| d.distance().unwrap())
+                            .collect(),
+                    ),
+                }
             }
             RenderMode::Render3 { mode, view, size } => {
                 let image_size = fidget::render::VoxelSize::new(
@@ -392,7 +409,7 @@ impl RenderTask {
                     }
                 };
                 let (data, _size) = image.take();
-                data
+                ImageData::Rgba(data)
             }
         };
         Some(data)

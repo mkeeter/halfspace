@@ -184,16 +184,37 @@ impl<'a> WorldView<'a> {
         match (image.settings.mode, current_canvas) {
             (
                 RenderMode::Render2 {
-                    mode: image_mode, ..
+                    mode: ViewMode2::Bitfield,
+                    ..
                 },
                 ViewCanvas::Canvas2 {
-                    mode: canvas_mode,
+                    mode: ViewMode2::Bitfield,
                     canvas,
                 },
-            ) if image_mode == canvas_mode => {
+            ) => {
                 ui.painter().add(egui_wgpu::Callback::new_paint_callback(
                     rect,
                     crate::painters::WgpuBitmapPainter::new(
+                        index,
+                        image.clone(),
+                        size,
+                        canvas.view(),
+                    ),
+                ));
+            }
+            (
+                RenderMode::Render2 {
+                    mode: ViewMode2::Sdf,
+                    ..
+                },
+                ViewCanvas::Canvas2 {
+                    mode: ViewMode2::Sdf,
+                    canvas,
+                },
+            ) => {
+                ui.painter().add(egui_wgpu::Callback::new_paint_callback(
+                    rect,
+                    crate::painters::WgpuSdfPainter::new(
                         index,
                         image.clone(),
                         size,

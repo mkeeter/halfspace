@@ -60,7 +60,7 @@ enum Message {
         level: usize,
         settings: view::RenderSettings,
         start_time: std::time::Instant,
-        data: Vec<[u8; 4]>,
+        data: view::ImageData,
     },
 }
 
@@ -91,6 +91,7 @@ impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // Install custom render pipelines
         let wgpu_state = cc.wgpu_render_state.as_ref().unwrap();
+        println!("{:?}", wgpu_state.device.features());
         painters::WgpuResources::install(wgpu_state);
 
         let mut fonts = egui::FontDefinitions::default();

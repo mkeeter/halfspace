@@ -1,4 +1,6 @@
 use super::{Uniforms, WgpuResources};
+
+///! Painter drawing bitmap bitmaps in a 2D view
 use crate::{
     view::{ImageData, RenderMode, ViewImage},
     world::BlockIndex,
@@ -10,29 +12,27 @@ use eframe::{
 use std::collections::HashMap;
 use zerocopy::IntoBytes;
 
-/// GPU callback for painting heightmaps
-///
-/// This is identical to the `HeightmapPainter` except that it takes a 3D view
-pub struct WgpuHeightmapPainter {
+/// GPU callback
+pub struct WgpuSdfPainter {
     /// Current view, which may differ from the image's view
-    view: fidget::render::View3,
+    view: fidget::render::View2,
     size: fidget::render::ImageSize,
 
     /// Index of the block being rendered
     index: BlockIndex,
 
-    /// Image to render
+    /// Image to render, which must be of type `ImageData::Distance`
     image: ViewImage,
 }
 
-impl WgpuHeightmapPainter {
+impl WgpuSdfPainter {
     pub fn new(
         index: BlockIndex,
         image: ViewImage,
         size: fidget::render::ImageSize,
-        view: fidget::render::View3,
+        view: fidget::render::View2,
     ) -> Self {
-        assert!(matches!(image.data, ImageData::Rgba(..)));
+        assert!(matches!(image.data, ImageData::Distance(..)));
         Self {
             index,
             image,
@@ -42,123 +42,15 @@ impl WgpuHeightmapPainter {
     }
 }
 
-impl egui_wgpu::CallbackTrait for WgpuHeightmapPainter {
-    fn prepare(
-        &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        _screen_descriptor: &egui_wgpu::ScreenDescriptor,
-        _egui_encoder: &mut wgpu::CommandEncoder,
-        resources: &mut egui_wgpu::CallbackResources,
-    ) -> Vec<wgpu::CommandBuffer> {
-        let gr: &mut WgpuResources = resources.get_mut().unwrap();
-
-        let (width, height) = match self.image.settings.mode {
-            RenderMode::Render3 { size, .. } => (
-                (size.width() / (1 << self.image.level)).max(1),
-                (size.height() / (1 << self.image.level)).max(1),
-            ),
-            _ => panic!("invalid painter"),
-        };
-        let texture_size = wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        };
-
-        let (texture, uniform_buffer) =
-            gr.heightmap.get_data(device, self.index, texture_size);
-
-        // Upload RGBA image data
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            self.image.data.as_bytes(),
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(4 * width),
-                rows_per_image: Some(height),
-            },
-            texture_size,
-        );
-
-        // Create the uniform
-        let transform = match self.image.settings.mode {
-            RenderMode::Render3 { size, view, .. } => {
-                // don't blame me, I just twiddled the matrices until things
-                // looked right
-                let aspect_ratio = |width: u32, height: u32| {
-                    let width = width as f32;
-                    let height = height as f32;
-                    if width > height {
-                        nalgebra::Scale3::new(height / width, 1.0, 1.0)
-                    } else {
-                        nalgebra::Scale3::new(1.0, width / height, 1.0)
-                    }
-                };
-                let prev_aspect_ratio =
-                    aspect_ratio(size.width(), size.height());
-                let curr_aspect_ratio =
-                    aspect_ratio(self.size.width(), self.size.height());
-                let m =
-                    prev_aspect_ratio.to_homogeneous().try_inverse().unwrap()
-                        * curr_aspect_ratio.to_homogeneous()
-                        * self.view.world_to_model().try_inverse().unwrap()
-                        * view.world_to_model();
-                #[rustfmt::skip]
-                let transform = nalgebra::Matrix4::new(
-                    m[(0, 0)], m[(0, 1)], m[(0, 2)], m[(0, 3)] * curr_aspect_ratio.x,
-                    m[(1, 0)], m[(1, 1)], m[(1, 2)], m[(1, 3)] * curr_aspect_ratio.y,
-                    m[(2, 0)], m[(2, 1)], m[(2, 2)], m[(2, 3)],
-                    0.0,         0.0,         0.0, 1.0,
-                );
-                transform
-            }
-            _ => unreachable!(),
-        };
-        let uniforms = Uniforms {
-            transform: transform.into(),
-        };
-        let mut writer = queue
-            .write_buffer_with(
-                uniform_buffer,
-                0,
-                (std::mem::size_of_val(&uniforms) as u64)
-                    .try_into()
-                    .unwrap(),
-            )
-            .unwrap();
-        writer.copy_from_slice(uniforms.as_bytes());
-
-        Vec::new()
-    }
-
-    fn paint(
-        &self,
-        _info: egui::PaintCallbackInfo,
-        render_pass: &mut wgpu::RenderPass<'static>,
-        resources: &egui_wgpu::CallbackResources,
-    ) {
-        let rs: &WgpuResources = resources.get().unwrap();
-
-        rs.clear.paint(render_pass);
-        rs.heightmap.paint(render_pass, self.index);
-    }
-}
-
-pub(crate) struct HeightmapResources {
+pub(crate) struct SdfResources {
     pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
 
-    spare_bitmaps: HashMap<wgpu::Extent3d, Vec<HeightmapData>>,
-    bound_bitmaps: HashMap<BlockIndex, HeightmapData>,
+    spare_bitmaps: HashMap<wgpu::Extent3d, Vec<SdfData>>,
+    bound_bitmaps: HashMap<BlockIndex, SdfData>,
 }
 
-impl HeightmapResources {
+impl SdfResources {
     pub fn new(
         device: &wgpu::Device,
         target_format: wgpu::TextureFormat,
@@ -166,11 +58,11 @@ impl HeightmapResources {
         // Create bitmap shader module
         let shader =
             device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("bitmap Shader"),
+                label: Some("sdf shader"),
                 source: wgpu::ShaderSource::Wgsl(
                     include_str!(concat!(
                         env!("CARGO_MANIFEST_DIR"),
-                        "/shaders/image.wgsl"
+                        "/shaders/sdf.wgsl"
                     ))
                     .into(),
                 ),
@@ -179,7 +71,7 @@ impl HeightmapResources {
         // Create bind group layout
         let bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("bitmap Bind Group Layout"),
+                label: Some("sdf bind group layout"),
                 entries: &[
                     // Texture
                     wgpu::BindGroupLayoutEntry {
@@ -220,7 +112,7 @@ impl HeightmapResources {
         // Create render pipeline layouts
         let pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("bitmap Render Pipeline Layout"),
+                label: Some("sdf render pipeline layout"),
                 bind_group_layouts: &[&bind_group_layout],
                 push_constant_ranges: &[],
             });
@@ -228,7 +120,7 @@ impl HeightmapResources {
         // Create the bitmap render pipeline
         let pipeline =
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("bitmap Render Pipeline"),
+                label: Some("sdf render pipeline"),
                 layout: Some(&pipeline_layout),
                 cache: None,
                 vertex: wgpu::VertexState {
@@ -301,12 +193,12 @@ impl HeightmapResources {
             .unwrap_or_else(|| {
                 // Create the texture
                 let texture = device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("bitmap Texture"),
+                    label: Some("sdf texture"),
                     size,
                     mip_level_count: 1,
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    format: wgpu::TextureFormat::R32Float,
                     usage: wgpu::TextureUsages::TEXTURE_BINDING
                         | wgpu::TextureUsages::COPY_DST,
                     view_formats: &[],
@@ -317,7 +209,7 @@ impl HeightmapResources {
 
                 // Create samplers
                 let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-                    label: Some("bitmap Sampler"),
+                    label: Some("sdf sampler"),
                     address_mode_u: wgpu::AddressMode::ClampToEdge,
                     address_mode_v: wgpu::AddressMode::ClampToEdge,
                     address_mode_w: wgpu::AddressMode::ClampToEdge,
@@ -330,7 +222,7 @@ impl HeightmapResources {
                 // Create the buffer
                 let uniform_buffer =
                     device.create_buffer(&wgpu::BufferDescriptor {
-                        label: Some("Uniform Buffer"),
+                        label: Some("uniform buffer"),
                         size: std::mem::size_of::<Uniforms>() as u64,
                         mapped_at_creation: false,
                         usage: wgpu::BufferUsages::UNIFORM
@@ -339,7 +231,7 @@ impl HeightmapResources {
 
                 let bind_group =
                     device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("bitmap Bind Group"),
+                        label: Some("sdf bind group"),
                         layout: &self.bind_group_layout,
                         entries: &[
                             wgpu::BindGroupEntry {
@@ -361,7 +253,7 @@ impl HeightmapResources {
                         ],
                     });
 
-                HeightmapData {
+                SdfData {
                     sampler,
                     texture,
                     bind_group,
@@ -386,7 +278,7 @@ impl HeightmapResources {
 }
 
 /// Resources used to render a single bitmap
-pub(crate) struct HeightmapData {
+pub(crate) struct SdfData {
     #[expect(unused)] // kept alive for lifetime purposes
     sampler: wgpu::Sampler,
 
@@ -398,4 +290,110 @@ pub(crate) struct HeightmapData {
 
     /// Bind group for bitmap rendering
     bind_group: wgpu::BindGroup,
+}
+
+impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
+    fn prepare(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        _screen_descriptor: &egui_wgpu::ScreenDescriptor,
+        _egui_encoder: &mut wgpu::CommandEncoder,
+        resources: &mut egui_wgpu::CallbackResources,
+    ) -> Vec<wgpu::CommandBuffer> {
+        let gr: &mut WgpuResources = resources.get_mut().unwrap();
+
+        let (width, height) = match self.image.settings.mode {
+            RenderMode::Render2 { size, .. } => (
+                (size.width() / (1 << self.image.level)).max(1),
+                (size.height() / (1 << self.image.level)).max(1),
+            ),
+            _ => panic!("invalid render mode for bitmap painter"),
+        };
+        let texture_size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+
+        let (texture, uniform_buffer) =
+            gr.sdf.get_data(device, self.index, texture_size);
+
+        // Upload bitmap image data
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            self.image.data.as_bytes(),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * width),
+                rows_per_image: Some(height),
+            },
+            texture_size,
+        );
+
+        // Create the uniform
+        let transform = match self.image.settings.mode {
+            RenderMode::Render2 { size, view, .. } => {
+                // don't blame me, I just twiddled the matrices until things
+                // looked right
+                let aspect_ratio = |size: fidget::render::ImageSize| {
+                    let width = size.width() as f32;
+                    let height = size.height() as f32;
+                    if width > height {
+                        nalgebra::Scale2::new(height / width, 1.0)
+                    } else {
+                        nalgebra::Scale2::new(1.0, width / height)
+                    }
+                };
+                let prev_aspect_ratio = aspect_ratio(size);
+                let curr_aspect_ratio = aspect_ratio(self.size);
+                let m =
+                    prev_aspect_ratio.to_homogeneous().try_inverse().unwrap()
+                        * curr_aspect_ratio.to_homogeneous()
+                        * self.view.world_to_model().try_inverse().unwrap()
+                        * view.world_to_model();
+                #[rustfmt::skip]
+                let transform = nalgebra::Matrix4::new(
+                    m[(0, 0)], m[(0, 1)], 0.0, m[(0, 2)] * curr_aspect_ratio.x,
+                    m[(1, 0)], m[(1, 1)], 0.0, m[(1, 2)] * curr_aspect_ratio.y,
+                    0.0,         0.0,         1.0, 0.0,
+                    0.0,         0.0,         0.0, 1.0,
+                );
+                transform
+            }
+            _ => unreachable!(),
+        };
+        let uniforms = Uniforms {
+            transform: transform.into(),
+        };
+        let mut writer = queue
+            .write_buffer_with(
+                uniform_buffer,
+                0,
+                (std::mem::size_of_val(&uniforms) as u64)
+                    .try_into()
+                    .unwrap(),
+            )
+            .unwrap();
+        writer.copy_from_slice(uniforms.as_bytes());
+
+        Vec::new()
+    }
+
+    fn paint(
+        &self,
+        _info: egui::PaintCallbackInfo,
+        render_pass: &mut wgpu::RenderPass<'static>,
+        resources: &egui_wgpu::CallbackResources,
+    ) {
+        let rs: &WgpuResources = resources.get().unwrap();
+
+        rs.clear.paint(render_pass);
+        rs.sdf.paint(render_pass, self.index);
+    }
 }
