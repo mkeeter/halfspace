@@ -90,8 +90,7 @@ pub enum ViewState {
 
 #[derive(Copy, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ViewMode2 {
-    SdfApprox,
-    SdfExact,
+    Sdf,
     Bitfield,
 }
 
@@ -115,7 +114,7 @@ impl ViewData {
             task: None,
             canvas: ViewCanvas::Canvas2 {
                 canvas: fidget::gui::Canvas2::new(image_size),
-                mode: ViewMode2::SdfApprox,
+                mode: ViewMode2::Sdf,
             },
             image: None,
             generation: 0,
@@ -318,26 +317,24 @@ impl RenderTask {
                     image_size,
                     view,
                     cancel,
+                    pixel_perfect: matches!(mode, ViewMode2::Sdf),
                     ..Default::default()
                 };
                 let shape = fidget::vm::VmShape::from(settings.tree.clone());
+                let tmp = cfg.run(shape)?;
                 let image = match mode {
                     ViewMode2::Bitfield => {
-                        let image =
-                            cfg.run::<_, fidget::render::BitRenderMode>(shape)?;
-                        image.map(|&b| if b { [u8::MAX; 4] } else { [0; 4] })
+                        fidget::render::effects::to_rgba_bitmap(
+                            tmp,
+                            true,
+                            cfg.threads,
+                        )
                     }
-                    ViewMode2::SdfApprox => {
-                        let image =
-                            cfg.run::<_, fidget::render::SdfRenderMode>(shape)?;
-                        image.map(|&[r, g, b]| [r, g, b, u8::MAX])
-                    }
-                    ViewMode2::SdfExact => {
-                        let image = cfg
-                            .run::<_, fidget::render::SdfPixelRenderMode>(
-                                shape,
-                            )?;
-                        image.map(|&[r, g, b]| [r, g, b, u8::MAX])
+                    ViewMode2::Sdf => {
+                        fidget::render::effects::to_rgba_distance(
+                            tmp,
+                            cfg.threads,
+                        )
                     }
                 };
                 let (data, _size) = image.take();

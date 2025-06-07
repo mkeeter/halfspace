@@ -384,8 +384,7 @@ impl<'a> WorldView<'a> {
         // Pop-up box to change render settings
         #[derive(Copy, Clone, PartialEq, Eq)]
         enum ViewCanvasType {
-            SdfApprox,
-            SdfExact,
+            Sdf,
             Bitfield,
             Heightmap,
             Shaded,
@@ -396,13 +395,9 @@ impl<'a> WorldView<'a> {
                 ..
             } => ViewCanvasType::Bitfield,
             ViewCanvas::Canvas2 {
-                mode: ViewMode2::SdfApprox,
+                mode: ViewMode2::Sdf,
                 ..
-            } => ViewCanvasType::SdfApprox,
-            ViewCanvas::Canvas2 {
-                mode: ViewMode2::SdfExact,
-                ..
-            } => ViewCanvasType::SdfExact,
+            } => ViewCanvasType::Sdf,
             ViewCanvas::Canvas3 {
                 mode: ViewMode3::Heightmap,
                 ..
@@ -423,16 +418,7 @@ impl<'a> WorldView<'a> {
                     ViewCanvasType::Bitfield,
                     "2D bitfield",
                 );
-                ui.selectable_value(
-                    &mut tag,
-                    ViewCanvasType::SdfApprox,
-                    "2D SDF (approx)",
-                );
-                ui.selectable_value(
-                    &mut tag,
-                    ViewCanvasType::SdfExact,
-                    "2D SDF (exact)",
-                );
+                ui.selectable_value(&mut tag, ViewCanvasType::Sdf, "2D SDF");
                 ui.separator();
                 ui.selectable_value(
                     &mut tag,
@@ -453,17 +439,16 @@ impl<'a> WorldView<'a> {
         if tag != initial_tag {
             out |= ViewResponse::REDRAW;
             let mut next_canvas = match tag {
-                ViewCanvasType::SdfExact
-                | ViewCanvasType::SdfApprox
-                | ViewCanvasType::Bitfield => ViewCanvas::Canvas2 {
-                    canvas: fidget::gui::Canvas2::new(size),
-                    mode: match tag {
-                        ViewCanvasType::SdfExact => ViewMode2::SdfExact,
-                        ViewCanvasType::SdfApprox => ViewMode2::SdfApprox,
-                        ViewCanvasType::Bitfield => ViewMode2::Bitfield,
-                        _ => unreachable!(),
-                    },
-                },
+                ViewCanvasType::Sdf | ViewCanvasType::Bitfield => {
+                    ViewCanvas::Canvas2 {
+                        canvas: fidget::gui::Canvas2::new(size),
+                        mode: match tag {
+                            ViewCanvasType::Sdf => ViewMode2::Sdf,
+                            ViewCanvasType::Bitfield => ViewMode2::Bitfield,
+                            _ => unreachable!(),
+                        },
+                    }
+                }
                 ViewCanvasType::Heightmap | ViewCanvasType::Shaded => {
                     let size = fidget::render::VoxelSize::new(
                         size.width(),

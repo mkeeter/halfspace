@@ -253,11 +253,6 @@ impl World {
         }
     }
 
-    /// Checks whether the world is empty
-    pub fn is_empty(&self) -> bool {
-        self.order.is_empty()
-    }
-
     /// Filters blocks based on a function
     ///
     /// Returns `true` if anything changed, or `false` otherwise
@@ -270,28 +265,6 @@ impl World {
         self.blocks.retain(|index, _block| f(index));
         self.order.retain(|index| f(index));
         self.order.len() != prev_len
-    }
-
-    /// Appends a new empty block to the end of the list
-    ///
-    /// Returns `true` if anything changed (which is always the case)
-    #[must_use]
-    pub fn new_empty_block(&mut self) -> bool {
-        let index = BlockIndex(self.next_index);
-        self.next_index += 1;
-        let name = self.next_name_with_prefix("script");
-
-        self.blocks.insert(
-            index,
-            Block {
-                name,
-                script: "".to_owned(),
-                inputs: HashMap::new(),
-                data: None,
-            },
-        );
-        self.order.push(index);
-        true
     }
 
     fn next_name_with_prefix(&self, s: &str) -> String {
