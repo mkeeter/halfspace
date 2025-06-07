@@ -5,8 +5,8 @@ use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek, Write};
 use zerocopy::IntoBytes;
 
-mod draw;
 mod gui;
+mod painters;
 mod shapes;
 mod view;
 mod world;
@@ -91,7 +91,7 @@ impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // Install custom render pipelines
         let wgpu_state = cc.wgpu_render_state.as_ref().unwrap();
-        draw::WgpuResources::install(wgpu_state);
+        painters::WgpuResources::install(wgpu_state);
 
         let mut fonts = egui::FontDefinitions::default();
         fonts.font_data.insert(
@@ -313,7 +313,7 @@ impl eframe::App for App {
             .renderer
             .write()
             .callback_resources
-            .get_mut::<draw::WgpuResources>()
+            .get_mut::<painters::WgpuResources>()
         {
             r.reset();
         }

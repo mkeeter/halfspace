@@ -193,7 +193,7 @@ impl<'a> WorldView<'a> {
             ) if image_mode == canvas_mode => {
                 ui.painter().add(egui_wgpu::Callback::new_paint_callback(
                     rect,
-                    crate::draw::WgpuBitmapPainter::new(
+                    crate::painters::WgpuBitmapPainter::new(
                         index,
                         image.clone(),
                         size,
@@ -212,7 +212,7 @@ impl<'a> WorldView<'a> {
             ) if image_mode == canvas_mode => {
                 ui.painter().add(egui_wgpu::Callback::new_paint_callback(
                     rect,
-                    crate::draw::WgpuHeightmapPainter::new(
+                    crate::painters::WgpuHeightmapPainter::new(
                         index,
                         image.clone(),
                         size,
