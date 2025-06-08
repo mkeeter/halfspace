@@ -357,7 +357,14 @@ impl RenderTask {
                     ),
                     ViewMode2::Sdf => ImageData::Distance(
                         tmp.into_iter()
-                            .map(|d| d.distance().unwrap())
+                            .map(|d| {
+                                let d = d.distance().unwrap();
+                                if d.is_infinite() {
+                                    1e12f32.copysign(d)
+                                } else {
+                                    d
+                                }
+                            })
                             .collect(),
                     ),
                 }
