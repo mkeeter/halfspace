@@ -610,31 +610,59 @@ impl<'a> WorldView<'a> {
         let mut out = ViewResponse::empty();
         let theme =
             egui_extras::syntax_highlighting::CodeTheme::from_style(ui.style());
-        let mut layouter = |ui: &egui::Ui, buf: &str, wrap_width: f32| {
-            let mut layout_job =
-                egui_extras::syntax_highlighting::highlight_with(
-                    ui.ctx(),
-                    ui.style(),
-                    &theme,
-                    buf,
-                    "rhai",
-                    self.syntax,
+        let out = ui
+            .with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
+                let mut line_count = block.script.lines().count();
+                if block.script.is_empty() || block.script.ends_with('\n') {
+                    line_count += 1;
+                }
+                let mut line_text = (1..=line_count)
+                    .map(|i| i.to_string())
+                    .collect::<Vec<String>>()
+                    .join("\n");
+                let max_indent = line_count.to_string().len();
+                let width = max_indent as f32
+                    * ui.text_style_height(&egui::TextStyle::Monospace)
+                    * 0.5;
+                ui.add(
+                    egui::TextEdit::multiline(&mut line_text)
+                        .id_source(index.id().with("line_numbers"))
+                        .font(egui::TextStyle::Monospace)
+                        .interactive(false)
+                        .desired_width(width)
+                        .frame(false),
                 );
-            layout_job.wrap.max_width = wrap_width;
-            ui.fonts(|f| f.layout_job(layout_job))
-        };
-        let r = ui.add(
-            egui::TextEdit::multiline(&mut block.script)
-                .font(egui::TextStyle::Monospace) // for cursor height
-                .code_editor()
-                .desired_rows(10)
-                .lock_focus(true)
-                .desired_width(f32::INFINITY)
-                .layouter(&mut layouter),
-        );
-        if r.changed() {
-            out |= ViewResponse::CHANGED;
-        }
+
+                let mut layouter =
+                    |ui: &egui::Ui, buf: &str, wrap_width: f32| {
+                        let mut layout_job =
+                            egui_extras::syntax_highlighting::highlight_with(
+                                ui.ctx(),
+                                ui.style(),
+                                &theme,
+                                buf,
+                                "rhai",
+                                self.syntax,
+                            );
+                        layout_job.wrap.max_width = wrap_width;
+                        ui.fonts(|f| f.layout_job(layout_job))
+                    };
+                let r = ui.add(
+                    egui::TextEdit::multiline(&mut block.script)
+                        .font(egui::TextStyle::Monospace) // for cursor height
+                        .code_editor()
+                        .desired_rows(10)
+                        .lock_focus(true)
+                        .desired_width(f32::INFINITY)
+                        .layouter(&mut layouter),
+                );
+                if r.changed() {
+                    out |= ViewResponse::CHANGED;
+                }
+                out
+            })
+            .inner;
+
         if let Some(block_data) = &mut block.data {
             if !block_data.stdout.is_empty() {
                 ui.label("Output");

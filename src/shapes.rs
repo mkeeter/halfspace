@@ -145,7 +145,7 @@ fn get_field_string(f: &facet::Field) -> String {
         get_field_as::<Vec<fidget::context::Tree>>(
             f,
             |_| unimplemented!("can't format Vec<Tree> yet"),
-            "",
+            "[]",
         )
     })
     .expect("unknown field type")

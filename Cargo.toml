@@ -8,6 +8,12 @@ description = "An experimental CAD tool"
 authors = ["Matt Keeter <matt.j.keeter@gmail.com"]
 readme = "README.md"
 
+[profile.dev]
+panic = 'abort'
+
+[profile.release]
+panic = 'abort'
+
 [dependencies]
 bincode = { version = "2", features = ["serde"] }
 bitflags = "2.9.1"
