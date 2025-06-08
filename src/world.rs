@@ -132,16 +132,14 @@ impl Block {
     ///
     /// A block with no state is _invalid_, i.e. returns `false`
     pub fn is_valid(&self) -> bool {
-        self.data.as_ref().is_some_and(|s| {
-            s.name_error.is_none() && s.script_errors.is_empty()
-        })
+        self.data.as_ref().is_some_and(|s| s.error.is_none())
     }
 
     /// Gets the `BlockView`, if the block is free of errors
     pub fn get_view(&self) -> Option<&BlockView> {
         self.data
             .as_ref()
-            .filter(|s| s.name_error.is_none() && s.script_errors.is_empty())
+            .filter(|s| s.error.is_none())
             .and_then(|s| s.view.as_ref())
     }
 }
@@ -200,7 +198,13 @@ impl std::ops::IndexMut<BlockIndex> for World {
 }
 
 #[derive(Clone)]
-pub struct BlockError {
+pub enum BlockError {
+    NameError(NameError),
+    EvalError(EvalError),
+}
+
+#[derive(Clone)]
+pub struct EvalError {
     #[allow(unused)] // TODO
     pub line: Option<usize>,
     pub message: String,
@@ -233,10 +237,8 @@ pub struct BlockData {
     pub stdout: String,
     /// Output from `debug` calls in the script, pinned to specific lines
     pub debug: HashMap<usize, Vec<String>>,
-    /// Error encountered evaluating the name
-    pub name_error: Option<NameError>,
-    /// Errors encountered while parsing and evaluating the script
-    pub script_errors: Vec<BlockError>,
+    /// Error encountered when evaluating the script
+    pub error: Option<BlockError>,
     /// Values defined with `input(..)` or `output(..)` calls in the script
     pub io_values: Vec<(String, IoValue)>,
     /// Value exported to a view
@@ -356,9 +358,8 @@ impl World {
         let block = self.blocks.get_mut(&i).unwrap();
         block.data = Some(BlockData {
             stdout: String::new(),
-            name_error: None,
+            error: None,
             debug: HashMap::new(),
-            script_errors: vec![],
             io_values: vec![],
             view: None,
         });
@@ -366,13 +367,15 @@ impl World {
 
         // Check that the name is valid
         if !rhai::is_valid_identifier(&block.name) {
-            data.name_error = Some(NameError::InvalidIdentifier);
+            data.error =
+                Some(BlockError::NameError(NameError::InvalidIdentifier));
             return input_scope;
         }
         // Bind from the name to a block index (if available)
         match name_map.entry(block.name.clone()) {
             std::collections::hash_map::Entry::Occupied(..) => {
-                data.name_error = Some(NameError::DuplicateName);
+                data.error =
+                    Some(BlockError::NameError(NameError::DuplicateName));
                 return input_scope;
             }
             std::collections::hash_map::Entry::Vacant(v) => {
@@ -406,10 +409,10 @@ impl World {
         let ast = match engine.compile(&block.script) {
             Ok(ast) => ast,
             Err(e) => {
-                data.script_errors.push(BlockError {
+                data.error = Some(BlockError::EvalError(EvalError {
                     message: e.to_string(),
                     line: e.position().line(),
-                });
+                }));
                 return input_scope;
             }
         };
@@ -453,10 +456,10 @@ impl World {
         input_scope.push(&block.name, obj);
 
         if let Err(e) = r {
-            data.script_errors.push(BlockError {
+            data.error = Some(BlockError::EvalError(EvalError {
                 message: e.to_string(),
                 line: e.position().line(),
-            });
+            }));
         } else {
             // If the script evaluated successfully, filter out any input
             // fields which haven't been used in the script.

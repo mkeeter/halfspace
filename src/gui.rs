@@ -5,7 +5,7 @@ use crate::{
     view::{
         RenderMode, RenderSettings, ViewCanvas, ViewData, ViewMode2, ViewMode3,
     },
-    world::{Block, BlockIndex, IoValue, NameError, World},
+    world::{Block, BlockError, BlockIndex, IoValue, NameError, World},
     BlockResponse, Message, ViewResponse,
 };
 use serde::{Deserialize, Serialize};
@@ -672,14 +672,9 @@ impl<'a> WorldView<'a> {
                         .desired_width(f32::INFINITY),
                 );
             }
-            if !block_data.script_errors.is_empty() {
+            if let Some(BlockError::EvalError(e)) = &block_data.error {
                 ui.label("Errors");
-                let mut text = block_data
-                    .script_errors
-                    .iter()
-                    .map(|e| e.message.as_str())
-                    .collect::<Vec<_>>()
-                    .join("\n");
+                let mut text = e.message.clone();
                 ui.scope(|ui| {
                     let vis = ui.visuals_mut();
                     vis.widgets.inactive = vis.widgets.active;
@@ -828,33 +823,37 @@ fn draggable_block_header(
             }
         }
         if let Some(block_data) = &block.data {
-            if let Some(e) = block_data.name_error {
-                let err = match e {
-                    NameError::DuplicateName => "duplicate name",
-                    NameError::InvalidIdentifier => "invalid identifier",
-                };
-                ui.label(
-                    egui::RichText::new(WARN)
-                        .color(ui.style().visuals.error_fg_color),
-                )
-                .on_hover_ui(|ui| {
-                    ui.label(err);
-                });
-            } else if !block_data.script_errors.is_empty() {
-                let r = ui
-                    .add(
-                        egui::Label::new(
-                            egui::RichText::new(WARN)
-                                .color(ui.style().visuals.warn_fg_color),
-                        )
-                        .sense(egui::Sense::click()),
+            match &block_data.error {
+                Some(BlockError::NameError(e)) => {
+                    let err = match e {
+                        NameError::DuplicateName => "duplicate name",
+                        NameError::InvalidIdentifier => "invalid identifier",
+                    };
+                    ui.label(
+                        egui::RichText::new(WARN)
+                            .color(ui.style().visuals.error_fg_color),
                     )
                     .on_hover_ui(|ui| {
-                        ui.label("script contains error");
+                        ui.label(err);
                     });
-                if r.clicked() {
-                    response |= BlockResponse::FOCUS_ERR;
                 }
+                Some(BlockError::EvalError(_)) => {
+                    let r = ui
+                        .add(
+                            egui::Label::new(
+                                egui::RichText::new(WARN)
+                                    .color(ui.style().visuals.error_fg_color),
+                            )
+                            .sense(egui::Sense::click()),
+                        )
+                        .on_hover_ui(|ui| {
+                            ui.label("script contains error");
+                        });
+                    if r.clicked() {
+                        response |= BlockResponse::FOCUS_ERR;
+                    }
+                }
+                None => (),
             }
         }
         ui.with_layout(
