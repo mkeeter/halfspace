@@ -732,7 +732,7 @@ fn draw_line_numbers(ui: &mut egui::Ui, index: BlockIndex, block: &Block) {
         ) -> egui::text::LayoutJob {
             let mut layout_job = egui::text::LayoutJob::default();
             let (buf, err_line, text_color, error_color, font_id) = key;
-            for (i, t) in buf.split("\n").enumerate() {
+            for (i, t) in buf.lines().enumerate() {
                 if Some(i + 1) == err_line {
                     layout_job.append(
                         t,
@@ -746,6 +746,11 @@ fn draw_line_numbers(ui: &mut egui::Ui, index: BlockIndex, block: &Block) {
                         egui::TextFormat::simple(font_id.clone(), text_color),
                     );
                 }
+                layout_job.append(
+                    "\n",
+                    0.0,
+                    egui::TextFormat::simple(font_id.clone(), text_color),
+                );
             }
             layout_job
         }
