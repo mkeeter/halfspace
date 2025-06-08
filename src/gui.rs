@@ -689,11 +689,11 @@ fn draw_line_numbers(ui: &mut egui::Ui, index: BlockIndex, block: &Block) {
     if block.script.is_empty() || block.script.ends_with('\n') {
         line_count += 1;
     }
+    let max_indent = line_count.to_string().len();
     let mut line_text = (1..=line_count)
-        .map(|i| i.to_string())
+        .map(|i| format!("{number:>width$}", number = i, width = max_indent))
         .collect::<Vec<String>>()
         .join("\n");
-    let max_indent = line_count.to_string().len();
     let width = max_indent as f32
         * ui.text_style_height(&egui::TextStyle::Monospace)
         * 0.5;
