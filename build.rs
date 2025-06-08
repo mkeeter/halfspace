@@ -6,6 +6,7 @@ fn main() {
     let mut builder = syntect::parsing::SyntaxSetBuilder::new();
     builder.add_from_folder("syntax", true).unwrap();
     let ps = builder.build();
+
     bincode::serde::encode_into_std_write(
         &ps,
         &mut dest_file,

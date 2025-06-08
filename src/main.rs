@@ -62,54 +62,59 @@ pub fn wgpu_setup() -> egui_wgpu::WgpuSetupExisting {
     }
 }
 
-fn monokai_visuals() -> egui::Visuals {
+pub mod color {
+    pub const BASE00: egui::Color32 = egui::Color32::from_rgb(0x2d, 0x2d, 0x2d);
+    pub const BASE01: egui::Color32 = egui::Color32::from_rgb(0x39, 0x39, 0x39);
+    pub const BASE02: egui::Color32 = egui::Color32::from_rgb(0x51, 0x51, 0x51);
+    pub const BASE03: egui::Color32 = egui::Color32::from_rgb(0x74, 0x73, 0x69);
+    pub const BASE04: egui::Color32 = egui::Color32::from_rgb(0xa0, 0x9f, 0x93);
+    pub const BASE05: egui::Color32 = egui::Color32::from_rgb(0xd3, 0xd0, 0xc8);
+    pub const BASE06: egui::Color32 = egui::Color32::from_rgb(0xe8, 0xe6, 0xdf);
+    pub const BASE07: egui::Color32 = egui::Color32::from_rgb(0xf2, 0xf0, 0xec);
+
+    pub const RED: egui::Color32 = egui::Color32::from_rgb(0xf2, 0x77, 0x7a);
+    pub const ORANGE: egui::Color32 = egui::Color32::from_rgb(0xf9, 0x91, 0x57);
+    pub const YELLOW: egui::Color32 = egui::Color32::from_rgb(0xff, 0xcc, 0x66);
+    pub const GREEN: egui::Color32 = egui::Color32::from_rgb(0x99, 0xcc, 0x99);
+    pub const CYAN: egui::Color32 = egui::Color32::from_rgb(0x66, 0xcc, 0xcc);
+    pub const BLUE: egui::Color32 = egui::Color32::from_rgb(0x66, 0x99, 0xcc);
+    pub const PINK: egui::Color32 = egui::Color32::from_rgb(0xcc, 0x99, 0xcc);
+    pub const BROWN: egui::Color32 = egui::Color32::from_rgb(0xd2, 0x7b, 0x53);
+}
+
+fn theme_visuals() -> egui::Visuals {
     let mut visuals = egui::Visuals::dark();
 
-    // Text
-    visuals.override_text_color = Some(egui::Color32::from_rgb(248, 248, 242));
+    // Top-level settings
+    visuals.error_fg_color = color::ORANGE;
+    visuals.warn_fg_color = color::BROWN;
+    return visuals;
 
-    // Backgrounds
-    visuals.window_fill = egui::Color32::from_rgb(39, 40, 34);
-    visuals.panel_fill = egui::Color32::from_rgb(39, 40, 34);
-    visuals.extreme_bg_color = egui::Color32::from_rgb(30, 30, 30); // e.g. background behind panels
+    visuals.override_text_color = Some(color::BASE07);
+    visuals.extreme_bg_color = color::BASE00;
+    visuals.panel_fill = color::BASE01;
+    visuals.faint_bg_color = color::BASE01;
+    visuals.window_fill = color::BASE01;
+    visuals.window_stroke = egui::Stroke::new(1.0, color::RED);
 
     // Widget states
-    visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(39, 40, 34);
-    visuals.widgets.inactive.fg_stroke.color =
-        egui::Color32::from_rgb(248, 248, 242);
+    visuals.widgets.inactive.bg_fill = color::BASE00;
+    visuals.widgets.inactive.fg_stroke.color = color::BASE06;
 
-    visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(73, 72, 62);
-    visuals.widgets.hovered.fg_stroke.color =
-        egui::Color32::from_rgb(248, 248, 242);
+    visuals.widgets.hovered.bg_fill = color::BASE03;
+    visuals.widgets.hovered.fg_stroke.color = color::BASE06;
 
-    visuals.widgets.active.bg_fill = egui::Color32::from_rgb(102, 217, 239);
-    visuals.widgets.active.fg_stroke.color = egui::Color32::BLACK;
+    visuals.widgets.active.bg_fill = color::BASE04;
+    visuals.widgets.active.fg_stroke.color = color::BASE06;
+    visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, color::CYAN);
 
-    visuals.widgets.open.bg_fill = egui::Color32::from_rgb(80, 80, 70); // for collapsible headers
+    visuals.widgets.open.bg_fill = egui::Color32::from_rgb(80, 80, 70);
+
+    visuals.widgets.noninteractive.fg_stroke.color = color::BASE04;
 
     // Selection and highlights
-    visuals.selection.bg_fill = egui::Color32::from_rgb(66, 66, 66);
-    visuals.selection.stroke =
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(102, 217, 239));
-
-    // Separators and strokes
-    visuals.window_stroke =
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 80, 80));
-    visuals.faint_bg_color = egui::Color32::from_rgb(50, 50, 50); // grid lines, guides, etc.
-    visuals.widgets.noninteractive.fg_stroke.color =
-        egui::Color32::from_rgb(160, 160, 160);
-    visuals.widgets.active.bg_stroke = egui::Stroke::new(
-        1.0,
-        egui::Color32::from_rgb(102, 217, 239), // Monokai cyan
-    );
-
-    // Diagnostic colors
-    visuals.error_fg_color = egui::Color32::from_rgb(249, 38, 114); // Red-pink
-    visuals.warn_fg_color = egui::Color32::from_rgb(253, 151, 31); // Orange
-
-    // Shadows
-    visuals.window_shadow.color =
-        egui::Color32::from_rgba_unmultiplied(0, 0, 0, 128);
+    visuals.selection.bg_fill = color::BASE03;
+    visuals.selection.stroke = egui::Stroke::new(1.0, color::BASE04);
 
     visuals
 }
@@ -203,8 +208,13 @@ impl App {
         )
         .unwrap();
         let ts = syntect::highlighting::ThemeSet::load_defaults();
-        let syntax =
+
+        // XXX hack: `egui_extras::syntax_highlighting` will always use
+        // `base16-mocha.dark`, so we'll use its name for `base16-eighties.dark`
+        let mut syntax =
             egui_extras::syntax_highlighting::SyntectSettings { ps, ts };
+        let s = syntax.ts.themes.remove("base16-eighties.dark").unwrap();
+        syntax.ts.themes.insert("base16-mocha.dark".to_owned(), s);
 
         cc.egui_ctx.set_fonts(fonts);
         cc.egui_ctx.all_styles_mut(|style| {
@@ -227,7 +237,7 @@ impl App {
             );
             style.interaction.tooltip_delay = 0.0;
             style.interaction.show_tooltips_only_when_still = false;
-            style.visuals = monokai_visuals();
+            style.visuals = theme_visuals();
         });
 
         let (tx, rx) = std::sync::mpsc::channel();

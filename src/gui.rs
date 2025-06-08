@@ -999,7 +999,7 @@ fn block_name(ui: &mut egui::Ui, index: BlockIndex, block: &mut Block) -> bool {
 }
 
 // Unicode symbols from Nerd Fonts, see https://www.nerdfonts.com/cheat-sheet
-pub const NEW_BLOCK: &str = "\u{f067} New block";
+pub const NEW_BLOCK: &str = "New block";
 const DRAG: &str = "\u{f0041}";
 const TRASH: &str = "\u{f48e}";
 const PENCIL: &str = "\u{f03eb}";
