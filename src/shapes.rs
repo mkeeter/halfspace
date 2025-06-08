@@ -85,35 +85,7 @@ impl ShapeVisitor for Visitor {
                 panic!("duplicate field name {field_name} in {shape_name}")
             };
 
-            // Same set of types as `fidget::rhai::shapes::Type`
-            let t = if f.shape().id == fidget::shapes::Vec2::SHAPE.id {
-                if field_name == "upper" || field_name == "scale" {
-                    "[1, 1]"
-                } else {
-                    "[0, 0]"
-                }
-            } else if f.shape().id == fidget::shapes::Vec3::SHAPE.id {
-                if field_name == "upper" || field_name == "scale" {
-                    "[1, 1, 1]"
-                } else {
-                    "[0, 0, 0]"
-                }
-            } else if f.shape().id == fidget::shapes::Vec4::SHAPE.id {
-                "[0, 0, 0, 0]"
-            } else if f.shape().id == f64::SHAPE.id {
-                if field_name == "radius" || field_name == "scale" {
-                    "1"
-                } else {
-                    "0"
-                }
-            } else if f.shape().id == fidget::context::Tree::SHAPE.id {
-                "x"
-            } else if f.shape().id == Vec::<fidget::context::Tree>::SHAPE.id {
-                "[x, y]"
-            } else {
-                panic!("unknown type ID for {}", f.shape().type_identifier)
-            };
-            i.insert(t.to_owned());
+            i.insert(get_field_string(f));
             script += "\n";
             for line in f.doc {
                 script += &format!("// {line}\n");
@@ -138,4 +110,75 @@ impl ShapeVisitor for Visitor {
             category: ShapeCategory::Fidget,
         });
     }
+}
+
+fn get_field_string(f: &facet::Field) -> String {
+    // Same set of types as `fidget::rhai::shapes::Type`
+    get_field_as::<fidget::shapes::Vec2>(
+        f,
+        |v| format!("[{}, {}]", v.x, v.y),
+        "[0, 0]",
+    )
+    .or_else(|| {
+        get_field_as::<fidget::shapes::Vec3>(
+            f,
+            |v| format!("[{}, {}, {}]", v.x, v.y, v.z),
+            "[0, 0, 0]",
+        )
+    })
+    .or_else(|| {
+        get_field_as::<fidget::shapes::Vec4>(
+            f,
+            |v| format!("[{}, {}, {}, {}]", v.x, v.y, v.z, v.w),
+            "[0, 0, 0, 0]",
+        )
+    })
+    .or_else(|| get_field_as::<f64>(f, |v| v.to_string(), "0"))
+    .or_else(|| {
+        get_field_as::<fidget::context::Tree>(
+            f,
+            |_| unimplemented!("can't format tree yet"),
+            "",
+        )
+    })
+    .or_else(|| {
+        get_field_as::<Vec<fidget::context::Tree>>(
+            f,
+            |_| unimplemented!("can't format Vec<Tree> yet"),
+            "",
+        )
+    })
+    .expect("unknown field type")
+}
+
+fn get_field_as<T: Facet<'static>>(
+    field: &facet::Field,
+    formatter: fn(T) -> String,
+    default: &str,
+) -> Option<String> {
+    if field.shape().id == T::SHAPE.id {
+        Some(if let Some(df) = field.vtable.default_fn {
+            let v = unsafe { eval_default_fn(df) };
+            formatter(v)
+        } else {
+            default.to_owned()
+        })
+    } else {
+        None
+    }
+}
+
+/// Evaluates a default builder function, returning a value
+///
+/// # Safety
+/// `f` must be a builder for type `T`
+unsafe fn eval_default_fn<T>(
+    f: unsafe fn(facet::PtrUninit) -> facet::PtrMut,
+) -> T {
+    let mut v = std::mem::MaybeUninit::<T>::uninit();
+    let ptr = facet::PtrUninit::new(&mut v);
+    // SAFETY: `f` must be a builder for type `T`
+    unsafe { f(ptr) };
+    // SAFETY: `v` is initialized by `f`
+    unsafe { v.assume_init() }
 }
