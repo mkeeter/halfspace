@@ -137,10 +137,7 @@ impl Block {
 
     /// Gets the `BlockView`, if the block is free of errors
     pub fn get_view(&self) -> Option<&BlockView> {
-        self.data
-            .as_ref()
-            .filter(|s| s.error.is_none())
-            .and_then(|s| s.view.as_ref())
+        self.data.as_ref().and_then(|s| s.view.as_ref())
     }
 }
 
@@ -365,24 +362,6 @@ impl World {
         });
         let data = block.data.as_mut().unwrap();
 
-        // Check that the name is valid
-        if !rhai::is_valid_identifier(&block.name) {
-            data.error =
-                Some(BlockError::NameError(NameError::InvalidIdentifier));
-            return input_scope;
-        }
-        // Bind from the name to a block index (if available)
-        match name_map.entry(block.name.clone()) {
-            std::collections::hash_map::Entry::Occupied(..) => {
-                data.error =
-                    Some(BlockError::NameError(NameError::DuplicateName));
-                return input_scope;
-            }
-            std::collections::hash_map::Entry::Vacant(v) => {
-                v.insert(i);
-            }
-        }
-
         let mut engine = rhai::Engine::new();
         fidget::rhai::tree::register(&mut engine);
         fidget::rhai::vec::register(&mut engine);
@@ -441,6 +420,43 @@ impl World {
         // Update inputs, which may have been modified
         block.inputs = eval_data.inputs;
 
+        if let Err(e) = r {
+            data.error = Some(BlockError::EvalError(EvalError {
+                message: e.to_string(),
+                line: e.position().line(),
+            }));
+        } else {
+            // If the script evaluated successfully, filter out any input
+            // fields which haven't been used in the script.
+            block.inputs.retain(|k, _| eval_data.new_inputs.contains(k));
+        }
+
+        // Then, check whether we can bind outputs to the block name.  We'll
+        // first check that the name is valid.  We prioritize script errors over
+        // name errors, so will not replace an existing value in `data.error`
+        let mut input_scope = eval_data.scope;
+        if !rhai::is_valid_identifier(&block.name) {
+            if data.error.is_none() {
+                data.error =
+                    Some(BlockError::NameError(NameError::InvalidIdentifier));
+            }
+            return input_scope;
+        }
+
+        // Next, bind from the name to a block index (if available)
+        match name_map.entry(block.name.clone()) {
+            std::collections::hash_map::Entry::Occupied(..) => {
+                if data.error.is_none() {
+                    data.error =
+                        Some(BlockError::NameError(NameError::DuplicateName));
+                }
+                return input_scope;
+            }
+            std::collections::hash_map::Entry::Vacant(v) => {
+                v.insert(i);
+            }
+        }
+
         // Write outputs into the shared input scope
         let obj: rhai::Map = data
             .io_values
@@ -452,19 +468,7 @@ impl World {
                 IoValue::Input(..) => None,
             })
             .collect();
-        let mut input_scope = eval_data.scope;
         input_scope.push(&block.name, obj);
-
-        if let Err(e) = r {
-            data.error = Some(BlockError::EvalError(EvalError {
-                message: e.to_string(),
-                line: e.position().line(),
-            }));
-        } else {
-            // If the script evaluated successfully, filter out any input
-            // fields which haven't been used in the script.
-            block.inputs.retain(|k, _| eval_data.new_inputs.contains(k));
-        }
 
         input_scope
     }
