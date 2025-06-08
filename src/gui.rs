@@ -612,26 +612,7 @@ impl<'a> WorldView<'a> {
             egui_extras::syntax_highlighting::CodeTheme::from_style(ui.style());
         let out = ui
             .with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
-                let mut line_count = block.script.lines().count();
-                if block.script.is_empty() || block.script.ends_with('\n') {
-                    line_count += 1;
-                }
-                let mut line_text = (1..=line_count)
-                    .map(|i| i.to_string())
-                    .collect::<Vec<String>>()
-                    .join("\n");
-                let max_indent = line_count.to_string().len();
-                let width = max_indent as f32
-                    * ui.text_style_height(&egui::TextStyle::Monospace)
-                    * 0.5;
-                ui.add(
-                    egui::TextEdit::multiline(&mut line_text)
-                        .id_source(index.id().with("line_numbers"))
-                        .font(egui::TextStyle::Monospace)
-                        .interactive(false)
-                        .desired_width(width)
-                        .frame(false),
-                );
+                draw_line_numbers(ui, index, block);
 
                 let mut layouter =
                     |ui: &egui::Ui, buf: &str, wrap_width: f32| {
@@ -701,6 +682,105 @@ pub struct BlockUiFlags {
     pub is_last: bool,
     pub is_dragged: bool,
     pub is_view_open: Option<bool>,
+}
+
+fn draw_line_numbers(ui: &mut egui::Ui, index: BlockIndex, block: &Block) {
+    let mut line_count = block.script.lines().count();
+    if block.script.is_empty() || block.script.ends_with('\n') {
+        line_count += 1;
+    }
+    let mut line_text = (1..=line_count)
+        .map(|i| i.to_string())
+        .collect::<Vec<String>>()
+        .join("\n");
+    let max_indent = line_count.to_string().len();
+    let width = max_indent as f32
+        * ui.text_style_height(&egui::TextStyle::Monospace)
+        * 0.5;
+    let err_line = if let Some(BlockError::EvalError(e)) =
+        block.data.as_ref().and_then(|e| e.error.as_ref())
+    {
+        e.line
+    } else {
+        None
+    };
+
+    // cached LayoutJob computation for line numbers
+    #[derive(Default)]
+    struct LineNumberDraw;
+    impl
+        egui::cache::ComputerMut<
+            (
+                &str,
+                Option<usize>,
+                egui::Color32,
+                egui::Color32,
+                &egui::FontId,
+            ),
+            egui::text::LayoutJob,
+        > for LineNumberDraw
+    {
+        fn compute(
+            &mut self,
+            key: (
+                &str,
+                Option<usize>,
+                egui::Color32,
+                egui::Color32,
+                &egui::FontId,
+            ),
+        ) -> egui::text::LayoutJob {
+            let mut layout_job = egui::text::LayoutJob::default();
+            let (buf, err_line, text_color, error_color, font_id) = key;
+            for (i, t) in buf.split("\n").enumerate() {
+                if Some(i + 1) == err_line {
+                    layout_job.append(
+                        t,
+                        0.0,
+                        egui::TextFormat::simple(font_id.clone(), error_color),
+                    );
+                } else {
+                    layout_job.append(
+                        t,
+                        0.0,
+                        egui::TextFormat::simple(font_id.clone(), text_color),
+                    );
+                }
+            }
+            layout_job
+        }
+    }
+
+    let s = ui.style();
+    let line_color = ui.style().visuals.text_color();
+    let error_color = ui.style().visuals.error_fg_color;
+    let font_id = s.text_styles[&egui::TextStyle::Monospace].clone();
+
+    type LineNumberCache =
+        egui::cache::FrameCache<egui::text::LayoutJob, LineNumberDraw>;
+
+    let mut layouter = |ui: &egui::Ui, buf: &str, wrap_width: f32| {
+        let ctx = ui.ctx();
+        let mut layout_job = ctx.memory_mut(|mem| {
+            mem.caches.cache::<LineNumberCache>().get((
+                buf,
+                err_line,
+                line_color,
+                error_color,
+                &font_id,
+            ))
+        });
+        layout_job.wrap.max_width = wrap_width;
+        ui.fonts(|f| f.layout_job(layout_job))
+    };
+    let lines = egui::TextEdit::multiline(&mut line_text)
+        .id_source(index.id().with("line_numbers"))
+        .font(egui::TextStyle::Monospace)
+        .interactive(false)
+        .desired_width(width)
+        .frame(false)
+        .layouter(&mut layouter);
+    ui.add(lines);
 }
 
 /// Draws a draggable block within a [`egui_dnd`] context
