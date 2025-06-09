@@ -1,6 +1,7 @@
 use clap::Parser;
 use eframe::egui_wgpu::wgpu;
 use egui_dnd::dnd;
+use log::warn;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek, Write};
@@ -62,7 +63,10 @@ pub fn wgpu_setup() -> egui_wgpu::WgpuSetupExisting {
     }
 }
 
+// Base-16 Eighties, approximately
 pub mod color {
+    pub const BASE0: egui::Color32 = egui::Color32::from_rgb(0x20, 0x20, 0x20);
+
     pub const BASE00: egui::Color32 = egui::Color32::from_rgb(0x2d, 0x2d, 0x2d);
     pub const BASE01: egui::Color32 = egui::Color32::from_rgb(0x39, 0x39, 0x39);
     pub const BASE02: egui::Color32 = egui::Color32::from_rgb(0x51, 0x51, 0x51);
@@ -80,44 +84,113 @@ pub mod color {
     pub const BLUE: egui::Color32 = egui::Color32::from_rgb(0x66, 0x99, 0xcc);
     pub const PINK: egui::Color32 = egui::Color32::from_rgb(0xcc, 0x99, 0xcc);
     pub const BROWN: egui::Color32 = egui::Color32::from_rgb(0xd2, 0x7b, 0x53);
+
+    pub const LIGHT_BLUE: egui::Color32 =
+        egui::Color32::from_rgb(0xbb, 0xcc, 0xee);
+    pub const DARK_BLUE: egui::Color32 =
+        egui::Color32::from_rgb(0x33, 0x66, 0x99);
 }
 
 fn theme_visuals() -> egui::Visuals {
-    let mut visuals = egui::Visuals::dark();
+    use color::*;
+    let base = egui::Visuals::dark();
+    let c = |c: egui::Color32| {
+        if c == egui::Color32::from_rgb(255, 143, 0) {
+            ORANGE
+        } else if c == egui::Color32::from_rgb(0, 92, 128) {
+            DARK_BLUE
+        } else if c == egui::Color32::from_rgb(90, 170, 255) {
+            BLUE
+        } else if c == egui::Color32::from_rgb(192, 222, 255) {
+            LIGHT_BLUE
+        } else if c == egui::Color32::from_rgb(255, 0, 0) {
+            RED
+        } else if c.r() == c.g() && c.g() == c.b() {
+            // Linear mapping from dark to light, chosen somewhat arbitrarily
+            const ARRAY: [egui::Color32; 2] = [BASE0, BASE07];
+            let frac = (c.r() as f32 / 255.0) * (ARRAY.len() as f32 - 1.0);
+            let i = frac as usize;
+            if i as f32 == frac {
+                ARRAY[i]
+            } else {
+                let f = frac - i as f32;
+                let blend = |a, b| (a as f32 * (1.0 - f) + b as f32 * f) as u8;
+                let a = ARRAY[i];
+                let b = ARRAY[i + 1];
+                egui::Color32::from_rgb(
+                    blend(a.r(), b.r()),
+                    blend(a.b(), b.b()),
+                    blend(a.g(), b.g()),
+                )
+            }
+        } else {
+            warn!("unknown color {c:?}");
+            c
+        }
+    };
+    let s = |s: egui::Stroke| egui::Stroke {
+        color: c(s.color),
+        ..s
+    };
+    let t = |t: egui::style::TextCursorStyle| egui::style::TextCursorStyle {
+        stroke: s(t.stroke),
+        ..t
+    };
+    let w = |v: egui::style::WidgetVisuals| egui::style::WidgetVisuals {
+        bg_fill: c(v.bg_fill),
+        weak_bg_fill: c(v.weak_bg_fill),
+        bg_stroke: s(v.bg_stroke),
+        fg_stroke: s(v.fg_stroke),
+        expansion: v.expansion,
+        corner_radius: v.corner_radius,
+    };
 
-    // Top-level settings
-    visuals.error_fg_color = color::ORANGE;
-    visuals.warn_fg_color = color::BROWN;
-    return visuals;
+    egui::Visuals {
+        dark_mode: base.dark_mode,
+        override_text_color: Some(BASE07),
+        selection: egui::style::Selection {
+            bg_fill: c(base.selection.bg_fill),
+            stroke: s(base.selection.stroke),
+        },
+        hyperlink_color: c(base.hyperlink_color),
+        faint_bg_color: c(base.faint_bg_color),
+        extreme_bg_color: c(base.extreme_bg_color),
+        code_bg_color: c(base.code_bg_color),
+        warn_fg_color: c(base.warn_fg_color),
+        error_fg_color: c(base.error_fg_color),
+        window_fill: c(base.window_fill),
+        window_stroke: s(base.window_stroke),
+        panel_fill: c(base.panel_fill),
+        text_cursor: t(base.text_cursor),
 
-    visuals.override_text_color = Some(color::BASE07);
-    visuals.extreme_bg_color = color::BASE00;
-    visuals.panel_fill = color::BASE01;
-    visuals.faint_bg_color = color::BASE01;
-    visuals.window_fill = color::BASE01;
-    visuals.window_stroke = egui::Stroke::new(1.0, color::RED);
+        collapsing_header_frame: base.collapsing_header_frame,
+        handle_shape: base.handle_shape,
+        window_corner_radius: base.window_corner_radius,
+        window_shadow: base.window_shadow,
+        image_loading_spinners: base.image_loading_spinners,
+        window_highlight_topmost: base.window_highlight_topmost,
+        menu_corner_radius: base.menu_corner_radius,
+        popup_shadow: base.popup_shadow,
+        resize_corner_size: base.resize_corner_size,
+        indent_has_left_vline: base.indent_has_left_vline,
+        striped: base.striped,
+        slider_trailing_fill: base.slider_trailing_fill,
+        interact_cursor: base.interact_cursor,
+        numeric_color_space: base.numeric_color_space,
 
-    // Widget states
-    visuals.widgets.inactive.bg_fill = color::BASE00;
-    visuals.widgets.inactive.fg_stroke.color = color::BASE06;
+        button_frame: base.button_frame,
+        clip_rect_margin: base.clip_rect_margin,
 
-    visuals.widgets.hovered.bg_fill = color::BASE03;
-    visuals.widgets.hovered.fg_stroke.color = color::BASE06;
-
-    visuals.widgets.active.bg_fill = color::BASE04;
-    visuals.widgets.active.fg_stroke.color = color::BASE06;
-    visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, color::CYAN);
-
-    visuals.widgets.open.bg_fill = egui::Color32::from_rgb(80, 80, 70);
-
-    visuals.widgets.noninteractive.fg_stroke.color = color::BASE04;
-
-    // Selection and highlights
-    visuals.selection.bg_fill = color::BASE03;
-    visuals.selection.stroke = egui::Stroke::new(1.0, color::BASE04);
-
-    visuals
+        widgets: egui::style::Widgets {
+            noninteractive: w(base.widgets.noninteractive),
+            inactive: w(base.widgets.inactive),
+            hovered: w(base.widgets.hovered),
+            active: w(base.widgets.active),
+            open: w(base.widgets.open),
+        },
+    }
 }
+
 pub fn main() -> Result<(), eframe::Error> {
     env_logger::Builder::from_env(
         env_logger::Env::default().default_filter_or("info"),
