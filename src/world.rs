@@ -10,7 +10,6 @@ use fidget::{
 use heck::ToSnakeCase;
 use serde::{Deserialize, Serialize};
 
-#[allow(unused)]
 #[derive(Clone)]
 pub enum Value {
     Float(f64),
@@ -95,7 +94,7 @@ pub struct Block {
 
     /// Map from input name to expression
     ///
-    /// This does not live in the `BlockData` because it must be persistent;
+    /// This does not live in the [`BlockData`] because it must be persistent;
     /// the resulting values _are_ stored in the block state.
     pub inputs: HashMap<String, String>,
 }
@@ -458,7 +457,7 @@ impl World {
         }
 
         // Write outputs into the shared input scope
-        let obj: rhai::Map = data
+        let mut obj: rhai::Map = data
             .io_values
             .iter()
             .filter_map(|(name, value)| match value {
@@ -468,7 +467,16 @@ impl World {
                 IoValue::Input(..) => None,
             })
             .collect();
-        input_scope.push(&block.name, obj);
+        match obj.len() {
+            0 => (),
+            1 => {
+                let (_name, value) = obj.pop_last().unwrap();
+                input_scope.push(&block.name, value);
+            }
+            _ => {
+                input_scope.push(&block.name, obj);
+            }
+        }
 
         input_scope
     }

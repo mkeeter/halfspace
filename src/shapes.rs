@@ -158,7 +158,12 @@ fn get_field_as<T: Facet<'static>>(
 ) -> Option<String> {
     if field.shape().id == T::SHAPE.id {
         Some(if let Some(df) = field.vtable.default_fn {
-            let v = unsafe { eval_default_fn(df) };
+            let mut v = std::mem::MaybeUninit::<T>::uninit();
+            let ptr = facet::PtrUninit::new(&mut v);
+            // SAFETY: `df` must be a builder for type `T`
+            unsafe { df(ptr) };
+            // SAFETY: `v` is initialized by `f`
+            let v = unsafe { v.assume_init() };
             formatter(v)
         } else {
             default.to_owned()
@@ -166,19 +171,4 @@ fn get_field_as<T: Facet<'static>>(
     } else {
         None
     }
-}
-
-/// Evaluates a default builder function, returning a value
-///
-/// # Safety
-/// `f` must be a builder for type `T`
-unsafe fn eval_default_fn<T>(
-    f: unsafe fn(facet::PtrUninit) -> facet::PtrMut,
-) -> T {
-    let mut v = std::mem::MaybeUninit::<T>::uninit();
-    let ptr = facet::PtrUninit::new(&mut v);
-    // SAFETY: `f` must be a builder for type `T`
-    unsafe { f(ptr) };
-    // SAFETY: `v` is initialized by `f`
-    unsafe { v.assume_init() }
 }
