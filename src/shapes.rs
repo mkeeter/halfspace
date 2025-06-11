@@ -172,3 +172,30 @@ fn get_field_as<T: Facet<'static>>(
         None
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn sphere_vars() {
+        let s = ShapeLibrary::build();
+        let sphere = s.shapes.iter().find(|s| s.name == "Sphere").unwrap();
+        assert_eq!(sphere.name, "Sphere");
+        let r = &sphere.inputs["radius"];
+        assert_eq!(r, "1");
+        let center = &sphere.inputs["center"];
+        assert_eq!(center, "[0, 0, 0]");
+    }
+
+    #[test]
+    fn scale_vars() {
+        let s = ShapeLibrary::build();
+        let scale = s.shapes.iter().find(|s| s.name == "Scale").unwrap();
+        assert_eq!(scale.name, "Scale");
+        let shape = &scale.inputs["shape"];
+        assert_eq!(shape, "");
+        let scale = &scale.inputs["scale"];
+        assert_eq!(scale, "[1, 1, 1]");
+    }
+}
