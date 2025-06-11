@@ -1,6 +1,12 @@
 use crate::{BlockIndex, Message};
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "jit")]
+type RenderShape = fidget::jit::JitShape;
+
+#[cfg(not(feature = "jit"))]
+type RenderShape = fidget::vm::VmShape;
+
 /// State associated with a given view in the GUI
 ///
 /// Each block may have 0 or 1 views.  Views are persistent even when closed;
@@ -338,7 +344,7 @@ impl RenderTask {
                     pixel_perfect: matches!(mode, ViewMode2::Sdf),
                     ..Default::default()
                 };
-                let shape = fidget::vm::VmShape::from(settings.tree.clone());
+                let shape = RenderShape::from(settings.tree.clone());
                 let tmp = cfg.run(shape)?;
                 match mode {
                     ViewMode2::Bitfield => ImageData::Distance(
@@ -381,7 +387,7 @@ impl RenderTask {
                     cancel,
                     ..Default::default()
                 };
-                let shape = fidget::vm::VmShape::from(settings.tree.clone());
+                let shape = RenderShape::from(settings.tree.clone());
                 let image = cfg.run(shape)?;
                 let image = match mode {
                     ViewMode3::Heightmap => image.map(|v| {

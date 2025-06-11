@@ -45,6 +45,8 @@ syntect = "5.2.0"
 
 [features]
 deadlock_detection = ["egui/deadlock_detection"]
+jit = ["fidget/jit"]
+default = ["jit"]
 
 [patch.crates-io]
 egui = { git = "https://github.com/mkeeter/egui", branch = "custom-syntect-settings-0.31.1-backport" }
