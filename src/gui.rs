@@ -998,6 +998,86 @@ fn block_name(ui: &mut egui::Ui, index: BlockIndex, block: &mut Block) -> bool {
     changed
 }
 
+/// Helper type to stably edit the `egui_dock` state
+pub struct DockStateEditor<'a> {
+    script: Option<TabLocation>,
+    view: Option<TabLocation>,
+    index: BlockIndex,
+    tree: &'a mut egui_dock::DockState<Tab>,
+}
+type TabLocation = (
+    egui_dock::SurfaceIndex,
+    egui_dock::NodeIndex,
+    egui_dock::TabIndex,
+);
+
+impl<'a> DockStateEditor<'a> {
+    pub fn new(
+        index: BlockIndex,
+        tree: &'a mut egui_dock::DockState<Tab>,
+    ) -> Self {
+        let script = tree.find_tab(&Tab::script(index));
+        let view = tree.find_tab(&Tab::view(index));
+        Self {
+            script,
+            view,
+            index,
+            tree,
+        }
+    }
+    pub fn has_script(&self) -> bool {
+        self.script.is_some()
+    }
+    pub fn close_script(&mut self) {
+        if let Some(script) = self.script {
+            self.tree.remove_tab(script).unwrap();
+            self.script = None;
+            self.update_view();
+        }
+    }
+    pub fn toggle_script(&mut self) {
+        if self.script.is_some() {
+            self.close_script();
+        } else {
+            self.tree.push_to_focused_leaf(self.script_index());
+            self.update_script();
+            self.update_view();
+        }
+    }
+    fn update_script(&mut self) {
+        self.script = self.tree.find_tab(&self.script_index());
+    }
+    fn script_index(&self) -> Tab {
+        Tab::script(self.index)
+    }
+
+    pub fn has_view(&self) -> bool {
+        self.view.is_some()
+    }
+    pub fn close_view(&mut self) {
+        if let Some(view) = self.view {
+            self.tree.remove_tab(view).unwrap();
+            self.view = None;
+            self.update_script();
+        }
+    }
+    pub fn toggle_view(&mut self) {
+        if self.view.is_some() {
+            self.close_view();
+        } else {
+            self.tree.push_to_focused_leaf(self.view_index());
+            self.update_script();
+            self.update_view();
+        }
+    }
+    fn update_view(&mut self) {
+        self.view = self.tree.find_tab(&self.view_index());
+    }
+    fn view_index(&self) -> Tab {
+        Tab::view(self.index)
+    }
+}
+
 // Unicode symbols from Nerd Fonts, see https://www.nerdfonts.com/cheat-sheet
 pub const NEW_BLOCK: &str = "New block";
 const DRAG: &str = "\u{f0041}";

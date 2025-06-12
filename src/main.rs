@@ -717,11 +717,9 @@ impl App {
         let r = dnd(ui, "dnd").show_vec(
             &mut self.data.order,
             |ui, index, handle, state| {
-                let script_index = gui::Tab::script(*index);
-                let view_index = gui::Tab::view(*index);
-                let tab_location = self.tree.find_tab(&script_index);
-                let mut view_location = self.tree.find_tab(&view_index);
                 let block = self.data.blocks.get_mut(index).unwrap();
+                let mut tree =
+                    gui::DockStateEditor::new(*index, &mut self.tree);
 
                 // If we have an open view but block is (1) valid and (2) no
                 // longer defines a view, then close the view.  We'll leave the
@@ -729,55 +727,36 @@ impl App {
                 // flicking in and out as a script is edited.
                 let block_defines_view =
                     block.data.as_ref().is_some_and(|s| s.view.is_some());
-                if let Some(v) = view_location {
-                    if block.is_valid() && !block_defines_view {
-                        self.tree.remove_tab(v);
-                        view_location = None;
-                    }
+                if tree.has_view() && block.is_valid() && !block_defines_view {
+                    tree.close_view();
                 }
 
                 let flags = gui::BlockUiFlags {
                     is_last: Some(*index) == last,
-                    is_open: tab_location.is_some(),
+                    is_open: tree.has_script(),
                     is_dragged: state.dragged,
-                    is_view_open: view_location.map(|_| true).or(
-                        if block_defines_view {
-                            Some(false)
-                        } else {
-                            None
-                        },
-                    ),
+                    is_view_open: if tree.has_view() {
+                        Some(true)
+                    } else if block_defines_view {
+                        Some(false)
+                    } else {
+                        None
+                    },
                 };
                 let r = gui::draggable_block(ui, *index, block, flags, handle);
                 if r.contains(BlockResponse::DELETE) {
                     to_delete.insert(*index);
-                    if let Some(tab_location) = tab_location {
-                        self.tree.remove_tab(tab_location).unwrap();
-                    }
-                    if let Some(view_location) = view_location {
-                        self.tree.remove_tab(view_location).unwrap();
-                    }
+                    tree.close_view();
+                    tree.close_script();
                 }
                 if r.contains(BlockResponse::TOGGLE_EDIT) {
-                    if let Some(tab_location) = tab_location {
-                        self.tree.remove_tab(tab_location).unwrap();
-                    } else {
-                        self.tree.push_to_focused_leaf(script_index);
-                    }
+                    tree.toggle_script();
                 }
                 if r.contains(BlockResponse::TOGGLE_VIEW) {
-                    if let Some(view_location) = view_location {
-                        self.tree.remove_tab(view_location).unwrap();
-                    } else {
-                        self.tree.push_to_focused_leaf(view_index);
-                    }
+                    tree.toggle_view();
                 }
                 if r.contains(BlockResponse::FOCUS_ERR) {
-                    if let Some(tab_location) = tab_location {
-                        self.tree.set_active_tab(tab_location)
-                    } else {
-                        self.tree.push_to_focused_leaf(script_index);
-                    }
+                    tree.toggle_script();
                 }
                 changed |= r.contains(BlockResponse::CHANGED);
             },
