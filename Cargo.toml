@@ -18,9 +18,9 @@ panic = 'abort'
 bincode = { version = "2", features = ["serde"] }
 bitflags = "2.9.1"
 clap = "4.5.39"
-eframe = { version = "0.31.1", features = ["wgpu"] }
+eframe = { version = "0.31.1", default-features = false, features = ["wgpu", "accesskit", "wayland", "web_screen_reader", "x11"] }
 egui = "0.31.1"
-egui-wgpu = "0.31.1"
+egui-wgpu = { version = "0.31.1", features = ["fragile-send-sync-non-atomic-wasm"] }
 egui_dnd = "0.12.0"
 egui_dock = { version = "0.16.0", features = ["serde"] }
 egui_extras = { git = "https://github.com/mkeeter/egui", features = ["syntect"], branch = "custom-syntect-settings-0.31.1-backport" }
