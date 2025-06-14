@@ -93,7 +93,7 @@ impl egui_wgpu::CallbackTrait for WgpuHeightmapPainter {
             self.image.as_bytes(),
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(4 * width),
+                bytes_per_row: Some(width),
                 rows_per_image: Some(height),
             },
             texture_size,
@@ -184,7 +184,7 @@ impl HeightmapResources {
                 source: wgpu::ShaderSource::Wgsl(
                     include_str!(concat!(
                         env!("CARGO_MANIFEST_DIR"),
-                        "/shaders/image.wgsl"
+                        "/shaders/heightmap.wgsl"
                     ))
                     .into(),
                 ),
@@ -317,7 +317,7 @@ impl HeightmapResources {
                     mip_level_count: 1,
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    format: wgpu::TextureFormat::R8Unorm,
                     usage: wgpu::TextureUsages::TEXTURE_BINDING
                         | wgpu::TextureUsages::COPY_DST,
                     view_formats: &[],

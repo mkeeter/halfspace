@@ -116,7 +116,8 @@ impl ViewData2 {
 #[strum_discriminants(name(ViewMode3))]
 #[strum_discriminants(derive(Serialize, Deserialize))]
 pub enum ViewData3 {
-    Heightmap(Vec<[u8; 4]>),
+    /// Normalized heightmap values, with 0 indicating an empty position
+    Heightmap(Vec<u8>),
     Shaded(Vec<[u8; 4]>),
 }
 
@@ -419,18 +420,10 @@ impl RenderTask {
                 let image = cfg.run(shape)?;
                 let data = match mode {
                     ViewMode3::Heightmap => {
-                        let (data, _size) = image
-                            .map(|v| {
-                                if v.depth > 0 {
-                                    let d = (v.depth as usize * 255
-                                        / image_size.depth() as usize)
-                                        as u8;
-                                    [d, d, d, 255]
-                                } else {
-                                    [0; 4]
-                                }
-                            })
-                            .take();
+                        let max =
+                            image.iter().map(|v| v.depth).max().unwrap_or(1);
+                        let (data, _size) =
+                            image.map(|v| ((v.depth * 255) / max) as u8).take();
                         ViewData3::Heightmap(data)
                     }
                     ViewMode3::Shaded => {
