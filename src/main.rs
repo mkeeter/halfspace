@@ -1,6 +1,7 @@
 use clap::Parser;
 use eframe::egui_wgpu::wgpu;
 use egui_dnd::dnd;
+use log::info;
 use log::warn;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -206,11 +207,15 @@ pub fn main() -> Result<(), eframe::Error> {
         native_options,
         Box::new(|cc| {
             let mut app = App::new(cc);
-            if let Some(f) = args.target {
-                let mut f = create_rw_file(f)?;
+            if let Some(filename) = args.target {
+                let mut f = std::fs::File::options()
+                    .create(true)
+                    .append(true)
+                    .read(true)
+                    .open(&filename)?;
                 f.seek(std::io::SeekFrom::End(0))?;
                 let file_length = f.stream_position()?;
-                app.file = Some(f);
+                app.file = Some((filename, f));
                 if file_length != 0 {
                     app.load_from_file()?;
                     app.start_world_rebuild(&cc.egui_ctx);
@@ -239,7 +244,7 @@ struct App {
     generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
     library: shapes::ShapeLibrary,
 
-    file: Option<std::fs::File>,
+    file: Option<(std::path::PathBuf, std::fs::File)>,
 
     tree: egui_dock::DockState<gui::Tab>,
     syntax: egui_extras::syntax_highlighting::SyntectSettings,
@@ -347,7 +352,8 @@ impl App {
         let state = self.state();
         let cfg = bincode::config::standard();
         let state_data = bincode::serde::encode_to_vec(&state, cfg).unwrap();
-        let f = self.file.as_mut().unwrap();
+        let (p, f) = self.file.as_mut().unwrap();
+        info!("saving to {:?}", p);
         f.rewind()?;
         f.set_len(0)?;
         f.write_all(FILE_MAGIC.as_bytes())?;
@@ -363,7 +369,7 @@ impl App {
     /// # Panics
     /// If `self.file` is `None`
     fn load_from_file(&mut self) -> Result<(), ReadError> {
-        let f = self.file.as_mut().unwrap();
+        let (_, f) = self.file.as_mut().unwrap();
 
         f.seek(std::io::SeekFrom::End(0))?;
         let file_length = f.stream_position()?;
@@ -664,10 +670,16 @@ impl eframe::App for App {
                 AppResponse::SAVE => {
                     if self.file.is_none() {
                         for i in 0..100 {
-                            if let Ok(f) =
-                                create_rw_file(format!("model_{i}.half"))
+                            let filename = std::path::PathBuf::from(format!(
+                                "model_{i}.half"
+                            ));
+                            if let Ok(f) = std::fs::File::options()
+                                .create_new(true)
+                                .read(true)
+                                .write(true)
+                                .open(&filename)
                             {
-                                self.file = Some(f);
+                                self.file = Some((filename, f));
                                 break;
                             }
                         }
@@ -681,16 +693,6 @@ impl eframe::App for App {
             }
         }
     }
-}
-
-fn create_rw_file<P: AsRef<std::path::Path>>(
-    p: P,
-) -> std::io::Result<std::fs::File> {
-    std::fs::File::options()
-        .create(true)
-        .append(true)
-        .read(true)
-        .open(p)
 }
 
 impl App {
