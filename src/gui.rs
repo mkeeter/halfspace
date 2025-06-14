@@ -6,7 +6,7 @@ use crate::{
         self, ViewCanvas, ViewData, ViewData2, ViewData3, ViewImage, ViewMode2,
         ViewMode3,
     },
-    world::{Block, BlockError, BlockIndex, IoValue, NameError, World},
+    world::{Block, BlockError, BlockIndex, IoValue, NameError, Value, World},
     BlockResponse, Message, ViewResponse,
 };
 use serde::{Deserialize, Serialize};
@@ -624,53 +624,91 @@ pub fn draggable_block(
 #[must_use]
 fn block_body(ui: &mut egui::Ui, index: BlockIndex, block: &mut Block) -> bool {
     let mut changed = false;
-    let block_data = block.data.as_ref().unwrap();
+    let block_data = block.data.take().unwrap();
     let padding = ui.spacing().icon_width + ui.spacing().icon_spacing;
     for (name, value) in &block_data.io_values {
         ui.horizontal(|ui| {
             ui.add_space(padding);
-            ui.label(name);
-            match value {
-                IoValue::Output(value) => {
-                    let mut txt = value.to_string();
-                    ui.add_enabled(
-                        false,
-                        egui::TextEdit::singleline(&mut txt)
-                            .desired_width(f32::INFINITY),
-                    );
-                }
-                IoValue::Input(value) => {
-                    let s = block.inputs.get_mut(name).unwrap();
-                    let input_id = index.id().with("input_edit").with(name);
-                    ui.with_layout(
-                        egui::Layout::right_to_left(egui::Align::Center),
-                        |ui| {
-                            if let Err(err) = &value {
-                                ui.colored_label(
-                                    ui.style().visuals.error_fg_color,
-                                    WARN,
-                                )
-                                .on_hover_ui(
-                                    |ui| {
-                                        ui.label(err);
-                                    },
-                                );
-                            }
-                            let r = ui.add(
-                                egui::TextEdit::singleline(s)
-                                    .id(input_id)
-                                    .desired_width(f32::INFINITY),
-                            );
-                            if r.changed() {
-                                changed = true;
-                            }
-                        },
-                    );
-                }
-            }
+            changed |= block_io(ui, index, block, name, value);
         });
     }
+    block.data = Some(block_data);
     changed
+}
+
+/// Draws a field for a block input or output
+#[must_use]
+fn block_io(
+    ui: &mut egui::Ui,
+    index: BlockIndex,
+    block: &mut Block,
+    name: &str,
+    value: &IoValue,
+) -> bool {
+    ui.label(name);
+    match value {
+        IoValue::Output(value) => {
+            let mut txt = value.to_string();
+            ui.add_enabled(
+                false,
+                egui::TextEdit::singleline(&mut txt)
+                    .desired_width(f32::INFINITY),
+            );
+            false
+        }
+        IoValue::Input(value) => block_io_input(ui, index, block, name, value),
+    }
+}
+
+fn try_parse_vec2(s: &str) -> Option<fidget::shapes::Vec2> {
+    let s = s.trim();
+    let s = s.strip_prefix('[')?;
+    let mut iter = s.split(',');
+    let x = iter.next()?.trim().parse().ok()?;
+    let y = iter.next()?.trim().strip_suffix(']')?.parse().ok()?;
+    Some(fidget::shapes::Vec2 { x, y })
+}
+
+/// Draws an editable input field for a block input
+#[must_use]
+fn block_io_input(
+    ui: &mut egui::Ui,
+    index: BlockIndex,
+    block: &mut Block,
+    name: &str,
+    value: &Result<Value, String>,
+) -> bool {
+    let s = block.inputs.get_mut(name).unwrap();
+    let input_id = index.id().with("input_edit").with(name);
+    let mut f = s.parse::<f32>().ok();
+    let mut v2 = try_parse_vec2(s);
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        if let Err(err) = &value {
+            ui.colored_label(ui.style().visuals.error_fg_color, WARN)
+                .on_hover_ui(|ui| {
+                    ui.label(err);
+                });
+        }
+        let mut changed = false;
+        if let Some(f) = f.as_mut() {
+            if draggable_button_float(ui, f).changed() {
+                *s = format!("{f:.2}");
+                changed = true;
+            }
+        } else if let Some(v) = v2.as_mut() {
+            if draggable_button_vec2(ui, v).changed() {
+                *s = format!("[{:.2}, {:.2}]", v.x, v.y);
+                changed = true;
+            }
+        }
+        let r = ui.add(
+            egui::TextEdit::singleline(s)
+                .id(input_id)
+                .desired_width(f32::INFINITY),
+        );
+        changed | r.changed()
+    })
+    .inner
 }
 
 fn draggable_block_header(
@@ -686,7 +724,7 @@ fn draggable_block_header(
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         ui.add_space(5.0);
         handle.show_drag_cursor_on_hover(false).ui(ui, |ui| {
-            ui.add(egui::Button::new(DRAG).selected(flags.is_dragged));
+            ui.add(egui::Button::new(DRAG_UP_DOWN).selected(flags.is_dragged));
         });
         if ui.button(TRASH).clicked() {
             response |= BlockResponse::DELETE;
@@ -793,6 +831,34 @@ fn block_name(ui: &mut egui::Ui, index: BlockIndex, block: &mut Block) -> bool {
     changed
 }
 
+fn draggable_button_float(ui: &mut egui::Ui, f: &mut f32) -> egui::Response {
+    let button = egui::Button::new(DRAG_LEFT_RIGHT).sense(egui::Sense::drag());
+    let mut response = ui.add(button);
+
+    if response.dragged() {
+        *f += response.drag_motion().x * 0.01;
+        response.mark_changed();
+    }
+
+    response
+}
+
+fn draggable_button_vec2(
+    ui: &mut egui::Ui,
+    f: &mut fidget::shapes::Vec2,
+) -> egui::Response {
+    let button = egui::Button::new(DRAG_QUAD).sense(egui::Sense::drag());
+    let mut response = ui.add(button);
+
+    if response.dragged() {
+        f.x += response.drag_motion().x as f64 * 0.01;
+        f.y -= response.drag_motion().y as f64 * 0.01;
+        response.mark_changed();
+    }
+
+    response
+}
+
 /// Helper type to stably edit the `egui_dock` state
 pub struct DockStateEditor<'a> {
     script: Option<TabLocation>,
@@ -874,7 +940,9 @@ impl<'a> DockStateEditor<'a> {
 }
 
 // Unicode symbols from Nerd Fonts, see https://www.nerdfonts.com/cheat-sheet
-const DRAG: &str = "\u{f0041}";
+const DRAG_QUAD: &str = "\u{f0041}";
+const DRAG_UP_DOWN: &str = "\u{f0e79}";
+const DRAG_LEFT_RIGHT: &str = "\u{f0e73}";
 const ERROR: &str = "\u{ea87}";
 const EYE: &str = "\u{f441}";
 const HOURGLASS: &str = "\u{f252}";
