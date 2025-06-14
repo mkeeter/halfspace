@@ -166,8 +166,12 @@ impl RenderTask {
                 let image = cfg.run(shape)?;
                 let data = match mode {
                     ViewMode3::Heightmap => {
-                        let max =
-                            image.iter().map(|v| v.depth).max().unwrap_or(1);
+                        let max = image
+                            .iter()
+                            .map(|v| v.depth)
+                            .max()
+                            .unwrap_or(0)
+                            .max(1);
                         let (data, _size) =
                             image.map(|v| ((v.depth * 255) / max) as u8).take();
                         ViewData3::Heightmap(data)

@@ -696,33 +696,35 @@ impl eframe::App for App {
 }
 
 impl App {
-    /// Pick the characteristic scale for each block
+    /// Pick the characteristic matrix for each block
     ///
-    /// The scale is the view's scale (if present); otherwise, it's the next
-    /// available characteristic scale.  If no views are open, then we pick a
+    /// The matrix is the view's matrix (if present); otherwise, it's the next
+    /// available characteristic matrix.  If no views are open, then we pick a
     /// reasonable default value.
-    fn characteristic_scale(&self) -> HashMap<BlockIndex, f32> {
-        let mut scale = self
+    fn characteristic_matrices(
+        &self,
+    ) -> HashMap<BlockIndex, nalgebra::Matrix4<f32>> {
+        let mut mats = self
             .data
             .order
             .iter()
             .map(|index| {
                 (
                     index,
-                    self.views.get(index).map(|v| v.characteristic_scale()),
+                    self.views.get(index).map(|v| v.characteristic_matrix()),
                 )
             })
             .collect::<Vec<_>>();
-        let mut last_scale = 0.01;
-        for (_i, s) in scale.iter_mut().rev() {
+        let mut last_mat =
+            nalgebra::Scale3::new(0.01, 0.01, 0.01).to_homogeneous();
+        for (_i, s) in mats.iter_mut().rev() {
             if let Some(s) = s {
-                last_scale = *s;
+                last_mat = *s;
             } else {
-                *s = Some(last_scale);
+                *s = Some(last_mat);
             }
         }
-        scale
-            .into_iter()
+        mats.into_iter()
             .map(|(i, s)| (*i, s.unwrap()))
             .collect::<HashMap<_, _>>()
     }
@@ -737,7 +739,7 @@ impl App {
         let mut changed = false;
         let last = self.data.order.last().cloned();
 
-        let block_scale = self.characteristic_scale();
+        let block_mats = self.characteristic_matrices();
 
         // XXX there is a drag-and-drop implementation that's built into egui,
         // see `egui_demo_lib/src/demo/drag_and_drop.rs`
@@ -770,10 +772,9 @@ impl App {
                         None
                     },
                 };
-                let scale = block_scale[index];
-                let r = gui::draggable_block(
-                    ui, *index, block, flags, scale, handle,
-                );
+                let mat = block_mats[index];
+                let r =
+                    gui::draggable_block(ui, *index, block, flags, mat, handle);
                 if r.contains(BlockResponse::DELETE) {
                     to_delete.insert(*index);
                     tree.close_view();

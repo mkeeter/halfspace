@@ -591,7 +591,7 @@ pub fn draggable_block(
     index: BlockIndex,
     block: &mut Block,
     flags: BlockUiFlags,
-    scale: f32,
+    mat: nalgebra::Matrix4<f32>,
     handle: egui_dnd::Handle,
 ) -> BlockResponse {
     let mut response = BlockResponse::empty();
@@ -606,7 +606,7 @@ pub fn draggable_block(
             response = draggable_block_header(ui, index, block, flags, handle)
         })
         .body_unindented(|ui| {
-            if block_body(ui, index, block, scale) {
+            if block_body(ui, index, block, mat) {
                 response |= BlockResponse::CHANGED;
             }
             if !flags.is_last {
@@ -627,7 +627,7 @@ fn block_body(
     ui: &mut egui::Ui,
     index: BlockIndex,
     block: &mut Block,
-    scale: f32,
+    mat: nalgebra::Matrix4<f32>,
 ) -> bool {
     let mut changed = false;
     let block_data = block.data.take().unwrap();
@@ -635,7 +635,7 @@ fn block_body(
     for (name, value) in &block_data.io_values {
         ui.horizontal(|ui| {
             ui.add_space(padding);
-            changed |= block_io(ui, index, block, name, value, scale);
+            changed |= block_io(ui, index, block, name, value, mat);
         });
     }
     block.data = Some(block_data);
@@ -650,7 +650,7 @@ fn block_io(
     block: &mut Block,
     name: &str,
     value: &IoValue,
-    scale: f32,
+    mat: nalgebra::Matrix4<f32>,
 ) -> bool {
     ui.label(name);
     match value {
@@ -664,7 +664,7 @@ fn block_io(
             false
         }
         IoValue::Input(value) => {
-            block_io_input(ui, index, block, name, value, scale)
+            block_io_input(ui, index, block, name, value, mat)
         }
     }
 }
@@ -678,6 +678,16 @@ fn try_parse_vec2(s: &str) -> Option<fidget::shapes::Vec2> {
     Some(fidget::shapes::Vec2 { x, y })
 }
 
+fn try_parse_vec3(s: &str) -> Option<fidget::shapes::Vec3> {
+    let s = s.trim();
+    let s = s.strip_prefix('[')?;
+    let mut iter = s.split(',');
+    let x = iter.next()?.trim().parse().ok()?;
+    let y = iter.next()?.trim().parse().ok()?;
+    let z = iter.next()?.trim().strip_suffix(']')?.parse().ok()?;
+    Some(fidget::shapes::Vec3 { x, y, z })
+}
+
 /// Draws an editable input field for a block input
 #[must_use]
 fn block_io_input(
@@ -686,12 +696,13 @@ fn block_io_input(
     block: &mut Block,
     name: &str,
     value: &Result<Value, String>,
-    scale: f32,
+    mat: nalgebra::Matrix4<f32>,
 ) -> bool {
     let s = block.inputs.get_mut(name).unwrap();
     let input_id = index.id().with("input_edit").with(name);
     let mut f = s.parse::<f32>().ok();
     let mut v2 = try_parse_vec2(s);
+    let mut v3 = try_parse_vec3(s);
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         if let Err(err) = &value {
             ui.colored_label(ui.style().visuals.error_fg_color, WARN)
@@ -702,16 +713,24 @@ fn block_io_input(
         let mut changed = false;
 
         // Pick text resolution based on characteristic scale
-        let res = scale.log10();
+        let res =
+            (mat[(0, 0)].powi(2) + mat[(1, 0)].powi(2) + mat[(2, 0)].powi(2))
+                .sqrt()
+                .log10();
         let r = if res < 0.0 { -res.floor() as usize } else { 2 };
         if let Some(f) = f.as_mut() {
-            if draggable_button_float(ui, f, scale).changed() {
+            if draggable_button_float(ui, f, mat).changed() {
                 *s = format!("{f:.*}", r);
                 changed = true;
             }
         } else if let Some(v) = v2.as_mut() {
-            if draggable_button_vec2(ui, v, scale).changed() {
+            if draggable_button_vec2(ui, v, mat).changed() {
                 *s = format!("[{:.*}, {:.*}]", r, v.x, r, v.y);
+                changed = true;
+            }
+        } else if let Some(v) = v3.as_mut() {
+            if draggable_button_vec3(ui, v, mat).changed() {
+                *s = format!("[{:.*}, {:.*}, {:.*}]", r, v.x, r, v.y, r, v.z);
                 changed = true;
             }
         }
@@ -848,13 +867,13 @@ fn block_name(ui: &mut egui::Ui, index: BlockIndex, block: &mut Block) -> bool {
 fn draggable_button_float(
     ui: &mut egui::Ui,
     f: &mut f32,
-    scale: f32,
+    mat: nalgebra::Matrix4<f32>,
 ) -> egui::Response {
     let button = egui::Button::new(DRAG_LEFT_RIGHT).sense(egui::Sense::drag());
     let mut response = ui.add(button);
 
     if response.dragged() {
-        *f += response.drag_motion().x * scale;
+        *f += response.drag_motion().x * mat[(0, 0)];
         response.mark_changed();
     }
 
@@ -864,14 +883,46 @@ fn draggable_button_float(
 fn draggable_button_vec2(
     ui: &mut egui::Ui,
     f: &mut fidget::shapes::Vec2,
-    scale: f32,
+    mat: nalgebra::Matrix4<f32>,
 ) -> egui::Response {
     let button = egui::Button::new(DRAG_QUAD).sense(egui::Sense::drag());
     let mut response = ui.add(button);
 
     if response.dragged() {
-        f.x += response.drag_motion().x as f64 * scale as f64;
-        f.y -= response.drag_motion().y as f64 * scale as f64;
+        let d = nalgebra::Vector4::new(
+            response.drag_motion().x,
+            response.drag_motion().y,
+            0.0,
+            0.0,
+        );
+        let out = mat * d;
+        f.x += out.x as f64;
+        f.y += out.y as f64;
+        response.mark_changed();
+    }
+
+    response
+}
+
+fn draggable_button_vec3(
+    ui: &mut egui::Ui,
+    f: &mut fidget::shapes::Vec3,
+    mat: nalgebra::Matrix4<f32>,
+) -> egui::Response {
+    let button = egui::Button::new(DRAG_QUAD).sense(egui::Sense::drag());
+    let mut response = ui.add(button);
+
+    if response.dragged() {
+        let d = nalgebra::Vector4::new(
+            response.drag_motion().x,
+            response.drag_motion().y,
+            0.0,
+            0.0,
+        );
+        let out = mat * d;
+        f.x += out.x as f64;
+        f.y += out.y as f64;
+        f.z += out.z as f64;
         response.mark_changed();
     }
 

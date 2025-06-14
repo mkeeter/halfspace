@@ -30,20 +30,26 @@ pub struct ViewData {
 }
 
 impl ViewData {
-    /// Returns a characteristic scale for this view
+    /// Returns a characteristic transform matrix for this view
     ///
     /// The scale should be applied to mouse motion in pixels
-    pub fn characteristic_scale(&self) -> f32 {
+    pub fn characteristic_matrix(&self) -> nalgebra::Matrix4<f32> {
         match self.canvas {
             ViewCanvas::Canvas2 { canvas, .. } => {
-                let mat = canvas.image_size().screen_to_world()
-                    * canvas.view().world_to_model();
-                mat[(0, 0)]
+                let m = canvas.view().world_to_model()
+                    * canvas.image_size().screen_to_world();
+                #[rustfmt::skip]
+                let mat = nalgebra::Matrix4::new(
+                    m[(0, 0)], m[(0, 1)], 0.0, m[(0, 2)],
+                    m[(1, 0)], m[(1, 1)], 0.0, m[(1, 2)],
+                    0.0,        0.0,      1.0, 0.0,
+                    m[(2, 0)], m[(2, 1)], 0.0, m[(2,2)],
+                );
+                mat
             }
             ViewCanvas::Canvas3 { canvas, .. } => {
-                let mat = canvas.image_size().screen_to_world()
-                    * canvas.view().world_to_model();
-                mat[(0, 0)]
+                canvas.view().world_to_model()
+                    * canvas.image_size().screen_to_world()
             }
         }
     }
