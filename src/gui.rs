@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use crate::{
     view::{
-        ViewCanvas, ViewData, ViewData2, ViewData3, ViewImage, ViewMode2,
+        self, ViewCanvas, ViewData, ViewData2, ViewData3, ViewImage, ViewMode2,
         ViewMode3,
     },
     world::{Block, BlockError, BlockIndex, IoValue, NameError, World},
@@ -104,7 +104,7 @@ impl<'a> WorldView<'a> {
             && matches!(entry, std::collections::hash_map::Entry::Vacant(..))
         {
             return out
-                | Self::view_fallback_ui(
+                | view::fallback_ui(
                     ui,
                     index,
                     None,
@@ -213,7 +213,7 @@ impl<'a> WorldView<'a> {
                 notify,
             ) else {
                 return out
-                    | Self::view_fallback_ui(
+                    | view::fallback_ui(
                         ui,
                         index,
                         Some(entry),
@@ -228,7 +228,7 @@ impl<'a> WorldView<'a> {
         } else {
             // XXX can we actually get here?
             return out
-                | Self::view_fallback_ui(
+                | view::fallback_ui(
                     ui,
                     index,
                     Some(entry),
@@ -324,7 +324,7 @@ impl<'a> WorldView<'a> {
             _ => {
                 return out
                     | if entry.task.as_ref().is_some_and(|t| !t.done()) {
-                        Self::view_fallback_ui(
+                        view::fallback_ui(
                             ui,
                             index,
                             Some(entry),
@@ -333,7 +333,7 @@ impl<'a> WorldView<'a> {
                             None,
                         )
                     } else {
-                        Self::view_fallback_ui(
+                        view::fallback_ui(
                             ui,
                             index,
                             Some(entry),
@@ -353,7 +353,7 @@ impl<'a> WorldView<'a> {
         }
 
         if valid {
-            out |= Self::view_edit_button(ui, index, entry, size);
+            out |= view::edit_button(ui, index, entry, size);
         } else {
             ui.painter().rect_stroke(
                 rect,
@@ -387,218 +387,11 @@ impl<'a> WorldView<'a> {
                     ui.with_layout(
                         egui::Layout::left_to_right(egui::Align::TOP),
                         |ui| {
-                            out |=
-                                Self::view_edit_button(ui, index, entry, size);
+                            out |= view::edit_button(ui, index, entry, size);
                         },
                     );
                 },
             );
-        }
-        out
-    }
-
-    fn view_edit_button(
-        ui: &mut egui::Ui,
-        index: BlockIndex,
-        entry: &mut ViewData,
-        size: fidget::render::ImageSize,
-    ) -> ViewResponse {
-        let mut out = ViewResponse::empty();
-        // Pop-up box to change render settings
-        #[derive(Copy, Clone, PartialEq, Eq)]
-        enum ViewCanvasType {
-            Sdf,
-            Bitfield,
-            Heightmap,
-            Shaded,
-        }
-        let initial_tag = match &entry.canvas {
-            ViewCanvas::Canvas2 {
-                mode: ViewMode2::Bitfield,
-                ..
-            } => ViewCanvasType::Bitfield,
-            ViewCanvas::Canvas2 {
-                mode: ViewMode2::Sdf,
-                ..
-            } => ViewCanvasType::Sdf,
-            ViewCanvas::Canvas3 {
-                mode: ViewMode3::Heightmap,
-                ..
-            } => ViewCanvasType::Heightmap,
-            ViewCanvas::Canvas3 {
-                mode: ViewMode3::Shaded,
-                ..
-            } => ViewCanvasType::Shaded,
-        };
-        let mut tag = initial_tag;
-        let mut reset_camera = false;
-        egui::ComboBox::from_id_salt(index.id().with("view_editor"))
-            .selected_text(CAMERA)
-            .width(0.0)
-            .show_ui(ui, |ui| {
-                ui.selectable_value(
-                    &mut tag,
-                    ViewCanvasType::Bitfield,
-                    "2D bitfield",
-                );
-                ui.selectable_value(&mut tag, ViewCanvasType::Sdf, "2D SDF");
-                ui.separator();
-                ui.selectable_value(
-                    &mut tag,
-                    ViewCanvasType::Heightmap,
-                    "3D heightmap",
-                );
-                ui.selectable_value(
-                    &mut tag,
-                    ViewCanvasType::Shaded,
-                    "3D shaded",
-                );
-                ui.separator();
-                if ui.button("Reset camera").clicked() {
-                    reset_camera = true;
-                }
-            });
-        // If we've edited the canvas tag, then update it in the entry
-        if tag != initial_tag {
-            out |= ViewResponse::REDRAW;
-            let mut next_canvas = match tag {
-                ViewCanvasType::Sdf | ViewCanvasType::Bitfield => {
-                    ViewCanvas::Canvas2 {
-                        canvas: fidget::gui::Canvas2::new(size),
-                        mode: match tag {
-                            ViewCanvasType::Sdf => ViewMode2::Sdf,
-                            ViewCanvasType::Bitfield => ViewMode2::Bitfield,
-                            _ => unreachable!(),
-                        },
-                    }
-                }
-                ViewCanvasType::Heightmap | ViewCanvasType::Shaded => {
-                    let size = fidget::render::VoxelSize::new(
-                        size.width(),
-                        size.height(),
-                        size.width().max(size.height()), // XXX select depth?
-                    );
-                    ViewCanvas::Canvas3 {
-                        canvas: fidget::gui::Canvas3::new(size),
-                        mode: match tag {
-                            ViewCanvasType::Heightmap => ViewMode3::Heightmap,
-                            ViewCanvasType::Shaded => ViewMode3::Shaded,
-                            _ => unreachable!(),
-                        },
-                    }
-                }
-            };
-            match (&mut next_canvas, &mut entry.canvas) {
-                (
-                    ViewCanvas::Canvas2 {
-                        canvas: next_canvas,
-                        ..
-                    },
-                    ViewCanvas::Canvas2 {
-                        canvas: prev_canvas,
-                        ..
-                    },
-                ) => std::mem::swap(next_canvas, prev_canvas),
-                (
-                    ViewCanvas::Canvas3 {
-                        canvas: next_canvas,
-                        ..
-                    },
-                    ViewCanvas::Canvas3 {
-                        canvas: prev_canvas,
-                        ..
-                    },
-                ) => std::mem::swap(next_canvas, prev_canvas),
-                _ => (), // TODO do some swapping if we do 2D <-> 3D?
-            }
-            entry.canvas = next_canvas;
-        }
-        if reset_camera {
-            match &mut entry.canvas {
-                ViewCanvas::Canvas2 { canvas, .. } => {
-                    *canvas = fidget::gui::Canvas2::new(canvas.image_size());
-                    out |= ViewResponse::REDRAW;
-                }
-                ViewCanvas::Canvas3 { canvas, .. } => {
-                    *canvas = fidget::gui::Canvas3::new(canvas.image_size());
-                    out |= ViewResponse::REDRAW;
-                }
-            }
-        }
-        out
-    }
-
-    /// Manually draw a backdrop indicating that the view is invalid
-    fn view_fallback_ui(
-        ui: &mut egui::Ui,
-        index: BlockIndex,
-        entry: Option<&mut ViewData>,
-        size: fidget::render::ImageSize,
-        inner_text: &str,
-        error_text: Option<&str>,
-    ) -> ViewResponse {
-        let mut out = ViewResponse::empty();
-
-        let style = ui.style();
-        let painter = ui.painter();
-
-        let mut t = style.text_styles[&egui::TextStyle::Heading].clone();
-        t.size *= 2.0;
-        let layout = painter.layout(
-            inner_text.to_owned(),
-            t,
-            style.visuals.widgets.noninteractive.text_color(),
-            f32::INFINITY,
-        );
-        let rect = painter.clip_rect();
-        let text_corner = rect.center() - layout.size() / 2.0;
-        painter.rect_filled(rect, 0.0, style.visuals.panel_fill);
-        painter.galley(text_corner, layout, egui::Color32::BLACK);
-
-        if let Some(error_text) = error_text {
-            ui.painter().rect_stroke(
-                rect,
-                0.0,
-                egui::Stroke {
-                    width: 4.0,
-                    color: ui.style().visuals.error_fg_color,
-                },
-                egui::StrokeKind::Inside,
-            );
-            ui.with_layout(
-                egui::Layout::right_to_left(egui::Align::TOP),
-                |ui| {
-                    let r = ui
-                        .add(
-                            egui::Label::new(
-                                egui::RichText::new(WARN)
-                                    .color(egui::Color32::WHITE)
-                                    .background_color(
-                                        ui.style().visuals.error_fg_color,
-                                    ),
-                            )
-                            .sense(egui::Sense::CLICK),
-                        )
-                        .on_hover_ui(|ui| {
-                            ui.label(error_text);
-                        });
-                    if r.clicked() {
-                        out |= ViewResponse::FOCUS_ERR;
-                    }
-                    if let Some(entry) = entry {
-                        ui.with_layout(
-                            egui::Layout::left_to_right(egui::Align::TOP),
-                            |ui| {
-                                out |= Self::view_edit_button(
-                                    ui, index, entry, size,
-                                );
-                            },
-                        );
-                    }
-                },
-            );
-        } else if let Some(entry) = entry {
-            out |= Self::view_edit_button(ui, index, entry, size);
         }
         out
     }
@@ -1081,12 +874,13 @@ impl<'a> DockStateEditor<'a> {
 }
 
 // Unicode symbols from Nerd Fonts, see https://www.nerdfonts.com/cheat-sheet
-pub const NEW_BLOCK: &str = "New block";
 const DRAG: &str = "\u{f0041}";
-const TRASH: &str = "\u{f48e}";
-const PENCIL: &str = "\u{f03eb}";
-const WARN: &str = "\u{f071}";
-const EYE: &str = "\u{f441}";
-const CAMERA: &str = "\u{f03d}";
-const HOURGLASS: &str = "\u{f252}";
 const ERROR: &str = "\u{ea87}";
+const EYE: &str = "\u{f441}";
+const HOURGLASS: &str = "\u{f252}";
+const PENCIL: &str = "\u{f03eb}";
+const TRASH: &str = "\u{f48e}";
+
+pub const CAMERA: &str = "\u{f03d}";
+pub const NEW_BLOCK: &str = "New block";
+pub const WARN: &str = "\u{f071}";
