@@ -228,10 +228,8 @@ enum Message {
     RenderView {
         block: BlockIndex,
         generation: u64,
-        level: usize,
-        settings: view::RenderSettings,
         start_time: std::time::Instant,
-        data: view::ImageData,
+        data: view::ViewImage,
     },
 }
 
@@ -510,19 +508,11 @@ impl eframe::App for App {
                 Message::RenderView {
                     block,
                     generation,
-                    level,
-                    settings,
                     data,
                     start_time,
                 } => {
                     if let Some(e) = self.views.get_mut(&block) {
-                        e.update(
-                            generation,
-                            level,
-                            data,
-                            settings,
-                            start_time.elapsed(),
-                        )
+                        e.update(generation, data, start_time.elapsed())
                     }
                 }
             }

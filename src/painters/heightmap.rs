@@ -1,6 +1,6 @@
 use super::{Uniforms, WgpuResources};
 use crate::{
-    view::{ImageData, RenderMode, ViewImage},
+    view::{RenderData, ViewData3, ViewImage},
     world::BlockIndex,
 };
 use eframe::{
@@ -26,13 +26,26 @@ pub struct WgpuHeightmapPainter {
 }
 
 impl WgpuHeightmapPainter {
+    /// Builds a new heightmap painter
+    ///
+    /// Note that `size` and `view` are associated with the current rendering
+    /// quad; the `image` contains its own size and view transforms.
+    ///
+    /// # Panics
+    /// If image data is not a heightmap
     pub fn new(
         index: BlockIndex,
         image: ViewImage,
         size: fidget::render::ImageSize,
         view: fidget::render::View3,
     ) -> Self {
-        assert!(matches!(image.data, ImageData::Rgba(..)));
+        assert!(matches!(
+            image.data,
+            RenderData::Render3 {
+                data: ViewData3::Heightmap(..),
+                ..
+            }
+        ));
         Self {
             index,
             image,
@@ -53,8 +66,8 @@ impl egui_wgpu::CallbackTrait for WgpuHeightmapPainter {
     ) -> Vec<wgpu::CommandBuffer> {
         let gr: &mut WgpuResources = resources.get_mut().unwrap();
 
-        let (width, height) = match self.image.settings.mode {
-            RenderMode::Render3 { size, .. } => (
+        let (width, height) = match &self.image.data {
+            RenderData::Render3 { size, .. } => (
                 (size.width() / (1 << self.image.level)).max(1),
                 (size.height() / (1 << self.image.level)).max(1),
             ),
@@ -77,7 +90,7 @@ impl egui_wgpu::CallbackTrait for WgpuHeightmapPainter {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            self.image.data.as_bytes(),
+            self.image.as_bytes(),
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(4 * width),
@@ -87,8 +100,8 @@ impl egui_wgpu::CallbackTrait for WgpuHeightmapPainter {
         );
 
         // Create the uniform
-        let transform = match self.image.settings.mode {
-            RenderMode::Render3 { size, view, .. } => {
+        let transform = match &self.image.data {
+            RenderData::Render3 { size, view, .. } => {
                 // don't blame me, I just twiddled the matrices until things
                 // looked right
                 let aspect_ratio = |width: u32, height: u32| {

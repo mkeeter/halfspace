@@ -94,41 +94,52 @@ pub enum ViewState {
     View3(ViewMode3),
 }
 
-#[derive(Copy, Clone, PartialEq, Serialize, Deserialize)]
-pub enum ViewMode2 {
-    Sdf,
-    Bitfield,
+#[derive(Clone, strum::EnumDiscriminants)]
+#[strum_discriminants(name(ViewMode2))]
+#[strum_discriminants(derive(Serialize, Deserialize))]
+pub enum ViewData2 {
+    Sdf(Vec<f32>),
+    Bitfield(Vec<f32>),
 }
 
-#[derive(Copy, Clone, PartialEq, Serialize, Deserialize)]
-pub enum ViewMode3 {
-    Heightmap,
-    Shaded,
+impl ViewData2 {
+    pub fn as_bytes(&self) -> &[u8] {
+        use zerocopy::IntoBytes;
+        match self {
+            ViewData2::Sdf(data) => data.as_bytes(),
+            ViewData2::Bitfield(data) => data.as_bytes(),
+        }
+    }
+}
+
+#[derive(Clone, strum::EnumDiscriminants)]
+#[strum_discriminants(name(ViewMode3))]
+#[strum_discriminants(derive(Serialize, Deserialize))]
+pub enum ViewData3 {
+    Heightmap(Vec<[u8; 4]>),
+    Shaded(Vec<[u8; 4]>),
+}
+
+impl ViewData3 {
+    pub fn as_bytes(&self) -> &[u8] {
+        use zerocopy::IntoBytes;
+        match self {
+            ViewData3::Heightmap(data) => data.as_bytes(),
+            ViewData3::Shaded(data) => data.as_bytes(),
+        }
+    }
 }
 
 /// Rendered image, along with the settings that generated it
 #[derive(Clone)]
 pub struct ViewImage {
-    // XXX there are ways for ImageData and RenderSettings to get out of
-    // sync with each other; do we need a new data structure?
-    pub data: ImageData,
+    pub data: RenderData,
     pub level: usize,
-    pub settings: RenderSettings,
 }
 
-#[derive(Clone)]
-pub enum ImageData {
-    Rgba(Vec<[u8; 4]>),
-    Distance(Vec<f32>),
-}
-
-impl ImageData {
+impl ViewImage {
     pub fn as_bytes(&self) -> &[u8] {
-        use zerocopy::IntoBytes;
-        match self {
-            ImageData::Rgba(v) => v.as_bytes(),
-            ImageData::Distance(v) => v.as_bytes(),
-        }
+        self.data.as_bytes()
     }
 }
 
@@ -151,9 +162,7 @@ impl ViewData {
     pub fn update(
         &mut self,
         generation: u64,
-        level: usize,
-        data: ImageData,
-        settings: RenderSettings,
+        data: ViewImage,
         render_time: std::time::Duration,
     ) {
         const TARGET_RENDER_TIME: std::time::Duration =
@@ -161,25 +170,21 @@ impl ViewData {
         const MAX_LEVEL: usize = 10;
 
         // Adjust self.start_level to hit a render time target
-        if level == self.start_level {
-            if render_time > TARGET_RENDER_TIME && level < MAX_LEVEL {
+        if data.level == self.start_level {
+            if render_time > TARGET_RENDER_TIME && data.level < MAX_LEVEL {
                 self.start_level += 1;
             } else if render_time < TARGET_RENDER_TIME * 3 / 4 {
                 self.start_level = self.start_level.saturating_sub(1);
             }
         }
         if generation == self.generation {
-            self.image = Some(ViewImage {
-                data,
-                settings,
-                level,
-            });
             if let Some(task) = &mut self.task {
                 task.done = true;
             }
-            if let Some(next) = level.checked_sub(1) {
+            if let Some(next) = data.level.checked_sub(1) {
                 self.pending = Some(next);
             }
+            self.image = Some(data);
         }
     }
 
@@ -277,6 +282,30 @@ pub enum RenderMode {
     },
 }
 
+/// Rendered image data
+#[derive(Clone)]
+pub enum RenderData {
+    Render2 {
+        data: ViewData2,
+        view: fidget::render::View2,
+        size: fidget::render::ImageSize,
+    },
+    Render3 {
+        data: ViewData3,
+        view: fidget::render::View3,
+        size: fidget::render::VoxelSize,
+    },
+}
+
+impl RenderData {
+    pub fn as_bytes(&self) -> &[u8] {
+        match self {
+            RenderData::Render2 { data, .. } => data.as_bytes(),
+            RenderData::Render3 { data, .. } => data.as_bytes(),
+        }
+    }
+}
+
 impl std::cmp::PartialEq for RenderSettings {
     fn eq(&self, other: &Self) -> bool {
         // XXX this does expensive tree deduplication!
@@ -306,8 +335,6 @@ impl RenderTask {
                     .send(Message::RenderView {
                         block,
                         generation,
-                        settings: settings_,
-                        level,
                         start_time,
                         data,
                     })
@@ -329,7 +356,7 @@ impl RenderTask {
         settings: &RenderSettings,
         level: usize,
         cancel: fidget::render::CancelToken,
-    ) -> Option<ImageData> {
+    ) -> Option<ViewImage> {
         let scale = 1 << level;
         let data = match settings.mode {
             RenderMode::Render2 { mode, view, size } => {
@@ -346,8 +373,8 @@ impl RenderTask {
                 };
                 let shape = RenderShape::from(settings.tree.clone());
                 let tmp = cfg.run(shape)?;
-                match mode {
-                    ViewMode2::Bitfield => ImageData::Distance(
+                let data = match mode {
+                    ViewMode2::Bitfield => ViewData2::Bitfield(
                         tmp.into_iter()
                             .map(|d| match d.distance() {
                                 Ok(d) => d,
@@ -361,7 +388,7 @@ impl RenderTask {
                             })
                             .collect(),
                     ),
-                    ViewMode2::Sdf => ImageData::Distance(
+                    ViewMode2::Sdf => ViewData2::Sdf(
                         tmp.into_iter()
                             .map(|d| {
                                 let d = d.distance().unwrap();
@@ -373,7 +400,8 @@ impl RenderTask {
                             })
                             .collect(),
                     ),
-                }
+                };
+                RenderData::Render2 { data, view, size }
             }
             RenderMode::Render3 { mode, view, size } => {
                 let image_size = fidget::render::VoxelSize::new(
@@ -389,17 +417,22 @@ impl RenderTask {
                 };
                 let shape = RenderShape::from(settings.tree.clone());
                 let image = cfg.run(shape)?;
-                let image = match mode {
-                    ViewMode3::Heightmap => image.map(|v| {
-                        if v.depth > 0 {
-                            let d = (v.depth as usize * 255
-                                / image_size.depth() as usize)
-                                as u8;
-                            [d, d, d, 255]
-                        } else {
-                            [0; 4]
-                        }
-                    }),
+                let data = match mode {
+                    ViewMode3::Heightmap => {
+                        let (data, _size) = image
+                            .map(|v| {
+                                if v.depth > 0 {
+                                    let d = (v.depth as usize * 255
+                                        / image_size.depth() as usize)
+                                        as u8;
+                                    [d, d, d, 255]
+                                } else {
+                                    [0; 4]
+                                }
+                            })
+                            .take();
+                        ViewData3::Heightmap(data)
+                    }
                     ViewMode3::Shaded => {
                         // XXX this should all happen on the GPU, probably
                         let threads = Some(&fidget::render::ThreadPool::Global);
@@ -423,13 +456,13 @@ impl RenderTask {
                             },
                             threads,
                         );
-                        out
+                        let (data, _size) = out.take();
+                        ViewData3::Shaded(data)
                     }
                 };
-                let (data, _size) = image.take();
-                ImageData::Rgba(data)
+                RenderData::Render3 { data, view, size }
             }
         };
-        Some(data)
+        Some(ViewImage { data, level })
     }
 }

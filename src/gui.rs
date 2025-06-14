@@ -3,7 +3,8 @@ use std::collections::HashMap;
 
 use crate::{
     view::{
-        RenderMode, RenderSettings, ViewCanvas, ViewData, ViewMode2, ViewMode3,
+        RenderData, RenderMode, RenderSettings, ViewCanvas, ViewData,
+        ViewData2, ViewData3, ViewMode2, ViewMode3,
     },
     world::{Block, BlockError, BlockIndex, IoValue, NameError, World},
     BlockResponse, Message, ViewResponse,
@@ -181,10 +182,10 @@ impl<'a> WorldView<'a> {
 
         // This is the magic that triggers the GPU callback.  We pick a render
         // mode based on the selected image's settings
-        match (image.settings.mode, current_canvas) {
+        match (&image.data, current_canvas) {
             (
-                RenderMode::Render2 {
-                    mode: ViewMode2::Bitfield,
+                RenderData::Render2 {
+                    data: ViewData2::Bitfield(..),
                     ..
                 },
                 ViewCanvas::Canvas2 {
@@ -203,8 +204,8 @@ impl<'a> WorldView<'a> {
                 ));
             }
             (
-                RenderMode::Render2 {
-                    mode: ViewMode2::Sdf,
+                RenderData::Render2 {
+                    data: ViewData2::Sdf(..),
                     ..
                 },
                 ViewCanvas::Canvas2 {
@@ -223,17 +224,38 @@ impl<'a> WorldView<'a> {
                 ));
             }
             (
-                RenderMode::Render3 {
-                    mode: image_mode, ..
+                RenderData::Render3 {
+                    data: ViewData3::Heightmap(..),
+                    ..
                 },
                 ViewCanvas::Canvas3 {
-                    mode: canvas_mode,
+                    mode: ViewMode3::Heightmap,
                     canvas,
                 },
-            ) if image_mode == canvas_mode => {
+            ) => {
                 ui.painter().add(egui_wgpu::Callback::new_paint_callback(
                     rect,
                     crate::painters::WgpuHeightmapPainter::new(
+                        index,
+                        image.clone(),
+                        size,
+                        canvas.view(),
+                    ),
+                ));
+            }
+            (
+                RenderData::Render3 {
+                    data: ViewData3::Shaded(..),
+                    ..
+                },
+                ViewCanvas::Canvas3 {
+                    mode: ViewMode3::Shaded,
+                    canvas,
+                },
+            ) => {
+                ui.painter().add(egui_wgpu::Callback::new_paint_callback(
+                    rect,
+                    crate::painters::WgpuShadedPainter::new(
                         index,
                         image.clone(),
                         size,

@@ -24,10 +24,12 @@ mod bitfield;
 mod clear;
 mod heightmap;
 mod sdf;
+mod shaded;
 
 pub use bitfield::WgpuBitfieldPainter;
 pub use heightmap::WgpuHeightmapPainter;
 pub use sdf::WgpuSdfPainter;
+pub use shaded::WgpuShadedPainter;
 
 /// Universal basic GPU resources
 ///
@@ -36,6 +38,7 @@ pub use sdf::WgpuSdfPainter;
 pub struct WgpuResources {
     bitfield: bitfield::BitfieldResources,
     heightmap: heightmap::HeightmapResources,
+    shaded: shaded::ShadedResources,
     clear: clear::ClearResources,
     sdf: sdf::SdfResources,
 }
@@ -51,6 +54,7 @@ impl WgpuResources {
     pub fn reset(&mut self) {
         self.bitfield.reset();
         self.heightmap.reset();
+        self.shaded.reset();
         self.sdf.reset();
     }
 
@@ -68,12 +72,14 @@ impl WgpuResources {
         let clear = clear::ClearResources::new(device, target_format);
         let heightmap =
             heightmap::HeightmapResources::new(device, target_format);
+        let shaded = shaded::ShadedResources::new(device, target_format);
         let bitfield = bitfield::BitfieldResources::new(device, target_format);
         let sdf = sdf::SdfResources::new(device, target_format);
 
         WgpuResources {
             clear,
             heightmap,
+            shaded,
             bitfield,
             sdf,
         }

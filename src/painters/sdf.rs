@@ -2,7 +2,7 @@ use super::{Uniforms, WgpuResources};
 
 /// Painter drawing SDFs
 use crate::{
-    view::{ImageData, RenderMode, ViewImage},
+    view::{RenderData, ViewData2, ViewImage},
     world::BlockIndex,
 };
 use eframe::{
@@ -26,13 +26,26 @@ pub struct WgpuSdfPainter {
 }
 
 impl WgpuSdfPainter {
+    /// Builds a new heightmap painter
+    ///
+    /// Note that `size` and `view` are associated with the current rendering
+    /// quad; the `image` contains its own size and view transforms.
+    ///
+    /// # Panics
+    /// If image data is not an SDF
     pub fn new(
         index: BlockIndex,
         image: ViewImage,
         size: fidget::render::ImageSize,
         view: fidget::render::View2,
     ) -> Self {
-        assert!(matches!(image.data, ImageData::Distance(..)));
+        assert!(matches!(
+            image.data,
+            RenderData::Render2 {
+                data: ViewData2::Sdf(..),
+                ..
+            }
+        ));
         Self {
             index,
             image,
@@ -296,8 +309,8 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
     ) -> Vec<wgpu::CommandBuffer> {
         let gr: &mut WgpuResources = resources.get_mut().unwrap();
 
-        let (width, height) = match self.image.settings.mode {
-            RenderMode::Render2 { size, .. } => (
+        let (width, height) = match &self.image.data {
+            RenderData::Render2 { size, .. } => (
                 (size.width() / (1 << self.image.level)).max(1),
                 (size.height() / (1 << self.image.level)).max(1),
             ),
@@ -320,7 +333,7 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            self.image.data.as_bytes(),
+            self.image.as_bytes(),
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(4 * width),
@@ -330,8 +343,8 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
         );
 
         // Create the uniform
-        let transform = match self.image.settings.mode {
-            RenderMode::Render2 { size, view, .. } => {
+        let transform = match &self.image.data {
+            RenderData::Render2 { size, view, .. } => {
                 // don't blame me, I just twiddled the matrices until things
                 // looked right
                 let aspect_ratio = |size: fidget::render::ImageSize| {
@@ -343,7 +356,7 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
                         nalgebra::Scale2::new(1.0, width / height)
                     }
                 };
-                let prev_aspect_ratio = aspect_ratio(size);
+                let prev_aspect_ratio = aspect_ratio(*size);
                 let curr_aspect_ratio = aspect_ratio(self.size);
                 let m =
                     prev_aspect_ratio.to_homogeneous().try_inverse().unwrap()
