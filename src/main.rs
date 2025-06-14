@@ -9,6 +9,7 @@ use zerocopy::IntoBytes;
 
 mod gui;
 mod painters;
+mod render;
 mod shapes;
 mod view;
 mod world;

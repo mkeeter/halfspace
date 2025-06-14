@@ -3,8 +3,8 @@ use std::collections::HashMap;
 
 use crate::{
     view::{
-        RenderSettings, ViewCanvas, ViewData, ViewData2, ViewData3, ViewImage,
-        ViewMode2, ViewMode3,
+        ViewCanvas, ViewData, ViewData2, ViewData3, ViewImage, ViewMode2,
+        ViewMode3,
     },
     world::{Block, BlockError, BlockIndex, IoValue, NameError, World},
     BlockResponse, Message, ViewResponse,
@@ -204,15 +204,14 @@ impl<'a> WorldView<'a> {
         // previous image, drawing it in an *invalid* state (with a red border).
         let current_canvas = entry.canvas;
         let (image, valid) = if let Some(block_view) = block_view {
-            let settings = RenderSettings::from_canvas(
-                &entry.canvas,
-                block_view.tree.clone(),
-            );
             let notify = move || ctx.request_repaint();
 
-            let Some(image) =
-                entry.image(index, settings, self.tx.clone(), notify)
-            else {
+            let Some(image) = entry.image(
+                index,
+                block_view.tree.clone(),
+                self.tx.clone(),
+                notify,
+            ) else {
                 return out
                     | Self::view_fallback_ui(
                         ui,
