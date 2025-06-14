@@ -154,8 +154,8 @@ pub(crate) struct HeightmapResources {
     pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
 
-    spare_bitmaps: HashMap<wgpu::Extent3d, Vec<HeightmapData>>,
-    bound_bitmaps: HashMap<BlockIndex, HeightmapData>,
+    spare_data: HashMap<wgpu::Extent3d, Vec<HeightmapData>>,
+    bound_data: HashMap<BlockIndex, HeightmapData>,
 }
 
 impl HeightmapResources {
@@ -163,10 +163,11 @@ impl HeightmapResources {
         device: &wgpu::Device,
         target_format: wgpu::TextureFormat,
     ) -> Self {
-        // Create bitmap shader module
+        // Create heightmap shader module.  Right now, this is the same as the
+        // bitmap shader, but may change in the future.
         let shader =
             device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("bitmap Shader"),
+                label: Some("heightmap shader"),
                 source: wgpu::ShaderSource::Wgsl(
                     include_str!(concat!(
                         env!("CARGO_MANIFEST_DIR"),
@@ -179,7 +180,7 @@ impl HeightmapResources {
         // Create bind group layout
         let bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("bitmap Bind Group Layout"),
+                label: Some("heightmap bind group layout"),
                 entries: &[
                     // Texture
                     wgpu::BindGroupLayoutEntry {
@@ -220,15 +221,15 @@ impl HeightmapResources {
         // Create render pipeline layouts
         let pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("bitmap Render Pipeline Layout"),
+                label: Some("heightmap render pipeline layout"),
                 bind_group_layouts: &[&bind_group_layout],
                 push_constant_ranges: &[],
             });
 
-        // Create the bitmap render pipeline
+        // Create the heightmap render pipeline
         let pipeline =
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("bitmap Render Pipeline"),
+                label: Some("heightmap render pipeline"),
                 layout: Some(&pipeline_layout),
                 cache: None,
                 vertex: wgpu::VertexState {
@@ -271,20 +272,17 @@ impl HeightmapResources {
         Self {
             pipeline,
             bind_group_layout,
-            bound_bitmaps: HashMap::new(),
-            spare_bitmaps: HashMap::new(),
+            bound_data: HashMap::new(),
+            spare_data: HashMap::new(),
         }
     }
 
     pub fn reset(&mut self) {
         // Only keep around bitmaps which were bound for the last render
-        self.spare_bitmaps.clear();
-        for (_k, b) in std::mem::take(&mut self.bound_bitmaps) {
-            self.spare_bitmaps
-                .entry(b.texture.size())
-                .or_default()
-                .push(b);
-            self.spare_bitmaps.retain(|_k, v| !v.is_empty());
+        self.spare_data.clear();
+        for (_k, b) in std::mem::take(&mut self.bound_data) {
+            self.spare_data.entry(b.texture.size()).or_default().push(b);
+            self.spare_data.retain(|_k, v| !v.is_empty());
         }
     }
 
@@ -295,13 +293,13 @@ impl HeightmapResources {
         size: wgpu::Extent3d,
     ) -> (&wgpu::Texture, &wgpu::Buffer) {
         let r = self
-            .spare_bitmaps
+            .spare_data
             .get_mut(&size)
             .and_then(|v| v.pop())
             .unwrap_or_else(|| {
                 // Create the texture
                 let texture = device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("bitmap Texture"),
+                    label: Some("heightmap texture"),
                     size,
                     mip_level_count: 1,
                     sample_count: 1,
@@ -317,7 +315,7 @@ impl HeightmapResources {
 
                 // Create samplers
                 let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-                    label: Some("bitmap Sampler"),
+                    label: Some("heightmap sampler"),
                     address_mode_u: wgpu::AddressMode::ClampToEdge,
                     address_mode_v: wgpu::AddressMode::ClampToEdge,
                     address_mode_w: wgpu::AddressMode::ClampToEdge,
@@ -330,7 +328,7 @@ impl HeightmapResources {
                 // Create the buffer
                 let uniform_buffer =
                     device.create_buffer(&wgpu::BufferDescriptor {
-                        label: Some("Uniform Buffer"),
+                        label: Some("uniform buffer"),
                         size: std::mem::size_of::<Uniforms>() as u64,
                         mapped_at_creation: false,
                         usage: wgpu::BufferUsages::UNIFORM
@@ -339,7 +337,7 @@ impl HeightmapResources {
 
                 let bind_group =
                     device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("bitmap Bind Group"),
+                        label: Some("heightmap bind group"),
                         layout: &self.bind_group_layout,
                         entries: &[
                             wgpu::BindGroupEntry {
@@ -368,24 +366,20 @@ impl HeightmapResources {
                     uniform_buffer,
                 }
             });
-        let prev = self.bound_bitmaps.insert(index, r);
+        let prev = self.bound_data.insert(index, r);
         assert!(prev.is_none());
-        let r = &self.bound_bitmaps[&index];
+        let r = &self.bound_data[&index];
         (&r.texture, &r.uniform_buffer)
     }
 
     pub fn paint(&self, render_pass: &mut wgpu::RenderPass, index: BlockIndex) {
         render_pass.set_pipeline(&self.pipeline);
-        render_pass.set_bind_group(
-            0,
-            &self.bound_bitmaps[&index].bind_group,
-            &[],
-        );
+        render_pass.set_bind_group(0, &self.bound_data[&index].bind_group, &[]);
         render_pass.draw(0..6, 0..1);
     }
 }
 
-/// Resources used to render a single bitmap
+/// Resources used to render a single heightmap
 pub(crate) struct HeightmapData {
     #[expect(unused)] // kept alive for lifetime purposes
     sampler: wgpu::Sampler,
@@ -396,6 +390,6 @@ pub(crate) struct HeightmapData {
     /// Uniform buffer
     uniform_buffer: wgpu::Buffer,
 
-    /// Bind group for bitmap rendering
+    /// Bind group for heightmap rendering
     bind_group: wgpu::BindGroup,
 }

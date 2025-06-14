@@ -12,7 +12,7 @@ impl ClearResources {
     ) -> Self {
         let shader =
             device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("Clear shader"),
+                label: Some("clear shader"),
                 source: wgpu::ShaderSource::Wgsl(
                     include_str!(concat!(
                         env!("CARGO_MANIFEST_DIR"),
@@ -25,22 +25,22 @@ impl ClearResources {
         // Create bind group layout
         let bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("Clear Bind Group Layout"),
+                label: Some("clear bind group layout"),
                 entries: &[],
             });
 
         // Create render pipeline layouts
         let pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Clear Render Pipeline Layout"),
+                label: Some("clear render pipeline layout"),
                 bind_group_layouts: &[&bind_group_layout],
                 push_constant_ranges: &[],
             });
 
-        // Create the RGBA render pipeline
+        // Create the clear render pipeline
         let pipeline =
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("RGBA Render Pipeline"),
+                label: Some("clear render pipeline"),
                 layout: Some(&pipeline_layout),
                 cache: None,
                 vertex: wgpu::VertexState {
@@ -82,7 +82,7 @@ impl ClearResources {
 
         // We can use a universal bind group, because every clear is identical
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Clear Bind Group"),
+            label: Some("clear bind group"),
             layout: &bind_group_layout,
             entries: &[],
         });

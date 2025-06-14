@@ -1,4 +1,22 @@
 //! Native WGPU painters for rendering images
+//!
+//! GPU rendering is integrated into the UI using [`egui_wgpu::CallbackTrait`].
+//!
+//! We use [`egui_wgpu::Callback::new_paint_callback`] to install a painter
+//! (e.g. [`WgpuSdfPainter`]) when drawing the UI.  The painter does not have
+//! any associated GPU resources; it just contains CPU-side data (e.g. image
+//! buffers).
+//!
+//! During [`egui_wgpu::CallbackTrait::prepare`], the painter adds resources to
+//! a global [`WgpuResources`] object.  The `WgpuResources` object is stored in
+//! [`egui_wgpu::CallbackResources`], and contains both static data (e.g. render
+//! pipelines) and maps of painter-specific data (e.g. textures).  During
+//! `prepare`, the painter claims data to be used when drawing itself.
+//!
+//! Finally, in [`egui_wgpu::CallbackTrait::paint`], the painter grabs the data
+//! that it previous installed in the global resources object and paints itself.
+//!
+//! After each frame, any unused data is deallocated.
 
 use eframe::egui_wgpu::wgpu;
 

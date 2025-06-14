@@ -1,6 +1,6 @@
 use super::{Uniforms, WgpuResources};
 
-///! Painter drawing bitmap bitmaps in a 2D view
+/// Painter drawing SDFs
 use crate::{
     view::{ImageData, RenderMode, ViewImage},
     world::BlockIndex,
@@ -46,8 +46,8 @@ pub(crate) struct SdfResources {
     pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
 
-    spare_bitmaps: HashMap<wgpu::Extent3d, Vec<SdfData>>,
-    bound_bitmaps: HashMap<BlockIndex, SdfData>,
+    spare_data: HashMap<wgpu::Extent3d, Vec<SdfData>>,
+    bound_data: HashMap<BlockIndex, SdfData>,
 }
 
 impl SdfResources {
@@ -55,7 +55,7 @@ impl SdfResources {
         device: &wgpu::Device,
         target_format: wgpu::TextureFormat,
     ) -> Self {
-        // Create bitmap shader module
+        // Create SDF shader module
         let shader =
             device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("sdf shader"),
@@ -117,7 +117,7 @@ impl SdfResources {
                 push_constant_ranges: &[],
             });
 
-        // Create the bitmap render pipeline
+        // Create the SDF render pipeline
         let pipeline =
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("sdf render pipeline"),
@@ -163,20 +163,17 @@ impl SdfResources {
         Self {
             pipeline,
             bind_group_layout,
-            bound_bitmaps: HashMap::new(),
-            spare_bitmaps: HashMap::new(),
+            bound_data: HashMap::new(),
+            spare_data: HashMap::new(),
         }
     }
 
     pub fn reset(&mut self) {
-        // Only keep around bitmaps which were bound for the last render
-        self.spare_bitmaps.clear();
-        for (_k, b) in std::mem::take(&mut self.bound_bitmaps) {
-            self.spare_bitmaps
-                .entry(b.texture.size())
-                .or_default()
-                .push(b);
-            self.spare_bitmaps.retain(|_k, v| !v.is_empty());
+        // Only keep around data which were bound for the last render
+        self.spare_data.clear();
+        for (_k, b) in std::mem::take(&mut self.bound_data) {
+            self.spare_data.entry(b.texture.size()).or_default().push(b);
+            self.spare_data.retain(|_k, v| !v.is_empty());
         }
     }
 
@@ -187,7 +184,7 @@ impl SdfResources {
         size: wgpu::Extent3d,
     ) -> (&wgpu::Texture, &wgpu::Buffer) {
         let r = self
-            .spare_bitmaps
+            .spare_data
             .get_mut(&size)
             .and_then(|v| v.pop())
             .unwrap_or_else(|| {
@@ -260,24 +257,20 @@ impl SdfResources {
                     uniform_buffer,
                 }
             });
-        let prev = self.bound_bitmaps.insert(index, r);
+        let prev = self.bound_data.insert(index, r);
         assert!(prev.is_none());
-        let r = &self.bound_bitmaps[&index];
+        let r = &self.bound_data[&index];
         (&r.texture, &r.uniform_buffer)
     }
 
     pub fn paint(&self, render_pass: &mut wgpu::RenderPass, index: BlockIndex) {
         render_pass.set_pipeline(&self.pipeline);
-        render_pass.set_bind_group(
-            0,
-            &self.bound_bitmaps[&index].bind_group,
-            &[],
-        );
+        render_pass.set_bind_group(0, &self.bound_data[&index].bind_group, &[]);
         render_pass.draw(0..6, 0..1);
     }
 }
 
-/// Resources used to render a single bitmap
+/// Resources used to render a single SDF
 pub(crate) struct SdfData {
     #[expect(unused)] // kept alive for lifetime purposes
     sampler: wgpu::Sampler,
@@ -288,7 +281,7 @@ pub(crate) struct SdfData {
     /// Uniform buffer
     uniform_buffer: wgpu::Buffer,
 
-    /// Bind group for bitmap rendering
+    /// Bind group for SDF rendering
     bind_group: wgpu::BindGroup,
 }
 
@@ -308,7 +301,7 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
                 (size.width() / (1 << self.image.level)).max(1),
                 (size.height() / (1 << self.image.level)).max(1),
             ),
-            _ => panic!("invalid render mode for bitmap painter"),
+            _ => panic!("invalid render mode for SDF painter"),
         };
         let texture_size = wgpu::Extent3d {
             width,
@@ -319,7 +312,7 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
         let (texture, uniform_buffer) =
             gr.sdf.get_data(device, self.index, texture_size);
 
-        // Upload bitmap image data
+        // Upload SDF image data
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture,
