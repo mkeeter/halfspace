@@ -29,6 +29,26 @@ pub struct ViewData {
     generation: u64,
 }
 
+impl ViewData {
+    /// Returns a characteristic scale for this view
+    ///
+    /// The scale should be applied to mouse motion in pixels
+    pub fn characteristic_scale(&self) -> f32 {
+        match self.canvas {
+            ViewCanvas::Canvas2 { canvas, .. } => {
+                let mat = canvas.image_size().screen_to_world()
+                    * canvas.view().world_to_model();
+                mat[(0, 0)]
+            }
+            ViewCanvas::Canvas3 { canvas, .. } => {
+                let mat = canvas.image_size().screen_to_world()
+                    * canvas.view().world_to_model();
+                mat[(0, 0)]
+            }
+        }
+    }
+}
+
 impl From<ViewCanvas> for ViewData {
     fn from(canvas: ViewCanvas) -> Self {
         Self {

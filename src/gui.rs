@@ -591,6 +591,7 @@ pub fn draggable_block(
     index: BlockIndex,
     block: &mut Block,
     flags: BlockUiFlags,
+    scale: f32,
     handle: egui_dnd::Handle,
 ) -> BlockResponse {
     let mut response = BlockResponse::empty();
@@ -605,7 +606,7 @@ pub fn draggable_block(
             response = draggable_block_header(ui, index, block, flags, handle)
         })
         .body_unindented(|ui| {
-            if block_body(ui, index, block) {
+            if block_body(ui, index, block, scale) {
                 response |= BlockResponse::CHANGED;
             }
             if !flags.is_last {
@@ -622,14 +623,19 @@ pub fn draggable_block(
 }
 
 #[must_use]
-fn block_body(ui: &mut egui::Ui, index: BlockIndex, block: &mut Block) -> bool {
+fn block_body(
+    ui: &mut egui::Ui,
+    index: BlockIndex,
+    block: &mut Block,
+    scale: f32,
+) -> bool {
     let mut changed = false;
     let block_data = block.data.take().unwrap();
     let padding = ui.spacing().icon_width + ui.spacing().icon_spacing;
     for (name, value) in &block_data.io_values {
         ui.horizontal(|ui| {
             ui.add_space(padding);
-            changed |= block_io(ui, index, block, name, value);
+            changed |= block_io(ui, index, block, name, value, scale);
         });
     }
     block.data = Some(block_data);
@@ -644,6 +650,7 @@ fn block_io(
     block: &mut Block,
     name: &str,
     value: &IoValue,
+    scale: f32,
 ) -> bool {
     ui.label(name);
     match value {
@@ -656,7 +663,9 @@ fn block_io(
             );
             false
         }
-        IoValue::Input(value) => block_io_input(ui, index, block, name, value),
+        IoValue::Input(value) => {
+            block_io_input(ui, index, block, name, value, scale)
+        }
     }
 }
 
@@ -677,6 +686,7 @@ fn block_io_input(
     block: &mut Block,
     name: &str,
     value: &Result<Value, String>,
+    scale: f32,
 ) -> bool {
     let s = block.inputs.get_mut(name).unwrap();
     let input_id = index.id().with("input_edit").with(name);
@@ -690,14 +700,18 @@ fn block_io_input(
                 });
         }
         let mut changed = false;
+
+        // Pick text resolution based on characteristic scale
+        let res = scale.log10();
+        let r = if res < 0.0 { -res.floor() as usize } else { 2 };
         if let Some(f) = f.as_mut() {
-            if draggable_button_float(ui, f).changed() {
-                *s = format!("{f:.2}");
+            if draggable_button_float(ui, f, scale).changed() {
+                *s = format!("{f:.*}", r);
                 changed = true;
             }
         } else if let Some(v) = v2.as_mut() {
-            if draggable_button_vec2(ui, v).changed() {
-                *s = format!("[{:.2}, {:.2}]", v.x, v.y);
+            if draggable_button_vec2(ui, v, scale).changed() {
+                *s = format!("[{:.*}, {:.*}]", r, v.x, r, v.y);
                 changed = true;
             }
         }
@@ -831,12 +845,16 @@ fn block_name(ui: &mut egui::Ui, index: BlockIndex, block: &mut Block) -> bool {
     changed
 }
 
-fn draggable_button_float(ui: &mut egui::Ui, f: &mut f32) -> egui::Response {
+fn draggable_button_float(
+    ui: &mut egui::Ui,
+    f: &mut f32,
+    scale: f32,
+) -> egui::Response {
     let button = egui::Button::new(DRAG_LEFT_RIGHT).sense(egui::Sense::drag());
     let mut response = ui.add(button);
 
     if response.dragged() {
-        *f += response.drag_motion().x * 0.01;
+        *f += response.drag_motion().x * scale;
         response.mark_changed();
     }
 
@@ -846,13 +864,14 @@ fn draggable_button_float(ui: &mut egui::Ui, f: &mut f32) -> egui::Response {
 fn draggable_button_vec2(
     ui: &mut egui::Ui,
     f: &mut fidget::shapes::Vec2,
+    scale: f32,
 ) -> egui::Response {
     let button = egui::Button::new(DRAG_QUAD).sense(egui::Sense::drag());
     let mut response = ui.add(button);
 
     if response.dragged() {
-        f.x += response.drag_motion().x as f64 * 0.01;
-        f.y -= response.drag_motion().y as f64 * 0.01;
+        f.x += response.drag_motion().x as f64 * scale as f64;
+        f.y -= response.drag_motion().y as f64 * scale as f64;
         response.mark_changed();
     }
 

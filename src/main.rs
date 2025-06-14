@@ -694,6 +694,37 @@ fn create_rw_file<P: AsRef<std::path::Path>>(
 }
 
 impl App {
+    /// Pick the characteristic scale for each block
+    ///
+    /// The scale is the view's scale (if present); otherwise, it's the next
+    /// available characteristic scale.  If no views are open, then we pick a
+    /// reasonable default value.
+    fn characteristic_scale(&self) -> HashMap<BlockIndex, f32> {
+        let mut scale = self
+            .data
+            .order
+            .iter()
+            .map(|index| {
+                (
+                    index,
+                    self.views.get(index).map(|v| v.characteristic_scale()),
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut last_scale = 0.01;
+        for (_i, s) in scale.iter_mut().rev() {
+            if let Some(s) = s {
+                last_scale = *s;
+            } else {
+                *s = Some(last_scale);
+            }
+        }
+        scale
+            .into_iter()
+            .map(|(i, s)| (*i, s.unwrap()))
+            .collect::<HashMap<_, _>>()
+    }
+
     /// Draws the list of blocks
     ///
     /// Returns `true` if anything changed
@@ -703,6 +734,9 @@ impl App {
         let mut to_delete = HashSet::new();
         let mut changed = false;
         let last = self.data.order.last().cloned();
+
+        let block_scale = self.characteristic_scale();
+
         // XXX there is a drag-and-drop implementation that's built into egui,
         // see `egui_demo_lib/src/demo/drag_and_drop.rs`
         let r = dnd(ui, "dnd").show_vec(
@@ -734,7 +768,10 @@ impl App {
                         None
                     },
                 };
-                let r = gui::draggable_block(ui, *index, block, flags, handle);
+                let scale = block_scale[index];
+                let r = gui::draggable_block(
+                    ui, *index, block, flags, scale, handle,
+                );
                 if r.contains(BlockResponse::DELETE) {
                     to_delete.insert(*index);
                     tree.close_view();
