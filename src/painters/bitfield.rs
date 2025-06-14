@@ -1,7 +1,7 @@
 //! Painter drawing bitfield bitmaps in a 2D view
 use super::{Uniforms, WgpuResources};
 use crate::{
-    view::{RenderData, ViewData2, ViewImage},
+    view::{ViewData2, ViewImage},
     world::BlockIndex,
 };
 use eframe::{
@@ -39,8 +39,8 @@ impl WgpuBitfieldPainter {
         view: fidget::render::View2,
     ) -> Self {
         assert!(matches!(
-            image.data,
-            RenderData::Render2 {
+            image,
+            ViewImage::View2 {
                 data: ViewData2::Bitfield(..),
                 ..
             }
@@ -308,10 +308,10 @@ impl egui_wgpu::CallbackTrait for WgpuBitfieldPainter {
     ) -> Vec<wgpu::CommandBuffer> {
         let gr: &mut WgpuResources = resources.get_mut().unwrap();
 
-        let (width, height) = match &self.image.data {
-            RenderData::Render2 { size, .. } => (
-                (size.width() / (1 << self.image.level)).max(1),
-                (size.height() / (1 << self.image.level)).max(1),
+        let (width, height) = match &self.image {
+            ViewImage::View2 { size, level, .. } => (
+                (size.width() / (1 << level)).max(1),
+                (size.height() / (1 << level)).max(1),
             ),
             _ => panic!("invalid render mode for bitfield painter"),
         };
@@ -342,8 +342,8 @@ impl egui_wgpu::CallbackTrait for WgpuBitfieldPainter {
         );
 
         // Create the uniform
-        let transform = match &self.image.data {
-            RenderData::Render2 { size, view, .. } => {
+        let transform = match &self.image {
+            ViewImage::View2 { size, view, .. } => {
                 // don't blame me, I just twiddled the matrices until things
                 // looked right
                 let aspect_ratio = |size: fidget::render::ImageSize| {

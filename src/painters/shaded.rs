@@ -1,6 +1,6 @@
 use super::{Uniforms, WgpuResources};
 use crate::{
-    view::{RenderData, ViewData3, ViewImage},
+    view::{ViewData3, ViewImage},
     world::BlockIndex,
 };
 use eframe::{
@@ -41,8 +41,8 @@ impl WgpuShadedPainter {
         view: fidget::render::View3,
     ) -> Self {
         assert!(matches!(
-            image.data,
-            RenderData::Render3 {
+            image,
+            ViewImage::View3 {
                 data: ViewData3::Shaded(..),
                 ..
             }
@@ -67,10 +67,10 @@ impl egui_wgpu::CallbackTrait for WgpuShadedPainter {
     ) -> Vec<wgpu::CommandBuffer> {
         let gr: &mut WgpuResources = resources.get_mut().unwrap();
 
-        let (width, height) = match &self.image.data {
-            RenderData::Render3 { size, .. } => (
-                (size.width() / (1 << self.image.level)).max(1),
-                (size.height() / (1 << self.image.level)).max(1),
+        let (width, height) = match &self.image {
+            ViewImage::View3 { size, level, .. } => (
+                (size.width() / (1 << level)).max(1),
+                (size.height() / (1 << level)).max(1),
             ),
             _ => panic!("invalid painter"),
         };
@@ -101,8 +101,8 @@ impl egui_wgpu::CallbackTrait for WgpuShadedPainter {
         );
 
         // Create the uniform
-        let transform = match &self.image.data {
-            RenderData::Render3 { size, view, .. } => {
+        let transform = match &self.image {
+            ViewImage::View3 { size, view, .. } => {
                 // don't blame me, I just twiddled the matrices until things
                 // looked right
                 let aspect_ratio = |width: u32, height: u32| {

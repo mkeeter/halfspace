@@ -3,8 +3,8 @@ use std::collections::HashMap;
 
 use crate::{
     view::{
-        RenderData, RenderMode, RenderSettings, ViewCanvas, ViewData,
-        ViewData2, ViewData3, ViewMode2, ViewMode3,
+        RenderSettings, ViewCanvas, ViewData, ViewData2, ViewData3, ViewImage,
+        ViewMode2, ViewMode3,
     },
     world::{Block, BlockError, BlockIndex, IoValue, NameError, World},
     BlockResponse, Message, ViewResponse,
@@ -119,177 +119,6 @@ impl<'a> WorldView<'a> {
         // a new empty one.
         let entry = entry.or_insert_with(|| ViewData::new(size));
 
-        let ctx = ui.ctx().clone();
-        // If we have a block view, then use it (or fall back to the previous
-        // image, drawing it in a valid state).  Otherwise, fall back to the
-        // previous image, drawing it in an *invalid* state (with a red border).
-        let current_canvas = entry.canvas;
-        let (image, valid) = if let Some(block_view) = block_view {
-            let mode = match &entry.canvas {
-                ViewCanvas::Canvas2 { canvas, mode } => RenderMode::Render2 {
-                    view: canvas.view(),
-                    size,
-                    mode: *mode,
-                },
-                ViewCanvas::Canvas3 { canvas, mode } => {
-                    RenderMode::Render3 {
-                        view: canvas.view(),
-                        size: fidget::render::VoxelSize::new(
-                            size.width(),
-                            size.height(),
-                            // XXX select depth?
-                            size.width().max(size.height()),
-                        ),
-                        mode: *mode,
-                    }
-                }
-            };
-            let settings = RenderSettings {
-                tree: block_view.tree.clone(),
-                mode,
-            };
-
-            let notify = move || ctx.request_repaint();
-
-            let Some(image) =
-                entry.image(index, settings, self.tx.clone(), notify)
-            else {
-                return out
-                    | Self::view_fallback_ui(
-                        ui,
-                        index,
-                        Some(entry),
-                        size,
-                        HOURGLASS,
-                        None,
-                    );
-            };
-            (image, true)
-        } else if let Some(prev_image) = entry.prev_image() {
-            (prev_image, false)
-        } else {
-            // XXX can we actually get here?
-            return out
-                | Self::view_fallback_ui(
-                    ui,
-                    index,
-                    Some(entry),
-                    size,
-                    ERROR,
-                    Some("block has errors and no previous image"),
-                );
-        };
-
-        // This is the magic that triggers the GPU callback.  We pick a render
-        // mode based on the selected image's settings
-        match (&image.data, current_canvas) {
-            (
-                RenderData::Render2 {
-                    data: ViewData2::Bitfield(..),
-                    ..
-                },
-                ViewCanvas::Canvas2 {
-                    mode: ViewMode2::Bitfield,
-                    canvas,
-                },
-            ) => {
-                ui.painter().add(egui_wgpu::Callback::new_paint_callback(
-                    rect,
-                    crate::painters::WgpuBitfieldPainter::new(
-                        index,
-                        image.clone(),
-                        size,
-                        canvas.view(),
-                    ),
-                ));
-            }
-            (
-                RenderData::Render2 {
-                    data: ViewData2::Sdf(..),
-                    ..
-                },
-                ViewCanvas::Canvas2 {
-                    mode: ViewMode2::Sdf,
-                    canvas,
-                },
-            ) => {
-                ui.painter().add(egui_wgpu::Callback::new_paint_callback(
-                    rect,
-                    crate::painters::WgpuSdfPainter::new(
-                        index,
-                        image.clone(),
-                        size,
-                        canvas.view(),
-                    ),
-                ));
-            }
-            (
-                RenderData::Render3 {
-                    data: ViewData3::Heightmap(..),
-                    ..
-                },
-                ViewCanvas::Canvas3 {
-                    mode: ViewMode3::Heightmap,
-                    canvas,
-                },
-            ) => {
-                ui.painter().add(egui_wgpu::Callback::new_paint_callback(
-                    rect,
-                    crate::painters::WgpuHeightmapPainter::new(
-                        index,
-                        image.clone(),
-                        size,
-                        canvas.view(),
-                    ),
-                ));
-            }
-            (
-                RenderData::Render3 {
-                    data: ViewData3::Shaded(..),
-                    ..
-                },
-                ViewCanvas::Canvas3 {
-                    mode: ViewMode3::Shaded,
-                    canvas,
-                },
-            ) => {
-                ui.painter().add(egui_wgpu::Callback::new_paint_callback(
-                    rect,
-                    crate::painters::WgpuShadedPainter::new(
-                        index,
-                        image.clone(),
-                        size,
-                        canvas.view(),
-                    ),
-                ));
-            }
-            _ => {
-                return out
-                    | if entry.task.as_ref().is_some_and(|t| !t.done()) {
-                        Self::view_fallback_ui(
-                            ui,
-                            index,
-                            Some(entry),
-                            size,
-                            HOURGLASS,
-                            None,
-                        )
-                    } else {
-                        Self::view_fallback_ui(
-                            ui,
-                            index,
-                            Some(entry),
-                            size,
-                            ERROR,
-                            Some(
-                                "block has errors and no previous \
-                                 image in this mode",
-                            ),
-                        )
-                    }
-            }
-        }
-
         let r = ui.interact(
             rect,
             index.id().with("block_view_interact"),
@@ -368,6 +197,158 @@ impl<'a> WorldView<'a> {
                 )
             }
         };
+
+        let ctx = ui.ctx().clone();
+        // If we have a block view, then use it (or fall back to the previous
+        // image, drawing it in a valid state).  Otherwise, fall back to the
+        // previous image, drawing it in an *invalid* state (with a red border).
+        let current_canvas = entry.canvas;
+        let (image, valid) = if let Some(block_view) = block_view {
+            let settings = RenderSettings::from_canvas(
+                &entry.canvas,
+                block_view.tree.clone(),
+            );
+            let notify = move || ctx.request_repaint();
+
+            let Some(image) =
+                entry.image(index, settings, self.tx.clone(), notify)
+            else {
+                return out
+                    | Self::view_fallback_ui(
+                        ui,
+                        index,
+                        Some(entry),
+                        size,
+                        HOURGLASS,
+                        None,
+                    );
+            };
+            (image, true)
+        } else if let Some(prev_image) = entry.prev_image() {
+            (prev_image, false)
+        } else {
+            // XXX can we actually get here?
+            return out
+                | Self::view_fallback_ui(
+                    ui,
+                    index,
+                    Some(entry),
+                    size,
+                    ERROR,
+                    Some("block has errors and no previous image"),
+                );
+        };
+
+        // This is the magic that triggers the GPU callback.  We pick a render
+        // mode based on the selected image's settings
+        match (&image, current_canvas) {
+            (
+                ViewImage::View2 {
+                    data: ViewData2::Bitfield(..),
+                    ..
+                },
+                ViewCanvas::Canvas2 {
+                    mode: ViewMode2::Bitfield,
+                    canvas,
+                },
+            ) => {
+                ui.painter().add(egui_wgpu::Callback::new_paint_callback(
+                    rect,
+                    crate::painters::WgpuBitfieldPainter::new(
+                        index,
+                        image.clone(),
+                        size,
+                        canvas.view(),
+                    ),
+                ));
+            }
+            (
+                ViewImage::View2 {
+                    data: ViewData2::Sdf(..),
+                    ..
+                },
+                ViewCanvas::Canvas2 {
+                    mode: ViewMode2::Sdf,
+                    canvas,
+                },
+            ) => {
+                ui.painter().add(egui_wgpu::Callback::new_paint_callback(
+                    rect,
+                    crate::painters::WgpuSdfPainter::new(
+                        index,
+                        image.clone(),
+                        size,
+                        canvas.view(),
+                    ),
+                ));
+            }
+            (
+                ViewImage::View3 {
+                    data: ViewData3::Heightmap(..),
+                    ..
+                },
+                ViewCanvas::Canvas3 {
+                    mode: ViewMode3::Heightmap,
+                    canvas,
+                },
+            ) => {
+                ui.painter().add(egui_wgpu::Callback::new_paint_callback(
+                    rect,
+                    crate::painters::WgpuHeightmapPainter::new(
+                        index,
+                        image.clone(),
+                        size,
+                        canvas.view(),
+                    ),
+                ));
+            }
+            (
+                ViewImage::View3 {
+                    data: ViewData3::Shaded(..),
+                    ..
+                },
+                ViewCanvas::Canvas3 {
+                    mode: ViewMode3::Shaded,
+                    canvas,
+                },
+            ) => {
+                ui.painter().add(egui_wgpu::Callback::new_paint_callback(
+                    rect,
+                    crate::painters::WgpuShadedPainter::new(
+                        index,
+                        image.clone(),
+                        size,
+                        canvas.view(),
+                    ),
+                ));
+            }
+            _ => {
+                return out
+                    | if entry.task.as_ref().is_some_and(|t| !t.done()) {
+                        Self::view_fallback_ui(
+                            ui,
+                            index,
+                            Some(entry),
+                            size,
+                            HOURGLASS,
+                            None,
+                        )
+                    } else {
+                        Self::view_fallback_ui(
+                            ui,
+                            index,
+                            Some(entry),
+                            size,
+                            ERROR,
+                            Some(
+                                "block has errors and no previous \
+                                 image in this mode",
+                            ),
+                        )
+                    }
+            }
+        }
+
         if render_changed {
             out |= ViewResponse::REDRAW;
         }

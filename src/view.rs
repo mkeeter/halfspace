@@ -133,14 +133,35 @@ impl ViewData3 {
 
 /// Rendered image, along with the settings that generated it
 #[derive(Clone)]
-pub struct ViewImage {
-    pub data: RenderData,
-    pub level: usize,
+pub enum ViewImage {
+    View2 {
+        data: ViewData2,
+        view: fidget::render::View2,
+        size: fidget::render::ImageSize,
+        level: usize,
+    },
+    View3 {
+        data: ViewData3,
+        view: fidget::render::View3,
+        size: fidget::render::VoxelSize,
+        level: usize,
+    },
 }
 
 impl ViewImage {
     pub fn as_bytes(&self) -> &[u8] {
-        self.data.as_bytes()
+        match self {
+            ViewImage::View2 { data, .. } => data.as_bytes(),
+            ViewImage::View3 { data, .. } => data.as_bytes(),
+        }
+    }
+
+    pub fn level(&self) -> usize {
+        match self {
+            ViewImage::View2 { level, .. } | ViewImage::View3 { level, .. } => {
+                *level
+            }
+        }
     }
 }
 
@@ -171,8 +192,8 @@ impl ViewData {
         const MAX_LEVEL: usize = 10;
 
         // Adjust self.start_level to hit a render time target
-        if data.level == self.start_level {
-            if render_time > TARGET_RENDER_TIME && data.level < MAX_LEVEL {
+        if data.level() == self.start_level {
+            if render_time > TARGET_RENDER_TIME && data.level() < MAX_LEVEL {
                 self.start_level += 1;
             } else if render_time < TARGET_RENDER_TIME * 3 / 4 {
                 self.start_level = self.start_level.saturating_sub(1);
@@ -182,7 +203,7 @@ impl ViewData {
             if let Some(task) = &mut self.task {
                 task.done = true;
             }
-            if let Some(next) = data.level.checked_sub(1) {
+            if let Some(next) = data.level().checked_sub(1) {
                 self.pending = Some(next);
             }
             self.image = Some(data);
@@ -259,64 +280,7 @@ impl RenderTask {
     pub fn done(&self) -> bool {
         self.done
     }
-}
 
-/// Settings for rendering an image
-#[derive(Clone)]
-pub struct RenderSettings {
-    pub tree: fidget::context::Tree,
-    pub mode: RenderMode,
-}
-
-/// Image rendering mode (tied to a canvas, so without a tree)
-#[derive(Copy, Clone, PartialEq)]
-pub enum RenderMode {
-    Render2 {
-        mode: ViewMode2,
-        view: fidget::render::View2,
-        size: fidget::render::ImageSize,
-    },
-    Render3 {
-        mode: ViewMode3,
-        view: fidget::render::View3,
-        size: fidget::render::VoxelSize,
-    },
-}
-
-/// Rendered image data
-#[derive(Clone)]
-pub enum RenderData {
-    Render2 {
-        data: ViewData2,
-        view: fidget::render::View2,
-        size: fidget::render::ImageSize,
-    },
-    Render3 {
-        data: ViewData3,
-        view: fidget::render::View3,
-        size: fidget::render::VoxelSize,
-    },
-}
-
-impl RenderData {
-    pub fn as_bytes(&self) -> &[u8] {
-        match self {
-            RenderData::Render2 { data, .. } => data.as_bytes(),
-            RenderData::Render3 { data, .. } => data.as_bytes(),
-        }
-    }
-}
-
-impl std::cmp::PartialEq for RenderSettings {
-    fn eq(&self, other: &Self) -> bool {
-        // XXX this does expensive tree deduplication!
-        let mut ctx = fidget::Context::new();
-        self.mode == other.mode
-            && ctx.import(&self.tree) == ctx.import(&other.tree)
-    }
-}
-
-impl RenderTask {
     /// Begins a new image rendering task in the global thread pool
     pub fn spawn<F: FnOnce() + Send + Sync + 'static>(
         block: BlockIndex,
@@ -359,20 +323,25 @@ impl RenderTask {
         cancel: fidget::render::CancelToken,
     ) -> Option<ViewImage> {
         let scale = 1 << level;
-        let data = match settings.mode {
-            RenderMode::Render2 { mode, view, size } => {
+        let data = match settings {
+            RenderSettings::Render2 {
+                tree,
+                mode,
+                view,
+                size,
+            } => {
                 let image_size = fidget::render::ImageSize::new(
                     (size.width() / scale).max(1),
                     (size.height() / scale).max(1),
                 );
                 let cfg = fidget::render::ImageRenderConfig {
                     image_size,
-                    view,
+                    view: *view,
                     cancel,
                     pixel_perfect: matches!(mode, ViewMode2::Sdf),
                     ..Default::default()
                 };
-                let shape = RenderShape::from(settings.tree.clone());
+                let shape = RenderShape::from(tree.clone());
                 let tmp = cfg.run(shape)?;
                 let data = match mode {
                     ViewMode2::Bitfield => ViewData2::Bitfield(
@@ -402,9 +371,19 @@ impl RenderTask {
                             .collect(),
                     ),
                 };
-                RenderData::Render2 { data, view, size }
+                ViewImage::View2 {
+                    data,
+                    view: *view,
+                    size: *size,
+                    level,
+                }
             }
-            RenderMode::Render3 { mode, view, size } => {
+            RenderSettings::Render3 {
+                tree,
+                mode,
+                view,
+                size,
+            } => {
                 let image_size = fidget::render::VoxelSize::new(
                     (size.width() / scale).max(1),
                     (size.height() / scale).max(1),
@@ -412,11 +391,11 @@ impl RenderTask {
                 );
                 let cfg = fidget::render::VoxelRenderConfig {
                     image_size,
-                    view,
+                    view: *view,
                     cancel,
                     ..Default::default()
                 };
-                let shape = RenderShape::from(settings.tree.clone());
+                let shape = RenderShape::from(tree.clone());
                 let image = cfg.run(shape)?;
                 let data = match mode {
                     ViewMode3::Heightmap => {
@@ -453,9 +432,109 @@ impl RenderTask {
                         ViewData3::Shaded(data)
                     }
                 };
-                RenderData::Render3 { data, view, size }
+                ViewImage::View3 {
+                    data,
+                    view: *view,
+                    size: *size,
+                    level,
+                }
             }
         };
-        Some(ViewImage { data, level })
+        Some(data)
+    }
+}
+
+/// Settings for rendering an image
+#[derive(Clone)]
+pub enum RenderSettings {
+    Render2 {
+        tree: fidget::context::Tree,
+        mode: ViewMode2,
+        view: fidget::render::View2,
+        size: fidget::render::ImageSize,
+    },
+    Render3 {
+        tree: fidget::context::Tree,
+        mode: ViewMode3,
+        view: fidget::render::View3,
+        size: fidget::render::VoxelSize,
+    },
+}
+
+impl RenderSettings {
+    pub fn from_canvas(
+        canvas: &ViewCanvas,
+        tree: fidget::context::Tree,
+    ) -> Self {
+        match canvas {
+            ViewCanvas::Canvas2 { canvas, mode } => RenderSettings::Render2 {
+                tree,
+                view: canvas.view(),
+                size: canvas.image_size(),
+                mode: *mode,
+            },
+            ViewCanvas::Canvas3 { canvas, mode } => {
+                let size = canvas.image_size();
+                RenderSettings::Render3 {
+                    tree,
+                    view: canvas.view(),
+                    size: fidget::render::VoxelSize::new(
+                        size.width(),
+                        size.height(),
+                        // XXX select depth?
+                        size.width().max(size.height()),
+                    ),
+                    mode: *mode,
+                }
+            }
+        }
+    }
+}
+
+impl std::cmp::PartialEq for RenderSettings {
+    fn eq(&self, other: &Self) -> bool {
+        // XXX this does expensive tree deduplication!
+        let mut ctx = fidget::Context::new();
+        match (self, other) {
+            (
+                Self::Render2 {
+                    tree: tree_a,
+                    mode: mode_a,
+                    view: view_a,
+                    size: size_a,
+                },
+                Self::Render2 {
+                    tree: tree_b,
+                    mode: mode_b,
+                    view: view_b,
+                    size: size_b,
+                },
+            ) => {
+                mode_a == mode_b
+                    && view_a == view_b
+                    && size_a == size_b
+                    && ctx.import(tree_a) == ctx.import(tree_b)
+            }
+            (
+                Self::Render3 {
+                    tree: tree_a,
+                    mode: mode_a,
+                    view: view_a,
+                    size: size_a,
+                },
+                Self::Render3 {
+                    tree: tree_b,
+                    mode: mode_b,
+                    view: view_b,
+                    size: size_b,
+                },
+            ) => {
+                mode_a == mode_b
+                    && view_a == view_b
+                    && size_a == size_b
+                    && ctx.import(tree_a) == ctx.import(tree_b)
+            }
+            _ => false,
+        }
     }
 }
