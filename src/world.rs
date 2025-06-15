@@ -111,7 +111,7 @@ impl From<BlockState> for Block {
     }
 }
 
-impl<'a> From<&'a Block> for BlockState {
+impl From<&Block> for BlockState {
     fn from(b: &Block) -> BlockState {
         BlockState {
             name: b.name.clone(),
@@ -202,7 +202,7 @@ pub struct BlockData {
     pub view: Option<BlockView>,
 }
 
-impl<'a> From<&'a World> for WorldState {
+impl From<&World> for WorldState {
     /// Returns a version of the world without transient state
     ///
     /// (used for serialization and evaluation)
