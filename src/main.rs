@@ -473,10 +473,22 @@ impl eframe::App for App {
                 out |= AppResponse::QUIT;
             }
             if i.consume_shortcut(&egui::KeyboardShortcut {
+                modifiers: egui::Modifiers::MAC_CMD | egui::Modifiers::SHIFT,
+                logical_key: egui::Key::S,
+            }) {
+                out |= AppResponse::SAVE_AS;
+            }
+            if i.consume_shortcut(&egui::KeyboardShortcut {
                 modifiers: egui::Modifiers::MAC_CMD,
                 logical_key: egui::Key::S,
             }) {
                 out |= AppResponse::SAVE;
+            }
+            if i.consume_shortcut(&egui::KeyboardShortcut {
+                modifiers: egui::Modifiers::MAC_CMD,
+                logical_key: egui::Key::O,
+            }) {
+                out |= AppResponse::OPEN;
             }
         });
 
@@ -609,10 +621,12 @@ impl eframe::App for App {
                 }
                 AppResponse::SAVE => {
                     if self.file.is_none() {
-                        for i in 0..100 {
-                            let filename = std::path::PathBuf::from(format!(
-                                "model_{i}.half"
-                            ));
+                        use rfd::FileDialog;
+
+                        let filename = FileDialog::new()
+                            .add_filter("halfspace", &["half"])
+                            .save_file();
+                        if let Some(filename) = filename {
                             if let Ok(f) = std::fs::File::options()
                                 .create_new(true)
                                 .read(true)
@@ -620,14 +634,45 @@ impl eframe::App for App {
                                 .open(&filename)
                             {
                                 self.file = Some((filename, f));
-                                break;
+                            } else {
+                                panic!("could not create file");
                             }
-                        }
-                        if self.file.is_none() {
-                            panic!("could not create file");
+                        } else {
+                            warn!("file save cancelled due to empty selection");
                         }
                     }
-                    self.write_to_file().unwrap();
+                    if self.file.is_some() {
+                        self.write_to_file().unwrap();
+                    }
+                }
+                AppResponse::SAVE_AS => {
+                    use rfd::FileDialog;
+
+                    let filename = FileDialog::new()
+                        .add_filter("halfspace", &["half"])
+                        .save_file();
+                    if let Some(filename) = filename {
+                        if let Ok(f) = std::fs::File::options()
+                            .create_new(true)
+                            .read(true)
+                            .write(true)
+                            .open(&filename)
+                        {
+                            self.file = Some((filename, f));
+                        } else {
+                            panic!("could not create file");
+                        }
+                        self.write_to_file().unwrap();
+                    } else {
+                        warn!("file save cancelled due to empty selection");
+                    }
+                }
+                AppResponse::OPEN => {
+                    use rfd::FileDialog;
+
+                    let filename = FileDialog::new()
+                        .add_filter("halfspace", &["half"])
+                        .pick_file();
                 }
                 _ => panic!("invalid flag"),
             }
@@ -783,10 +828,14 @@ bitflags::bitflags! {
     struct AppResponse: u32 {
         /// Request to save the model
         const SAVE          = (1 << 0);
+        /// Request to save the model under a new name
+        const SAVE_AS       = (1 << 1);
         /// Request to quit the application
-        const QUIT          = (1 << 1);
+        const QUIT          = (1 << 2);
         /// The world should be re-evaluate
-        const WORLD_CHANGED = (1 << 2);
+        const WORLD_CHANGED = (1 << 3);
+        /// Request to open a file
+        const OPEN          = (1 << 4);
     }
 }
 
