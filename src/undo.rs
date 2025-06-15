@@ -1,4 +1,4 @@
-use crate::state::WorldState;
+use crate::{state::WorldState, world::World};
 use log::debug;
 
 #[derive(Clone)]
@@ -22,20 +22,20 @@ impl Undo {
         }
     }
 
-    pub fn undo(&mut self, state: &WorldState) -> Option<WorldState> {
+    pub fn undo(&mut self, world: &World) -> Option<WorldState> {
         while let Some(out) = self.undo.pop() {
             self.redo.push(out.clone());
-            if &out.state != state {
+            if *world != out.state {
                 return Some(out.state);
             }
         }
         None
     }
 
-    pub fn redo(&mut self, state: &WorldState) -> Option<WorldState> {
+    pub fn redo(&mut self, world: &World) -> Option<WorldState> {
         while let Some(out) = self.redo.pop() {
             self.undo.push(out.clone());
-            if &out.state != state {
+            if world != &out.state {
                 return Some(out.state);
             }
         }
@@ -43,15 +43,15 @@ impl Undo {
     }
 
     /// Update the state, creating a checkpoint when things are stable
-    pub fn feed_state(&mut self, state: &WorldState) {
+    pub fn feed_state(&mut self, world: &World) {
         if let Some(prev) = self.undo.last() {
-            if state != &prev.state {
+            if world != &prev.state {
                 if self.last_changed.elapsed()
                     > std::time::Duration::from_millis(200)
                 {
                     debug!("creating undo point due to changes");
                     self.undo.push(UndoState {
-                        state: state.clone(),
+                        state: WorldState::from(world),
                         saved: false,
                     });
                     self.redo.clear();
@@ -61,7 +61,7 @@ impl Undo {
         } else {
             debug!("creating undo point due to empty buffer");
             self.undo.push(UndoState {
-                state: state.clone(),
+                state: WorldState::from(world),
                 saved: false,
             });
             self.last_changed = std::time::Instant::now();
@@ -69,12 +69,12 @@ impl Undo {
     }
 
     /// Forcibly create an undo point if the state has changed
-    pub fn checkpoint(&mut self, state: &WorldState) {
+    pub fn checkpoint(&mut self, world: &World) {
         if let Some(prev) = self.undo.last() {
-            if state != &prev.state {
+            if world != &prev.state {
                 debug!("creating undo point due to checkpoint");
                 self.undo.push(UndoState {
-                    state: state.clone(),
+                    state: WorldState::from(world),
                     saved: false,
                 });
                 self.redo.clear();
@@ -83,7 +83,7 @@ impl Undo {
         } else {
             debug!("creating undo point due to checkpoint on empty buffer");
             self.undo.push(UndoState {
-                state: state.clone(),
+                state: WorldState::from(world),
                 saved: false,
             });
             self.last_changed = std::time::Instant::now();

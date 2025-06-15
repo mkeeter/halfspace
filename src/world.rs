@@ -232,6 +232,22 @@ impl From<WorldState> for World {
     }
 }
 
+impl PartialEq<WorldState> for World {
+    fn eq(&self, other: &WorldState) -> bool {
+        self.next_index == other.next_index
+            && self.order == other.order
+            && self.blocks.len() == other.blocks.len()
+            && self.blocks.iter().all(|(i, b)| {
+                let Some(other) = other.blocks.get(i) else {
+                    return false;
+                };
+                b.name == other.name
+                    && b.script == other.script
+                    && b.inputs == other.inputs
+            })
+    }
+}
+
 impl World {
     /// Builds a new (empty) world
     pub fn new() -> Self {

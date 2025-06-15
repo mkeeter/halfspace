@@ -459,9 +459,9 @@ impl eframe::App for App {
         let is_dragging = ctx.input(|i| i.pointer.any_down());
         let drag_released = ctx.input(|i| i.pointer.any_released());
         if drag_released {
-            self.undo.checkpoint(&WorldState::from(&self.data));
+            self.undo.checkpoint(&self.data);
         } else if !is_dragging {
-            self.undo.feed_state(&WorldState::from(&self.data));
+            self.undo.feed_state(&self.data);
         }
 
         // Receive new data from the worker pool
@@ -709,9 +709,7 @@ impl eframe::App for App {
                     }
                 }
                 AppResponse::UNDO => {
-                    if let Some(prev) =
-                        self.undo.undo(&WorldState::from(&self.data))
-                    {
+                    if let Some(prev) = self.undo.undo(&self.data) {
                         debug!("got undo state");
                         self.restore_world_state(ctx, prev);
                     } else {
@@ -720,9 +718,7 @@ impl eframe::App for App {
                     }
                 }
                 AppResponse::REDO => {
-                    if let Some(prev) =
-                        self.undo.redo(&WorldState::from(&self.data))
-                    {
+                    if let Some(prev) = self.undo.redo(&self.data) {
                         debug!("got redo state");
                         self.restore_world_state(ctx, prev);
                     } else {
