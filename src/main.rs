@@ -619,7 +619,7 @@ impl eframe::App for App {
                     self.start_world_rebuild(ctx);
                 }
                 AppResponse::QUIT => {
-                    std::process::exit(0);
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
                 AppResponse::SAVE => {
                     if let Some(f) = &self.file {
@@ -667,6 +667,7 @@ impl eframe::App for App {
                         if let Ok(state) = Self::load_from_file(&filename) {
                             self.file = Some(filename);
                             self.restore_from_state(state);
+                            ctx.request_repaint();
                         } else {
                             panic!("could not load file");
                         }
