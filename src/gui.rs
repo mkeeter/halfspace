@@ -713,24 +713,28 @@ fn block_io_input(
         let mut changed = false;
 
         // Pick text resolution based on characteristic scale
-        let res =
+        let scale =
             (mat[(0, 0)].powi(2) + mat[(1, 0)].powi(2) + mat[(2, 0)].powi(2))
                 .sqrt()
                 .log10();
-        let r = if res < 0.0 { -res.floor() as usize } else { 2 };
+        let d = if scale < 0.0 {
+            -scale.floor() as usize
+        } else {
+            2
+        };
         if let Some(f) = f.as_mut() {
             if draggable_button_float(ui, f, mat).changed() {
-                *s = format!("{f:.*}", r);
+                *s = format!("{f:.*}", d);
                 changed = true;
             }
         } else if let Some(v) = v2.as_mut() {
             if draggable_button_vec2(ui, v, mat).changed() {
-                *s = format!("[{:.*}, {:.*}]", r, v.x, r, v.y);
+                *s = format!("[{:.*}, {:.*}]", d, v.x, d, v.y);
                 changed = true;
             }
         } else if let Some(v) = v3.as_mut() {
             if draggable_button_vec3(ui, v, mat).changed() {
-                *s = format!("[{:.*}, {:.*}, {:.*}]", r, v.x, r, v.y, r, v.z);
+                *s = format!("[{:.*}, {:.*}, {:.*}]", d, v.x, d, v.y, d, v.z);
                 changed = true;
             }
         }
