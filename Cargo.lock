@@ -1518,7 +1518,7 @@ dependencies = [
 [[package]]
 name = "fidget"
 version = "0.3.8"
-source = "git+https://github.com/mkeeter/fidget#fc4e468b233b7b9f752404b5fd1dd3b9d8215b80"
+source = "git+https://github.com/mkeeter/fidget#947a81393af905f6b6fb25d01e956427e469463f"
 dependencies = [
  "arrayvec",
  "bimap",
@@ -1880,6 +1880,7 @@ dependencies = [
  "rayon",
  "rhai",
  "serde",
+ "serde_json",
  "strum 0.27.1",
  "syntect",
  "thiserror 2.0.12",
@@ -5060,7 +5061,7 @@ dependencies = [
 [[package]]
 name = "workspace-hack"
 version = "0.1.0"
-source = "git+https://github.com/mkeeter/fidget#fc4e468b233b7b9f752404b5fd1dd3b9d8215b80"
+source = "git+https://github.com/mkeeter/fidget#947a81393af905f6b6fb25d01e956427e469463f"
 dependencies = [
  "ahash",
  "anstream",

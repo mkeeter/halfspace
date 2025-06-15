@@ -34,6 +34,7 @@ pollster = "0.4.0"
 rayon = "1.10.0"
 rhai = { version = "1.21", features = ["sync", "internals"] }
 serde = "1"
+serde_json = "1.0.140"
 strum = { version = "0.27.1", features = ["derive"] }
 syntect = "5.2.0"
 thiserror = "2.0.12"

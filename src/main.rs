@@ -3,18 +3,18 @@ use eframe::egui_wgpu::wgpu;
 use egui_dnd::dnd;
 use log::info;
 use log::warn;
-use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek, Write};
-use zerocopy::IntoBytes;
 
 mod gui;
 mod painters;
 mod render;
 mod shapes;
+mod state;
 mod view;
 mod world;
 
+use state::AppState;
 use world::{BlockIndex, World};
 
 /// An experimental CAD tool
@@ -254,14 +254,6 @@ struct App {
     tx: std::sync::mpsc::Sender<Message>,
 }
 
-/// Serialization-friendly subset of state
-#[derive(Clone, Serialize, Deserialize)]
-struct AppState {
-    data: world::WorldState,
-    tree: egui_dock::DockState<gui::Tab>,
-    views: HashMap<BlockIndex, view::ViewState>,
-}
-
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // Install custom render pipelines
@@ -331,35 +323,18 @@ impl App {
         }
     }
 
-    /// Returns a serializable state
-    fn state(&self) -> AppState {
-        AppState {
-            data: self.data.state(),
-            tree: self.tree.clone(),
-            views: self
-                .views
-                .iter()
-                .map(|(k, v)| (*k, v.canvas.into()))
-                .collect(),
-        }
-    }
-
     /// Writes to the file in `self.file`
     ///
     /// # Panics
     /// If `self.file` is `None`
     fn write_to_file(&mut self) -> std::io::Result<()> {
-        let state = self.state();
-        let cfg = bincode::config::standard();
-        let state_data = bincode::serde::encode_to_vec(&state, cfg).unwrap();
+        let state = AppState::new(&self.data, &self.views, &self.tree);
+        let json_str = serde_json::to_string_pretty(&state)?;
         let (p, f) = self.file.as_mut().unwrap();
         info!("saving to {:?}", p);
         f.rewind()?;
         f.set_len(0)?;
-        f.write_all(FILE_MAGIC.as_bytes())?;
-        f.write_all(FILE_VERSION.as_bytes())?;
-        f.write_all((state_data.len() as u64).as_bytes())?;
-        f.write_all(&state_data)?;
+        f.write_all(json_str.as_bytes())?;
         f.flush()?;
         Ok(())
     }
@@ -371,54 +346,18 @@ impl App {
     fn load_from_file(&mut self) -> Result<(), ReadError> {
         let (_, f) = self.file.as_mut().unwrap();
 
-        f.seek(std::io::SeekFrom::End(0))?;
-        let file_length = f.stream_position()?;
-        let Some(data_length) = file_length.checked_sub(HEADER_LENGTH as u64)
-        else {
-            return Err(ReadError::TooShort);
-        };
-
-        f.rewind()?;
-        let mut magic = [0u8; 4];
-        f.read_exact(&mut magic)?;
-        if magic != FILE_MAGIC {
-            return Err(ReadError::BadMagic {
-                expected: FILE_MAGIC,
-                actual: magic,
-            });
-        }
-        let mut file_version = 0u32;
-        f.read_exact(file_version.as_mut_bytes())?;
-        if file_version != FILE_VERSION {
-            return Err(ReadError::BadVersion {
-                expected: FILE_VERSION,
-                actual: file_version,
-            });
-        }
-        let mut expected_len = 0u64;
-        f.read_exact(expected_len.as_mut_bytes())?;
-        if expected_len != data_length {
-            return Err(ReadError::BadFileSize {
-                expected: expected_len,
-                actual: data_length,
-            });
-        }
-        if expected_len > 4 * 1024u64.pow(3) {
-            return Err(ReadError::SuspiciouslyLarge(expected_len));
-        }
-        let mut data = vec![0u8; expected_len as usize];
-        f.read_exact(&mut data)?;
-
-        let cfg = bincode::config::standard();
-        let (state, _size) = bincode::serde::decode_from_slice(&data, cfg)
-            .map_err(ReadError::DecodeError)?;
+        f.seek(std::io::SeekFrom::Start(0))?;
+        let mut data = vec![];
+        f.read_to_end(&mut data)?;
+        let s = std::str::from_utf8(&data)?;
+        let state = AppState::deserialize(s)?;
         self.restore_from_state(state);
         Ok(())
     }
 
     fn restore_from_state(&mut self, state: AppState) {
-        self.data = state.data.into();
-        self.tree = state.tree;
+        self.data = state.world.into();
+        self.tree = state.dock;
         self.views = state
             .views
             .into_iter()
@@ -426,7 +365,6 @@ impl App {
             .collect();
         self.generation
             .store(0, std::sync::atomic::Ordering::Relaxed);
-        self.views = HashMap::new();
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx = tx; // use a new channel to orphan previous tasks
         self.rx = rx;
@@ -434,7 +372,7 @@ impl App {
 
     fn start_world_rebuild(&self, ctx: &egui::Context) {
         // Send the world to a worker thread for re-evaluation
-        let world = self.data.state();
+        let world = state::WorldState::from(&self.data);
         let ctx = ctx.clone();
         let tx = self.tx.clone();
         let generation = self
@@ -448,7 +386,7 @@ impl App {
             let current_gen =
                 gen_handle.load(std::sync::atomic::Ordering::Acquire);
             if current_gen == generation {
-                let world = World::build_from_state(world);
+                let world = World::from(world);
                 // Re-check generation before sending
                 let current_gen =
                     gen_handle.load(std::sync::atomic::Ordering::Acquire);
@@ -464,28 +402,30 @@ impl App {
     }
 }
 
-const FILE_VERSION: u32 = 1;
-const FILE_MAGIC: [u8; 4] = *b"HALF";
-const HEADER_LENGTH: usize = 4 + 4 + 8; // magic, version, length
-
 #[derive(thiserror::Error, Debug)]
 enum ReadError {
-    #[error("file is too short to contain the mandatory header")]
-    TooShort,
-    #[error(
-        "file has a bad magic header: expected {expected:?}, found {actual:?}"
-    )]
-    BadMagic { expected: [u8; 4], actual: [u8; 4] },
-    #[error("file has a bad version: expected {expected}, found {actual}")]
-    BadVersion { expected: u32, actual: u32 },
-    #[error("file has a bad size: expected {expected}, found {actual}")]
-    BadFileSize { expected: u64, actual: u64 },
-    #[error("io error encountered when loading file")]
+    #[error("io error encountered when reading file")]
     IoError(#[from] std::io::Error),
-    #[error("file is suspiciously large ({0} bytes)")]
-    SuspiciouslyLarge(u64),
-    #[error("bincode failed to parse the file")]
-    DecodeError(bincode::error::DecodeError),
+
+    #[error("file is not UTF-8")]
+    NotUtf8(#[from] std::str::Utf8Error),
+
+    #[error("could not parse JSON")]
+    ParseError(#[from] serde_json::Error),
+
+    #[error("bad tag: expected {expected}, got {actual}")]
+    BadTag { expected: String, actual: String },
+
+    #[error(
+        "file is too new: our version is {expected_major}.{expected_minor}, \
+         file's is {actual_major}.{actual_minor}"
+    )]
+    TooNew {
+        expected_major: usize,
+        expected_minor: usize,
+        actual_major: usize,
+        actual_minor: usize,
+    },
 }
 
 impl eframe::App for App {

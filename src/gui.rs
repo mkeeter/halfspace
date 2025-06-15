@@ -1,6 +1,7 @@
 //! Functions to draw our data into an `egui` context
 use std::collections::HashMap;
 
+pub use crate::state::{Tab, TabMode};
 use crate::{
     view::{
         self, ViewCanvas, ViewData, ViewData2, ViewData3, ViewImage, ViewMode2,
@@ -9,7 +10,6 @@ use crate::{
     world::{Block, BlockError, BlockIndex, IoValue, NameError, Value, World},
     BlockResponse, Message, ViewResponse,
 };
-use serde::{Deserialize, Serialize};
 
 pub struct WorldView<'a> {
     pub world: &'a mut World,
@@ -17,18 +17,6 @@ pub struct WorldView<'a> {
     pub views: &'a mut HashMap<BlockIndex, ViewData>,
     pub out: &'a mut Vec<(BlockIndex, ViewResponse)>,
     pub tx: &'a std::sync::mpsc::Sender<Message>,
-}
-
-#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, Serialize, Deserialize)]
-enum TabMode {
-    Script,
-    View,
-}
-
-#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, Serialize, Deserialize)]
-pub struct Tab {
-    index: BlockIndex,
-    mode: TabMode,
 }
 
 impl Tab {

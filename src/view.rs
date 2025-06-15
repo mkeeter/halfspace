@@ -1,9 +1,12 @@
 use crate::{
     gui::{CAMERA, WARN},
     render::{RenderSettings, RenderTask},
+    state,
+    state::ViewState,
     BlockIndex, Message, ViewResponse,
 };
-use serde::{Deserialize, Serialize};
+
+pub use state::{ViewMode2, ViewMode3};
 
 /// State associated with a given view in the GUI
 ///
@@ -57,6 +60,10 @@ impl ViewData {
 
 impl From<ViewCanvas> for ViewData {
     fn from(canvas: ViewCanvas) -> Self {
+        match canvas {
+            ViewCanvas::Canvas2 { mode, .. } => println!("{mode:?}"),
+            ViewCanvas::Canvas3 { mode, .. } => println!("{mode:?}"),
+        }
         Self {
             task: None,
             canvas,
@@ -81,46 +88,80 @@ pub enum ViewCanvas {
     },
 }
 
+impl From<&ViewCanvas> for state::ViewState {
+    fn from(v: &ViewCanvas) -> state::ViewState {
+        match v {
+            ViewCanvas::Canvas2 { canvas, mode } => {
+                let (view, size) = canvas.components();
+                let (center, scale) = view.components();
+                ViewState::View2 {
+                    mode: *mode,
+                    center,
+                    scale,
+                    width: size.width(),
+                    height: size.height(),
+                }
+            }
+            ViewCanvas::Canvas3 { canvas, mode } => {
+                let (view, size) = canvas.components();
+                let (center, scale, yaw, pitch) = view.components();
+                ViewState::View3 {
+                    mode: *mode,
+                    center,
+                    scale,
+                    yaw,
+                    pitch,
+                    width: size.width(),
+                    height: size.height(),
+                    depth: size.depth(),
+                }
+            }
+        }
+    }
+}
+
 impl From<ViewState> for ViewCanvas {
-    fn from(value: ViewState) -> Self {
-        match value {
+    fn from(v: ViewState) -> Self {
+        match v {
             // Use dummy sizes for the canvas; they'll be updated on the first
             // drawing pass.
-            ViewState::View2(mode) => Self::Canvas2 {
-                canvas: fidget::gui::Canvas2::new(
-                    fidget::render::ImageSize::new(64, 64),
-                ),
+            ViewState::View2 {
                 mode,
-            },
-            ViewState::View3(mode) => Self::Canvas3 {
-                canvas: fidget::gui::Canvas3::new(
-                    fidget::render::VoxelSize::new(64, 64, 64),
-                ),
+                center,
+                scale,
+                width,
+                height,
+            } => {
+                println!("{center}, {scale}");
+                let canvas = fidget::gui::Canvas2::from_components(
+                    fidget::render::View2::from_components(center, scale),
+                    fidget::render::ImageSize::new(width, height),
+                );
+                Self::Canvas2 { canvas, mode }
+            }
+            ViewState::View3 {
                 mode,
-            },
+                center,
+                scale,
+                yaw,
+                pitch,
+                width,
+                height,
+                depth,
+            } => {
+                let canvas = fidget::gui::Canvas3::from_components(
+                    fidget::render::View3::from_components(
+                        center, scale, yaw, pitch,
+                    ),
+                    fidget::render::VoxelSize::new(width, height, depth),
+                );
+                Self::Canvas3 { canvas, mode }
+            }
         }
     }
 }
 
-impl From<ViewCanvas> for ViewState {
-    fn from(value: ViewCanvas) -> Self {
-        match value {
-            ViewCanvas::Canvas2 { mode, .. } => ViewState::View2(mode),
-            ViewCanvas::Canvas3 { mode, .. } => ViewState::View3(mode),
-        }
-    }
-}
-
-/// Serializable view state
-#[derive(Copy, Clone, Serialize, Deserialize)]
-pub enum ViewState {
-    View2(ViewMode2),
-    View3(ViewMode3),
-}
-
-#[derive(Clone, strum::EnumDiscriminants)]
-#[strum_discriminants(name(ViewMode2))]
-#[strum_discriminants(derive(Serialize, Deserialize))]
+#[derive(Clone)]
 pub enum ViewData2 {
     Sdf(Vec<f32>),
     Bitfield(Vec<f32>),
@@ -136,9 +177,7 @@ impl ViewData2 {
     }
 }
 
-#[derive(Clone, strum::EnumDiscriminants)]
-#[strum_discriminants(name(ViewMode3))]
-#[strum_discriminants(derive(Serialize, Deserialize))]
+#[derive(Clone)]
 pub enum ViewData3 {
     /// Normalized heightmap values, with 0 indicating an empty position
     Heightmap(Vec<u8>),

@@ -3,12 +3,13 @@ use std::{
     sync::{Arc, RwLock},
 };
 
+pub use crate::state::BlockIndex;
+use crate::state::{BlockState, WorldState};
 use fidget::{
     context::Tree,
     shapes::{Vec2, Vec3},
 };
 use heck::ToSnakeCase;
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone)]
 pub enum Value {
@@ -99,14 +100,6 @@ pub struct Block {
     pub inputs: HashMap<String, String>,
 }
 
-/// Serialization-friendly subset of block state
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
-pub struct BlockState {
-    name: String,
-    script: String,
-    inputs: HashMap<String, String>,
-}
-
 impl From<BlockState> for Block {
     fn from(value: BlockState) -> Self {
         Self {
@@ -118,15 +111,17 @@ impl From<BlockState> for Block {
     }
 }
 
-impl Block {
-    fn state(&self) -> BlockState {
+impl<'a> From<&'a Block> for BlockState {
+    fn from(b: &Block) -> BlockState {
         BlockState {
-            name: self.name.clone(),
-            script: self.script.clone(),
-            inputs: self.inputs.clone(),
+            name: b.name.clone(),
+            script: b.script.clone(),
+            inputs: b.inputs.clone(),
         }
     }
+}
 
+impl Block {
     /// Checks whether the block is error-free
     ///
     /// A block with no state is _invalid_, i.e. returns `false`
@@ -140,44 +135,10 @@ impl Block {
     }
 }
 
-#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, Serialize, Deserialize)]
-pub struct BlockIndex(u64);
-
-impl BlockIndex {
-    pub fn id(&self) -> egui::Id {
-        egui::Id::new("block").with(self.0)
-    }
-}
-
 pub struct World {
     next_index: u64,
     pub order: Vec<BlockIndex>,
     pub blocks: HashMap<BlockIndex, Block>,
-}
-
-/// Serialization-friendly subset of world state
-///
-/// This is identical to [`World`], but with [`Block`] replaced with
-/// [`BlockState`] (to avoid the un-serializable [`BlockData`])
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
-pub struct WorldState {
-    next_index: u64,
-    pub order: Vec<BlockIndex>,
-    pub blocks: HashMap<BlockIndex, BlockState>,
-}
-
-impl From<WorldState> for World {
-    fn from(value: WorldState) -> Self {
-        Self {
-            next_index: value.next_index,
-            order: value.order,
-            blocks: value
-                .blocks
-                .into_iter()
-                .map(|(k, v)| (k, v.into()))
-                .collect(),
-        }
-    }
 }
 
 impl std::ops::Index<BlockIndex> for World {
@@ -241,6 +202,36 @@ pub struct BlockData {
     pub view: Option<BlockView>,
 }
 
+impl<'a> From<&'a World> for WorldState {
+    /// Returns a version of the world without transient state
+    ///
+    /// (used for serialization and evaluation)
+    fn from(w: &World) -> Self {
+        WorldState {
+            next_index: w.next_index,
+            order: w.order.clone(),
+            blocks: w.blocks.iter().map(|(k, v)| (*k, v.into())).collect(),
+        }
+    }
+}
+
+impl From<WorldState> for World {
+    /// Rebuilds the entire world, populating [`BlockData`] for each block
+    fn from(state: WorldState) -> Self {
+        let mut world = World {
+            next_index: state.next_index,
+            order: state.order,
+            blocks: state
+                .blocks
+                .into_iter()
+                .map(|(k, v)| (k, v.into()))
+                .collect(),
+        };
+        world.rebuild();
+        world
+    }
+}
+
 impl World {
     /// Builds a new (empty) world
     pub fn new() -> Self {
@@ -284,7 +275,7 @@ impl World {
         &mut self,
         s: &crate::shapes::ShapeDefinition,
     ) -> bool {
-        let index = BlockIndex(self.next_index);
+        let index = BlockIndex::new(self.next_index);
         self.next_index += 1;
         let name = self.next_name_with_prefix(&s.name.to_snake_case());
         self.blocks.insert(
@@ -298,32 +289,6 @@ impl World {
         );
         self.order.push(index);
         true
-    }
-
-    /// Returns a version of the world without transient state
-    ///
-    /// (used for serialization and evaluation)
-    pub fn state(&self) -> WorldState {
-        WorldState {
-            next_index: self.next_index,
-            order: self.order.clone(),
-            blocks: self.blocks.iter().map(|(k, v)| (*k, v.state())).collect(),
-        }
-    }
-
-    /// Rebuilds the entire world, populating [`BlockData`] for each block
-    pub fn build_from_state(state: WorldState) -> Self {
-        let mut world = World {
-            next_index: state.next_index,
-            order: state.order,
-            blocks: state
-                .blocks
-                .into_iter()
-                .map(|(k, v)| (k, v.into()))
-                .collect(),
-        };
-        world.rebuild();
-        world
     }
 
     fn rebuild(&mut self) {
