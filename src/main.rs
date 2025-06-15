@@ -663,6 +663,14 @@ impl eframe::App for App {
                     let filename = FileDialog::new()
                         .add_filter("halfspace", &["half"])
                         .pick_file();
+                    if let Some(filename) = filename {
+                        if let Ok(state) = Self::load_from_file(&filename) {
+                            self.file = Some(filename);
+                            self.restore_from_state(state);
+                        } else {
+                            panic!("could not load file");
+                        }
+                    }
                 }
                 _ => panic!("invalid flag"),
             }
