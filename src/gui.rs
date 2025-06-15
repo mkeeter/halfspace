@@ -700,9 +700,6 @@ fn block_io_input(
 ) -> bool {
     let s = block.inputs.get_mut(name).unwrap();
     let input_id = index.id().with("input_edit").with(name);
-    let mut f = s.parse::<f32>().ok();
-    let mut v2 = try_parse_vec2(s);
-    let mut v3 = try_parse_vec3(s);
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         if let Err(err) = &value {
             ui.colored_label(ui.style().visuals.error_fg_color, WARN)
@@ -712,33 +709,28 @@ fn block_io_input(
         }
         let mut changed = false;
 
-        // Pick text resolution based on characteristic scale
-        let scale =
-            (mat[(0, 0)].powi(2) + mat[(1, 0)].powi(2) + mat[(2, 0)].powi(2))
-                .sqrt();
-        let res = scale.log10();
-        let d = if res < 0.0 { -res.floor() as usize } else { 2 };
-        if let Some(f) = f.as_mut() {
-            if draggable_button_float(ui, f, scale).changed() {
-                *s = format!("{f:.*}", d);
-                changed = true;
-            }
-        } else if let Some(v) = v2.as_mut() {
-            if draggable_button_vec2(ui, v, mat).changed() {
-                *s = format!("[{:.*}, {:.*}]", d, v.x, d, v.y);
-                changed = true;
-            }
-        } else if let Some(v) = v3.as_mut() {
-            if draggable_button_vec3(ui, v, mat).changed() {
-                *s = format!("[{:.*}, {:.*}, {:.*}]", d, v.x, d, v.y, d, v.z);
-                changed = true;
-            }
-        }
+        let dv = DraggableInputValue::new(s);
         let r = ui.add(
             egui::TextEdit::singleline(s)
                 .id(input_id)
                 .desired_width(f32::INFINITY),
         );
+        let shift_down = ui.input(|i| i.modifiers.shift);
+        if shift_down && r.hovered() {
+            ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::Move);
+        }
+        if let Some(dv) = dv {
+            if shift_down {
+                // Extend sense over the same rect as TextEdit
+                let drag_response =
+                    ui.interact(r.rect, r.id, egui::Sense::drag());
+
+                if drag_response.dragged() {
+                    *s = dv.interact(drag_response.drag_motion(), mat);
+                    changed = true;
+                }
+            }
+        }
         changed | r.changed()
     })
     .inner
@@ -864,69 +856,53 @@ fn block_name(ui: &mut egui::Ui, index: BlockIndex, block: &mut Block) -> bool {
     changed
 }
 
-fn draggable_button_float(
-    ui: &mut egui::Ui,
-    f: &mut f32,
-    scale: f32,
-) -> egui::Response {
-    let button = egui::Button::new(DRAG_LEFT_RIGHT).sense(egui::Sense::drag());
-    let mut response = ui.add(button);
-
-    if response.dragged() {
-        *f += response.drag_motion().x * scale;
-        response.mark_changed();
-    }
-
-    response
+enum DraggableInputValue {
+    Float(f32),
+    Vec2(fidget::shapes::Vec2),
+    Vec3(fidget::shapes::Vec3),
 }
 
-fn draggable_button_vec2(
-    ui: &mut egui::Ui,
-    f: &mut fidget::shapes::Vec2,
-    mat: nalgebra::Matrix4<f32>,
-) -> egui::Response {
-    let button = egui::Button::new(DRAG_QUAD).sense(egui::Sense::drag());
-    let mut response = ui.add(button);
-
-    if response.dragged() {
-        let d = nalgebra::Vector4::new(
-            response.drag_motion().x,
-            response.drag_motion().y,
-            0.0,
-            0.0,
-        );
-        let out = mat * d;
-        f.x += out.x as f64;
-        f.y += out.y as f64;
-        response.mark_changed();
+impl DraggableInputValue {
+    fn new(s: &str) -> Option<Self> {
+        s.parse::<f32>()
+            .ok()
+            .map(Self::Float)
+            .or_else(|| try_parse_vec2(s).map(Self::Vec2))
+            .or_else(|| try_parse_vec3(s).map(Self::Vec3))
     }
 
-    response
-}
+    fn interact(
+        self,
+        drag_motion: egui::Vec2,
+        mat: nalgebra::Matrix4<f32>,
+    ) -> String {
+        // Pick text resolution based on characteristic scale
+        let scale = mat.fixed_view::<3, 1>(0, 0).norm();
+        let res = scale.log10();
+        let d = if res < 0.0 { -res.floor() as usize } else { 2 };
 
-fn draggable_button_vec3(
-    ui: &mut egui::Ui,
-    f: &mut fidget::shapes::Vec3,
-    mat: nalgebra::Matrix4<f32>,
-) -> egui::Response {
-    let button = egui::Button::new(DRAG_QUAD).sense(egui::Sense::drag());
-    let mut response = ui.add(button);
-
-    if response.dragged() {
-        let d = nalgebra::Vector4::new(
-            response.drag_motion().x,
-            response.drag_motion().y,
-            0.0,
-            0.0,
-        );
-        let out = mat * d;
-        f.x += out.x as f64;
-        f.y += out.y as f64;
-        f.z += out.z as f64;
-        response.mark_changed();
+        let offset =
+            nalgebra::Vector4::new(drag_motion.x, drag_motion.y, 0.0, 0.0);
+        match self {
+            Self::Float(mut f) => {
+                f += drag_motion.x * scale;
+                format!("{f:.*}", d)
+            }
+            Self::Vec2(mut v) => {
+                let out = mat * offset;
+                v.x += out.x as f64;
+                v.y += out.y as f64;
+                format!("[{:.*}, {:.*}]", d, v.x, d, v.y)
+            }
+            Self::Vec3(mut v) => {
+                let out = mat * offset;
+                v.x += out.x as f64;
+                v.y += out.y as f64;
+                v.z += out.z as f64;
+                format!("[{:.*}, {:.*}, {:.*}]", d, v.x, d, v.y, d, v.z)
+            }
+        }
     }
-
-    response
 }
 
 /// Helper type to stably edit the `egui_dock` state
@@ -1010,9 +986,7 @@ impl<'a> DockStateEditor<'a> {
 }
 
 // Unicode symbols from Nerd Fonts, see https://www.nerdfonts.com/cheat-sheet
-const DRAG_QUAD: &str = "\u{f0041}";
 const DRAG_UP_DOWN: &str = "\u{f0e79}";
-const DRAG_LEFT_RIGHT: &str = "\u{f0e73}";
 const ERROR: &str = "\u{ea87}";
 const EYE: &str = "\u{f441}";
 const HOURGLASS: &str = "\u{f252}";
