@@ -132,7 +132,6 @@ impl From<ViewState> for ViewCanvas {
                 width,
                 height,
             } => {
-                println!("{center}, {scale}");
                 let canvas = fidget::gui::Canvas2::from_components(
                     fidget::render::View2::from_components(center, scale),
                     fidget::render::ImageSize::new(width, height),

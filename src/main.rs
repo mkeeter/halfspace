@@ -4,7 +4,7 @@ use egui_dnd::dnd;
 use log::info;
 use log::warn;
 use std::collections::{HashMap, HashSet};
-use std::io::{Read, Seek, Write};
+use std::io::{Read, Write};
 
 mod gui;
 mod painters;
@@ -208,18 +208,22 @@ pub fn main() -> Result<(), eframe::Error> {
         Box::new(|cc| {
             let mut app = App::new(cc);
             if let Some(filename) = args.target {
-                let mut f = std::fs::File::options()
-                    .create(true)
-                    .append(true)
-                    .read(true)
-                    .open(&filename)?;
-                f.seek(std::io::SeekFrom::End(0))?;
-                let file_length = f.stream_position()?;
-                app.file = Some((filename, f));
-                if file_length != 0 {
-                    app.load_from_file()?;
-                    app.start_world_rebuild(&cc.egui_ctx);
-                }
+                match App::load_from_file(&filename) {
+                    Ok(state) => {
+                        info!("restoring state from file");
+                        app.file = Some(filename);
+                        app.restore_from_state(state);
+                        app.start_world_rebuild(&cc.egui_ctx);
+                    }
+                    Err(ReadError::IoError(e))
+                        if e.kind() == std::io::ErrorKind::NotFound =>
+                    {
+                        // We can specify a filename to create
+                        warn!("file {filename:?} is not yet present");
+                        app.file = Some(filename);
+                    }
+                    Err(e) => return Err(e.into()),
+                };
             }
             Ok(Box::new(app))
         }),
@@ -244,7 +248,7 @@ struct App {
     generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
     library: shapes::ShapeLibrary,
 
-    file: Option<(std::path::PathBuf, std::fs::File)>,
+    file: Option<std::path::PathBuf>,
 
     tree: egui_dock::DockState<gui::Tab>,
     syntax: egui_extras::syntax_highlighting::SyntectSettings,
@@ -323,17 +327,16 @@ impl App {
         }
     }
 
-    /// Writes to the file in `self.file`
-    ///
-    /// # Panics
-    /// If `self.file` is `None`
-    fn write_to_file(&mut self) -> std::io::Result<()> {
+    /// Writes to the given file
+    fn write_to_file(&self, filename: &std::path::Path) -> std::io::Result<()> {
+        info!("writing to {filename:?}");
+        let mut f = std::fs::File::options()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(filename)?;
         let state = AppState::new(&self.data, &self.views, &self.tree);
         let json_str = serde_json::to_string_pretty(&state)?;
-        let (p, f) = self.file.as_mut().unwrap();
-        info!("saving to {:?}", p);
-        f.rewind()?;
-        f.set_len(0)?;
         f.write_all(json_str.as_bytes())?;
         f.flush()?;
         Ok(())
@@ -343,16 +346,15 @@ impl App {
     ///
     /// # Panics
     /// If `self.file` is `None`
-    fn load_from_file(&mut self) -> Result<(), ReadError> {
-        let (_, f) = self.file.as_mut().unwrap();
-
-        f.seek(std::io::SeekFrom::Start(0))?;
+    fn load_from_file(
+        filename: &std::path::Path,
+    ) -> Result<AppState, ReadError> {
+        info!("loading {filename:?}");
+        let mut f = std::fs::File::options().read(true).open(filename)?;
         let mut data = vec![];
         f.read_to_end(&mut data)?;
         let s = std::str::from_utf8(&data)?;
-        let state = AppState::deserialize(s)?;
-        self.restore_from_state(state);
-        Ok(())
+        AppState::deserialize(s)
     }
 
     fn restore_from_state(&mut self, state: AppState) {
@@ -620,29 +622,23 @@ impl eframe::App for App {
                     std::process::exit(0);
                 }
                 AppResponse::SAVE => {
-                    if self.file.is_none() {
+                    if let Some(f) = &self.file {
+                        self.write_to_file(f).unwrap();
+                    } else {
                         use rfd::FileDialog;
 
                         let filename = FileDialog::new()
                             .add_filter("halfspace", &["half"])
                             .save_file();
                         if let Some(filename) = filename {
-                            if let Ok(f) = std::fs::File::options()
-                                .create_new(true)
-                                .read(true)
-                                .write(true)
-                                .open(&filename)
-                            {
-                                self.file = Some((filename, f));
+                            if self.write_to_file(&filename).is_ok() {
+                                self.file = Some(filename);
                             } else {
                                 panic!("could not create file");
                             }
                         } else {
                             warn!("file save cancelled due to empty selection");
                         }
-                    }
-                    if self.file.is_some() {
-                        self.write_to_file().unwrap();
                     }
                 }
                 AppResponse::SAVE_AS => {
@@ -652,17 +648,11 @@ impl eframe::App for App {
                         .add_filter("halfspace", &["half"])
                         .save_file();
                     if let Some(filename) = filename {
-                        if let Ok(f) = std::fs::File::options()
-                            .create_new(true)
-                            .read(true)
-                            .write(true)
-                            .open(&filename)
-                        {
-                            self.file = Some((filename, f));
+                        if self.write_to_file(&filename).is_ok() {
+                            self.file = Some(filename);
                         } else {
                             panic!("could not create file");
                         }
-                        self.write_to_file().unwrap();
                     } else {
                         warn!("file save cancelled due to empty selection");
                     }
