@@ -60,10 +60,6 @@ impl ViewData {
 
 impl From<ViewCanvas> for ViewData {
     fn from(canvas: ViewCanvas) -> Self {
-        match canvas {
-            ViewCanvas::Canvas2 { mode, .. } => println!("{mode:?}"),
-            ViewCanvas::Canvas3 { mode, .. } => println!("{mode:?}"),
-        }
         Self {
             task: None,
             canvas,

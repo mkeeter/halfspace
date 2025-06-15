@@ -1,8 +1,7 @@
 use clap::Parser;
 use eframe::egui_wgpu::wgpu;
 use egui_dnd::dnd;
-use log::info;
-use log::warn;
+use log::{debug, info, warn};
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 
@@ -11,16 +10,21 @@ mod painters;
 mod render;
 mod shapes;
 mod state;
+mod undo;
 mod view;
 mod world;
 
-use state::AppState;
+use state::{AppState, WorldState};
 use world::{BlockIndex, World};
 
 /// An experimental CAD tool
 #[derive(clap::Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
+    /// Show verbose logging
+    #[clap(short, long)]
+    verbose: bool,
+
     /// File to edit (created if not present)
     target: Option<std::path::PathBuf>,
 }
@@ -194,11 +198,15 @@ fn theme_visuals() -> egui::Visuals {
 }
 
 pub fn main() -> Result<(), eframe::Error> {
+    let args = Args::parse();
     env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or("info"),
+        env_logger::Env::default().default_filter_or(if args.verbose {
+            "halfspace=trace"
+        } else {
+            "halfspace=info"
+        }),
     )
     .init();
-    let args = Args::parse();
 
     let mut native_options = eframe::NativeOptions::default();
     native_options.wgpu_options.wgpu_setup = wgpu_setup().into();
@@ -247,6 +255,7 @@ struct App {
     data: World,
     generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
     library: shapes::ShapeLibrary,
+    undo: undo::Undo,
 
     file: Option<std::path::PathBuf>,
 
@@ -318,6 +327,7 @@ impl App {
             data: World::new(),
             library: shapes::ShapeLibrary::build(),
             tree: egui_dock::DockState::new(vec![]),
+            undo: undo::Undo::new(),
             file: None,
             syntax,
             views: HashMap::new(),
@@ -327,8 +337,11 @@ impl App {
         }
     }
 
-    /// Writes to the given file
-    fn write_to_file(&self, filename: &std::path::Path) -> std::io::Result<()> {
+    /// Writes to the given file and marks the current state as saved
+    fn write_to_file(
+        &mut self,
+        filename: &std::path::Path,
+    ) -> std::io::Result<()> {
         info!("writing to {filename:?}");
         let mut f = std::fs::File::options()
             .create(true)
@@ -339,6 +352,7 @@ impl App {
         let json_str = serde_json::to_string_pretty(&state)?;
         f.write_all(json_str.as_bytes())?;
         f.flush()?;
+        self.undo.mark_saved(&state.world);
         Ok(())
     }
 
@@ -374,7 +388,7 @@ impl App {
 
     fn start_world_rebuild(&self, ctx: &egui::Context) {
         // Send the world to a worker thread for re-evaluation
-        let world = state::WorldState::from(&self.data);
+        let world = WorldState::from(&self.data);
         let ctx = ctx.clone();
         let tx = self.tx.clone();
         let generation = self
@@ -442,6 +456,14 @@ impl eframe::App for App {
             r.reset();
         }
 
+        let is_dragging = ctx.input(|i| i.pointer.any_down());
+        let drag_released = ctx.input(|i| i.pointer.any_released());
+        if drag_released {
+            self.undo.checkpoint(&WorldState::from(&self.data));
+        } else if !is_dragging {
+            self.undo.feed_state(&WorldState::from(&self.data));
+        }
+
         // Receive new data from the worker pool
         while let Ok(m) = self.rx.try_recv() {
             match m {
@@ -468,29 +490,41 @@ impl eframe::App for App {
         }
         let mut out = AppResponse::empty();
         ctx.input_mut(|i| {
-            if i.consume_shortcut(&egui::KeyboardShortcut {
-                modifiers: egui::Modifiers::MAC_CMD,
-                logical_key: egui::Key::Q,
-            }) {
+            if i.consume_shortcut(&egui::KeyboardShortcut::new(
+                egui::Modifiers::MAC_CMD,
+                egui::Key::Q,
+            )) {
                 out |= AppResponse::QUIT;
             }
-            if i.consume_shortcut(&egui::KeyboardShortcut {
-                modifiers: egui::Modifiers::MAC_CMD | egui::Modifiers::SHIFT,
-                logical_key: egui::Key::S,
-            }) {
+            if i.consume_shortcut(&egui::KeyboardShortcut::new(
+                egui::Modifiers::MAC_CMD | egui::Modifiers::SHIFT,
+                egui::Key::S,
+            )) {
                 out |= AppResponse::SAVE_AS;
             }
-            if i.consume_shortcut(&egui::KeyboardShortcut {
-                modifiers: egui::Modifiers::MAC_CMD,
-                logical_key: egui::Key::S,
-            }) {
+            if i.consume_shortcut(&egui::KeyboardShortcut::new(
+                egui::Modifiers::MAC_CMD,
+                egui::Key::S,
+            )) {
                 out |= AppResponse::SAVE;
             }
-            if i.consume_shortcut(&egui::KeyboardShortcut {
-                modifiers: egui::Modifiers::MAC_CMD,
-                logical_key: egui::Key::O,
-            }) {
+            if i.consume_shortcut(&egui::KeyboardShortcut::new(
+                egui::Modifiers::MAC_CMD,
+                egui::Key::O,
+            )) {
                 out |= AppResponse::OPEN;
+            }
+            if i.consume_shortcut(&egui::KeyboardShortcut::new(
+                egui::Modifiers::MAC_CMD | egui::Modifiers::SHIFT,
+                egui::Key::Z,
+            )) {
+                out |= AppResponse::REDO;
+            }
+            if i.consume_shortcut(&egui::KeyboardShortcut::new(
+                egui::Modifiers::MAC_CMD,
+                egui::Key::Z,
+            )) {
+                out |= AppResponse::UNDO;
             }
         });
 
@@ -622,8 +656,9 @@ impl eframe::App for App {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
                 AppResponse::SAVE => {
-                    if let Some(f) = &self.file {
-                        self.write_to_file(f).unwrap();
+                    if let Some(f) = self.file.take() {
+                        self.write_to_file(&f).unwrap();
+                        self.file = Some(f);
                     } else {
                         use rfd::FileDialog;
 
@@ -671,6 +706,28 @@ impl eframe::App for App {
                         } else {
                             panic!("could not load file");
                         }
+                    }
+                }
+                AppResponse::UNDO => {
+                    if let Some(prev) =
+                        self.undo.undo(&WorldState::from(&self.data))
+                    {
+                        debug!("got undo state");
+                        self.restore_world_state(ctx, prev);
+                    } else {
+                        // XXX show a dialog or something?
+                        warn!("no undo available");
+                    }
+                }
+                AppResponse::REDO => {
+                    if let Some(prev) =
+                        self.undo.redo(&WorldState::from(&self.data))
+                    {
+                        debug!("got redo state");
+                        self.restore_world_state(ctx, prev);
+                    } else {
+                        // XXX show a dialog or something?
+                        warn!("no redo available");
                     }
                 }
                 _ => panic!("invalid flag"),
@@ -786,6 +843,19 @@ impl App {
 
         changed
     }
+
+    pub fn restore_world_state(
+        &mut self,
+        ctx: &egui::Context,
+        state: WorldState,
+    ) {
+        self.data = state.into();
+        self.tree
+            .retain_tabs(|t| self.data.blocks.contains_key(&t.index));
+        self.views.retain(|i, _| self.data.blocks.contains_key(i));
+        self.start_world_rebuild(ctx);
+        ctx.request_repaint();
+    }
 }
 
 bitflags::bitflags! {
@@ -835,6 +905,10 @@ bitflags::bitflags! {
         const WORLD_CHANGED = (1 << 3);
         /// Request to open a file
         const OPEN          = (1 << 4);
+        /// Undo
+        const UNDO          = (1 << 5);
+        /// Redo
+        const REDO          = (1 << 6);
     }
 }
 
