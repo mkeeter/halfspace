@@ -125,34 +125,45 @@ impl<'a> WorldView<'a> {
             egui::Sense::click_and_drag(),
         );
 
-        // Send mouse interactions to the canvas
+        // Get mouse interactions to send to the canvas
+        let cursor_state = match (r.interact_pointer_pos(), r.hover_pos()) {
+            (Some(p), _) => {
+                let drag = if r.dragged_by(egui::PointerButton::Primary) {
+                    Some(fidget::gui::DragMode::Pan)
+                } else if r.dragged_by(egui::PointerButton::Secondary) {
+                    Some(fidget::gui::DragMode::Rotate)
+                } else {
+                    None
+                };
+
+                Some((p, drag))
+            }
+            (_, Some(p)) => Some((p, None)),
+            (None, None) => None,
+        }
+        .map(|(p, drag)| {
+            let p = p - rect.min;
+            fidget::gui::CursorState {
+                screen_pos: nalgebra::Point2::new(
+                    p.x.round() as i32,
+                    p.y.round() as i32,
+                ),
+                drag,
+            }
+        });
+        let scroll = if r.hover_pos().is_some() {
+            ui.ctx().input(|i| i.smooth_scroll_delta.y)
+        } else {
+            0.0
+        };
         let render_changed = match &mut entry.canvas {
             ViewCanvas::Canvas2 { canvas, .. } => {
                 let cursor_state =
-                    match (r.interact_pointer_pos(), r.hover_pos()) {
-                        (Some(p), _) => Some((p, true)),
-                        (_, Some(p)) => Some((p, false)),
-                        (None, None) => None,
-                    }
-                    .map(|(p, drag)| {
-                        let p = p - rect.min;
-                        fidget::gui::CursorState {
-                            screen_pos: nalgebra::Point2::new(
-                                p.x.round() as i32,
-                                p.y.round() as i32,
-                            ),
-                            drag,
-                        }
+                    cursor_state.map(|c| fidget::gui::CursorState {
+                        screen_pos: c.screen_pos,
+                        drag: c.drag.is_some(),
                     });
-                canvas.interact(
-                    size,
-                    cursor_state,
-                    if r.hover_pos().is_some() {
-                        ui.ctx().input(|i| i.smooth_scroll_delta.y)
-                    } else {
-                        0.0
-                    },
-                )
+                canvas.interact(size, cursor_state, scroll)
             }
             ViewCanvas::Canvas3 { canvas, .. } => {
                 let size = fidget::render::VoxelSize::new(
@@ -160,45 +171,8 @@ impl<'a> WorldView<'a> {
                     size.height(),
                     size.width().max(size.height()),
                 );
-                let cursor_state =
-                    match (r.interact_pointer_pos(), r.hover_pos()) {
-                        (Some(p), _) => {
-                            let drag =
-                                if r.dragged_by(egui::PointerButton::Primary) {
-                                    Some(fidget::gui::DragMode::Pan)
-                                } else if r
-                                    .dragged_by(egui::PointerButton::Secondary)
-                                {
-                                    Some(fidget::gui::DragMode::Rotate)
-                                } else {
-                                    None
-                                };
 
-                            Some((p, drag))
-                        }
-                        (_, Some(p)) => Some((p, None)),
-                        (None, None) => None,
-                    }
-                    .map(|(p, drag)| {
-                        let p = p - rect.min;
-                        fidget::gui::CursorState {
-                            screen_pos: nalgebra::Point2::new(
-                                p.x.round() as i32,
-                                p.y.round() as i32,
-                            ),
-                            drag,
-                        }
-                    });
-
-                canvas.interact(
-                    size,
-                    cursor_state,
-                    if r.hover_pos().is_some() {
-                        ui.ctx().input(|i| i.smooth_scroll_delta.y)
-                    } else {
-                        0.0
-                    },
-                )
+                canvas.interact(size, cursor_state, scroll)
             }
         };
 
