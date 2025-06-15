@@ -715,15 +715,11 @@ fn block_io_input(
         // Pick text resolution based on characteristic scale
         let scale =
             (mat[(0, 0)].powi(2) + mat[(1, 0)].powi(2) + mat[(2, 0)].powi(2))
-                .sqrt()
-                .log10();
-        let d = if scale < 0.0 {
-            -scale.floor() as usize
-        } else {
-            2
-        };
+                .sqrt();
+        let res = scale.log10();
+        let d = if res < 0.0 { -res.floor() as usize } else { 2 };
         if let Some(f) = f.as_mut() {
-            if draggable_button_float(ui, f, mat).changed() {
+            if draggable_button_float(ui, f, scale).changed() {
                 *s = format!("{f:.*}", d);
                 changed = true;
             }
@@ -871,13 +867,13 @@ fn block_name(ui: &mut egui::Ui, index: BlockIndex, block: &mut Block) -> bool {
 fn draggable_button_float(
     ui: &mut egui::Ui,
     f: &mut f32,
-    mat: nalgebra::Matrix4<f32>,
+    scale: f32,
 ) -> egui::Response {
     let button = egui::Button::new(DRAG_LEFT_RIGHT).sense(egui::Sense::drag());
     let mut response = ui.add(button);
 
     if response.dragged() {
-        *f += response.drag_motion().x * mat[(0, 0)];
+        *f += response.drag_motion().x * scale;
         response.mark_changed();
     }
 
