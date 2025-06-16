@@ -1978,6 +1978,7 @@ dependencies = [
  "log",
  "nalgebra",
  "native-dialog",
+ "nonempty",
  "pollster",
  "rayon",
  "rfd",
@@ -2643,6 +2644,12 @@ checksum = "df9761775871bdef83bee530e60050f7e54b1105350d6884eb0fb4f46c2f9405"
 dependencies = [
  "memchr",
 ]
+
+[[package]]
+name = "nonempty"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "549e471b99ccaf2f89101bec68f4d244457d5a95a9c3d0672e9564124397741d"
 
 [[package]]
 name = "num-bigint"

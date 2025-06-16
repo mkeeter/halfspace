@@ -18,7 +18,7 @@ struct ChangedState {
 
 pub struct Undo {
     /// The undo buffer always contains >= 1 item
-    undo: Vec<UndoState>,
+    undo: nonempty::NonEmpty<UndoState>,
     redo: Vec<UndoState>,
     last_changed: Option<ChangedState>,
 }
@@ -28,10 +28,10 @@ const CHANGE_TIME: std::time::Duration = std::time::Duration::from_millis(500);
 impl Undo {
     pub fn new(world: &World) -> Self {
         Undo {
-            undo: vec![UndoState {
+            undo: nonempty::NonEmpty::new(UndoState {
                 state: world.into(),
                 saved: false,
-            }],
+            }),
             redo: vec![],
             last_changed: None,
         }
@@ -39,28 +39,27 @@ impl Undo {
 
     pub fn has_undo(&self, world: &World) -> bool {
         match self.undo.len() {
-            0 => panic!("undo must always have >= 1 item"),
-            1 => world != &self.undo.last().unwrap().state,
+            0 => unreachable!("nonempty vector cannot be empty"),
+            1 => world != &self.undo.last().state,
             _ => true,
         }
     }
 
     pub fn has_redo(&self, world: &World) -> bool {
-        !self.redo.is_empty() && world == &self.undo.last().unwrap().state
+        !self.redo.is_empty() && world == &self.undo.last().state
     }
 
     pub fn undo(&mut self, world: &World) -> Option<&WorldState> {
         if self.has_undo(world) {
-            let last = self.undo.last().unwrap();
+            let last = self.undo.last();
             if world == &last.state {
-                self.undo.pop();
-                assert!(!self.undo.is_empty());
+                self.undo.pop().unwrap();
             }
             self.redo.push(UndoState {
                 state: world.into(),
                 saved: false,
             });
-            Some(&self.undo.last().unwrap().state)
+            Some(&self.undo.last().state)
         } else {
             None
         }
@@ -70,12 +69,12 @@ impl Undo {
         // If the current state of the world differs from the value on top of
         // the undo stack, then we've changed and the redo stack is no longer
         // valid.
-        if !self.undo.is_empty() && world != &self.undo.last().unwrap().state {
+        if !self.undo.is_empty() && world != &self.undo.last().state {
             self.redo.clear();
             None
         } else if let Some(state) = self.redo.pop() {
             self.undo.push(state);
-            Some(&self.undo.last().unwrap().state)
+            Some(&self.undo.last().state)
         } else {
             None
         }
@@ -83,7 +82,7 @@ impl Undo {
 
     /// Update the state, creating a checkpoint when things are stable
     pub fn feed_state(&mut self, world: &World) {
-        let prev = self.undo.last().unwrap();
+        let prev = self.undo.last();
         if world != &prev.state {
             match &mut self.last_changed {
                 None => {
@@ -116,7 +115,7 @@ impl Undo {
 
     /// Forcibly create an undo point if the state has changed
     pub fn checkpoint(&mut self, world: &World) {
-        let prev = self.undo.last().unwrap();
+        let prev = self.undo.last();
         if world != &prev.state {
             debug!("creating undo point due to checkpoint");
             self.undo.push(UndoState {
@@ -134,7 +133,7 @@ impl Undo {
     /// make a `WorldState` when saving the file to disk, so we might as well
     /// reuse it.
     pub fn mark_saved(&mut self, state: WorldState) {
-        let prev = self.undo.last_mut().unwrap();
+        let prev = self.undo.last_mut();
         if state == prev.state {
             debug!("marking previous undo point as saved");
             prev.saved = true;
