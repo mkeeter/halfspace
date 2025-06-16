@@ -543,6 +543,24 @@ impl eframe::App for App {
                             out |= AppResponse::QUIT;
                         }
                     });
+                    ui.menu_button("Edit", |ui| {
+                        ui.add_enabled_ui(
+                            self.undo.has_undo(&self.data),
+                            |ui| {
+                                if ui.button("Undo").clicked() {
+                                    out |= AppResponse::UNDO;
+                                }
+                            },
+                        );
+                        ui.add_enabled_ui(
+                            self.undo.has_redo(&self.data),
+                            |ui| {
+                                if ui.button("Redo").clicked() {
+                                    out |= AppResponse::REDO;
+                                }
+                            },
+                        );
+                    });
                 });
                 ui.separator();
 
