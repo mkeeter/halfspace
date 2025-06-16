@@ -11,12 +11,19 @@ struct UndoState {
     saved: bool,
 }
 
+struct ChangedState {
+    time: std::time::Instant,
+    state: WorldState,
+}
+
 pub struct Undo {
     /// The undo buffer always contains >= 1 item
     undo: Vec<UndoState>,
     redo: Vec<UndoState>,
-    last_changed: std::time::Instant,
+    last_changed: Option<ChangedState>,
 }
+
+const CHANGE_TIME: std::time::Duration = std::time::Duration::from_millis(500);
 
 impl Undo {
     pub fn new(world: &World) -> Self {
@@ -26,7 +33,7 @@ impl Undo {
                 saved: false,
             }],
             redo: vec![],
-            last_changed: std::time::Instant::now(),
+            last_changed: None,
         }
     }
 
@@ -78,17 +85,32 @@ impl Undo {
     pub fn feed_state(&mut self, world: &World) {
         let prev = self.undo.last().unwrap();
         if world != &prev.state {
-            if self.last_changed.elapsed()
-                > std::time::Duration::from_millis(2000)
-            {
-                debug!("creating undo point due to changes");
-                self.undo.push(UndoState {
-                    state: WorldState::from(world),
-                    saved: false,
-                });
-                self.redo.clear();
+            match &mut self.last_changed {
+                None => {
+                    debug!("creating last_changed");
+                    self.last_changed = Some(ChangedState {
+                        time: std::time::Instant::now(),
+                        state: world.into(),
+                    })
+                }
+                Some(t) => {
+                    if world != &t.state {
+                        // If the value is in flux, then reset the timer
+                        t.state = world.into();
+                        t.time = std::time::Instant::now();
+                    } else if t.time.elapsed() > CHANGE_TIME {
+                        // If the value is stable, then create an undo point
+                        debug!("creating undo point due to changes");
+                        let t = self.last_changed.take().unwrap();
+                        self.undo.push(UndoState {
+                            state: t.state,
+                            saved: false,
+                        });
+                        self.redo.clear();
+                        self.last_changed = None;
+                    }
+                }
             }
-            self.last_changed = std::time::Instant::now();
         }
     }
 
@@ -103,7 +125,7 @@ impl Undo {
             });
             self.redo.clear();
         }
-        self.last_changed = std::time::Instant::now();
+        self.last_changed = None;
     }
 
     /// Mark the current state as *saved*
@@ -120,6 +142,7 @@ impl Undo {
             debug!("pushing a new saved undo point");
             self.undo.push(UndoState { state, saved: true });
             self.redo.clear();
+            self.last_changed = None;
         }
     }
 }
