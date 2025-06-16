@@ -220,7 +220,7 @@ pub fn main() -> Result<(), eframe::Error> {
                     Ok(state) => {
                         info!("restoring state from file");
                         app.file = Some(filename);
-                        app.restore_from_state(state);
+                        app.load_from_state(state);
                         app.start_world_rebuild(&cc.egui_ctx);
                     }
                     Err(ReadError::IoError(e))
@@ -323,11 +323,13 @@ impl App {
         });
 
         let (tx, rx) = std::sync::mpsc::channel();
+        let data = World::new();
+        let undo = undo::Undo::new(&data);
         Self {
-            data: World::new(),
+            data,
             library: shapes::ShapeLibrary::build(),
             tree: egui_dock::DockState::new(vec![]),
-            undo: undo::Undo::new(),
+            undo,
             file: None,
             syntax,
             views: HashMap::new(),
@@ -352,7 +354,7 @@ impl App {
         let json_str = serde_json::to_string_pretty(&state)?;
         f.write_all(json_str.as_bytes())?;
         f.flush()?;
-        self.undo.mark_saved(&state.world);
+        self.undo.mark_saved(state.world);
         Ok(())
     }
 
@@ -371,7 +373,7 @@ impl App {
         AppState::deserialize(s)
     }
 
-    fn restore_from_state(&mut self, state: AppState) {
+    fn load_from_state(&mut self, state: AppState) {
         self.data = state.world.into();
         self.tree = state.dock;
         self.views = state
@@ -381,6 +383,7 @@ impl App {
             .collect();
         self.generation
             .store(0, std::sync::atomic::Ordering::Relaxed);
+        self.undo = undo::Undo::new(&self.data);
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx = tx; // use a new channel to orphan previous tasks
         self.rx = rx;
@@ -701,7 +704,7 @@ impl eframe::App for App {
                     if let Some(filename) = filename {
                         if let Ok(state) = Self::load_from_file(&filename) {
                             self.file = Some(filename);
-                            self.restore_from_state(state);
+                            self.load_from_state(state);
                             ctx.request_repaint();
                         } else {
                             panic!("could not load file");
@@ -711,6 +714,7 @@ impl eframe::App for App {
                 AppResponse::UNDO => {
                     if let Some(prev) = self.undo.undo(&self.data) {
                         debug!("got undo state");
+                        let prev = prev.clone();
                         self.restore_world_state(ctx, prev);
                     } else {
                         // XXX show a dialog or something?
@@ -720,6 +724,7 @@ impl eframe::App for App {
                 AppResponse::REDO => {
                     if let Some(prev) = self.undo.redo(&self.data) {
                         debug!("got redo state");
+                        let prev = prev.clone();
                         self.restore_world_state(ctx, prev);
                     } else {
                         // XXX show a dialog or something?
