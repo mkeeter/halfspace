@@ -9,7 +9,7 @@ pub const MAJOR_VERSION: usize = 1;
 pub const MINOR_VERSION: usize = 1;
 
 /// Serialization-friendly subset of world state
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WorldState {
     pub next_index: u64,
     pub order: Vec<BlockIndex>,

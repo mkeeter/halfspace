@@ -495,6 +495,12 @@ impl eframe::App for App {
         ctx.input_mut(|i| {
             if i.consume_shortcut(&egui::KeyboardShortcut::new(
                 egui::Modifiers::MAC_CMD,
+                egui::Key::N,
+            )) {
+                out |= AppResponse::NEW;
+            }
+            if i.consume_shortcut(&egui::KeyboardShortcut::new(
+                egui::Modifiers::MAC_CMD,
                 egui::Key::Q,
             )) {
                 out |= AppResponse::QUIT;
@@ -536,9 +542,21 @@ impl eframe::App for App {
             .show(ctx, |ui| {
                 egui::menu::bar(ui, |ui| {
                     ui.menu_button("File", |ui| {
+                        if ui.button("New").clicked() {
+                            out |= AppResponse::NEW;
+                        }
+                        ui.separator();
                         if ui.button("Save").clicked() {
                             out |= AppResponse::SAVE;
                         }
+                        if ui.button("Save as").clicked() {
+                            out |= AppResponse::SAVE_AS;
+                        }
+                        ui.separator();
+                        if ui.button("Open").clicked() {
+                            out |= AppResponse::OPEN;
+                        }
+                        ui.separator();
                         if ui.button("Quit").clicked() {
                             out |= AppResponse::QUIT;
                         }
@@ -670,6 +688,18 @@ impl eframe::App for App {
         // Handle app-level actions
         for f in out.iter() {
             match f {
+                AppResponse::NEW => {
+                    if self.undo.is_saved()
+                        || matches!(
+                            self.on_unsaved(),
+                            UnsavedChoice::DiscardChanges
+                        )
+                    {
+                        self.file = None;
+                        self.load_from_state(AppState::default());
+                        ctx.request_repaint();
+                    }
+                }
                 AppResponse::WORLD_CHANGED => {
                     self.start_world_rebuild(ctx);
                 }
@@ -681,9 +711,7 @@ impl eframe::App for App {
                         self.write_to_file(&f).unwrap();
                         self.file = Some(f);
                     } else {
-                        use rfd::FileDialog;
-
-                        let filename = FileDialog::new()
+                        let filename = rfd::FileDialog::new()
                             .add_filter("halfspace", &["half"])
                             .save_file();
                         if let Some(filename) = filename {
@@ -698,9 +726,7 @@ impl eframe::App for App {
                     }
                 }
                 AppResponse::SAVE_AS => {
-                    use rfd::FileDialog;
-
-                    let filename = FileDialog::new()
+                    let filename = rfd::FileDialog::new()
                         .add_filter("halfspace", &["half"])
                         .save_file();
                     if let Some(filename) = filename {
@@ -714,18 +740,23 @@ impl eframe::App for App {
                     }
                 }
                 AppResponse::OPEN => {
-                    use rfd::FileDialog;
-
-                    let filename = FileDialog::new()
-                        .add_filter("halfspace", &["half"])
-                        .pick_file();
-                    if let Some(filename) = filename {
-                        if let Ok(state) = Self::load_from_file(&filename) {
-                            self.file = Some(filename);
-                            self.load_from_state(state);
-                            ctx.request_repaint();
-                        } else {
-                            panic!("could not load file");
+                    if self.undo.is_saved()
+                        || matches!(
+                            self.on_unsaved(),
+                            UnsavedChoice::DiscardChanges
+                        )
+                    {
+                        let filename = rfd::FileDialog::new()
+                            .add_filter("halfspace", &["half"])
+                            .pick_file();
+                        if let Some(filename) = filename {
+                            if let Ok(state) = Self::load_from_file(&filename) {
+                                self.file = Some(filename);
+                                self.load_from_state(state);
+                                ctx.request_repaint();
+                            } else {
+                                panic!("could not load file");
+                            }
                         }
                     }
                 }
@@ -752,7 +783,37 @@ impl eframe::App for App {
                 _ => panic!("invalid flag"),
             }
         }
+
+        // Note that this doesn't actually work on macOS right now, see
+        // https://github.com/emilk/egui/issues/7115
+        if ctx.input(|i| i.viewport().close_requested()) {
+            if self.undo.is_saved()
+                || matches!(self.on_unsaved(), UnsavedChoice::DiscardChanges)
+            {
+                // do nothing - we will close
+            } else {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            }
+        }
+
+        let marker = if self.undo.is_saved() { "" } else { "*" };
+        let title = if let Some(f) = &self.file {
+            let f = f
+                .file_name()
+                .map(|s| s.to_string_lossy())
+                .unwrap_or_else(|| "[no file name]".to_owned().into());
+            format!("{f}{marker}")
+        } else {
+            format!("[untitled]{marker}")
+        };
+        ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
     }
+}
+
+#[derive(Copy, Clone, Debug)]
+enum UnsavedChoice {
+    Cancel,
+    DiscardChanges,
 }
 
 impl App {
@@ -875,6 +936,20 @@ impl App {
         self.start_world_rebuild(ctx);
         ctx.request_repaint();
     }
+
+    fn on_unsaved(&self) -> UnsavedChoice {
+        let out = rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Warning)
+            .set_title("Unsaved changes")
+            .set_description("Unsaved changes will be lost")
+            .set_buttons(rfd::MessageButtons::OkCancel)
+            .show();
+        match out {
+            rfd::MessageDialogResult::Ok => UnsavedChoice::DiscardChanges,
+            rfd::MessageDialogResult::Cancel => UnsavedChoice::Cancel,
+            _ => panic!("invalid dialog result {out:?}"),
+        }
+    }
 }
 
 bitflags::bitflags! {
@@ -928,6 +1003,8 @@ bitflags::bitflags! {
         const UNDO          = (1 << 5);
         /// Redo
         const REDO          = (1 << 6);
+        /// Request to create a new model
+        const NEW           = (1 << 7);
     }
 }
 

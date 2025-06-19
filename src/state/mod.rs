@@ -61,6 +61,19 @@ pub struct AppState {
 
 const TAG: &str = "halfspace";
 
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            tag: TAG.to_owned(),
+            major: MAJOR_VERSION,
+            minor: MINOR_VERSION,
+            world: WorldState::default(),
+            views: HashMap::new(),
+            dock: egui_dock::DockState::new(vec![]),
+        }
+    }
+}
+
 impl AppState {
     pub fn new(
         world: &crate::World,

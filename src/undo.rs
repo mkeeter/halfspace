@@ -26,15 +26,23 @@ pub struct Undo {
 const CHANGE_TIME: std::time::Duration = std::time::Duration::from_millis(500);
 
 impl Undo {
+    /// Builds a new undo state
+    ///
+    /// The initial world is assumed to be saved
     pub fn new(world: &World) -> Self {
         Undo {
             undo: nonempty::NonEmpty::new(UndoState {
                 state: world.into(),
-                saved: false,
+                saved: true,
             }),
             redo: vec![],
             last_changed: None,
         }
+    }
+
+    /// Checks whether the current state is marked as saved
+    pub fn is_saved(&self) -> bool {
+        self.undo.last().saved
     }
 
     pub fn has_undo(&self, world: &World) -> bool {
