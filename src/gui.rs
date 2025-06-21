@@ -785,11 +785,24 @@ fn block_name(ui: &mut egui::Ui, index: BlockIndex, block: &mut Block) -> bool {
     let mut changed = false;
     match ui.memory(|mem| mem.data.get_temp(id)) {
         Some(NameEdit { needs_focus }) => {
-            let response = ui.add(
-                egui::TextEdit::singleline(&mut block.name)
-                    .id(egui::Id::new(index).with("name_edit"))
-                    .desired_width(f32::INFINITY),
-            );
+            let text_edit_id = egui::Id::new(index).with("name_edit");
+            let mut out = egui::TextEdit::singleline(&mut block.name)
+                .id(text_edit_id)
+                .desired_width(f32::INFINITY)
+                .show(ui);
+            let response = out.response;
+
+            // If this is the first time we've focused on the text box, then
+            // select all of the text.
+            if needs_focus {
+                out.state.cursor.set_char_range(Some(
+                    egui::text::CCursorRange::two(
+                        egui::text::CCursor::new(0),
+                        egui::text::CCursor::new(block.name.len()),
+                    ),
+                ));
+                out.state.store(ui.ctx(), response.id)
+            }
             let lost_focus = response.lost_focus();
             changed |= response.changed();
             ui.memory_mut(|mem| {
