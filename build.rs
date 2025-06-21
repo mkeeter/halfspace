@@ -1,3 +1,4 @@
+// Computes a `SyntaxSetBuilder` with Rhai syntax and writes it to a bin file
 fn main() {
     let out_dir = std::env::var_os("OUT_DIR").unwrap();
     let dest_path = std::path::Path::new(&out_dir).join("syntax.bin");
