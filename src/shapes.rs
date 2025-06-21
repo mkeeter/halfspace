@@ -1,8 +1,12 @@
 //! Tools for treating Fidget's library of shapes as blocks
 
 use facet::Facet;
-use fidget::shapes::{visit_shapes, ShapeVisitor};
+use fidget::shapes::{
+    types::{Vec2, Vec3, Vec4},
+    visit_shapes, ShapeVisitor,
+};
 use heck::ToSnakeCase;
+use log::warn;
 use std::collections::{HashMap, HashSet};
 
 struct Visitor {
@@ -112,43 +116,53 @@ impl ShapeVisitor for Visitor {
     }
 }
 
+/// For a field, get a reasonable default string
+///
+/// If the field has a default, then build the default object and use it to
+/// generate the string; otherwise fall back to a hard-coded per-type string.
 fn get_field_string(f: &facet::Field) -> String {
-    // Same set of types as `fidget::rhai::shapes::Type`
-    get_field_as::<fidget::shapes::Vec2>(
-        f,
-        |v| format!("[{}, {}]", v.x, v.y),
-        "[0, 0]",
-    )
-    .or_else(|| {
-        get_field_as::<fidget::shapes::Vec3>(
-            f,
-            |v| format!("[{}, {}, {}]", v.x, v.y, v.z),
-            "[0, 0, 0]",
-        )
-    })
-    .or_else(|| {
-        get_field_as::<fidget::shapes::Vec4>(
-            f,
-            |v| format!("[{}, {}, {}, {}]", v.x, v.y, v.z, v.w),
-            "[0, 0, 0, 0]",
-        )
-    })
-    .or_else(|| get_field_as::<f64>(f, |v| v.to_string(), "0"))
-    .or_else(|| {
-        get_field_as::<fidget::context::Tree>(
-            f,
-            |_| unimplemented!("can't format tree yet"),
-            "",
-        )
-    })
-    .or_else(|| {
-        get_field_as::<Vec<fidget::context::Tree>>(
-            f,
-            |_| unimplemented!("can't format Vec<Tree> yet"),
-            "[]",
-        )
-    })
-    .expect("unknown field type")
+    // Same set of types as `fidget::shapes::Type`
+    let s =
+        get_field_as::<Vec2>(f, |v| format!("[{}, {}]", v.x, v.y), "[0, 0]")
+            .or_else(|| {
+                get_field_as::<Vec3>(
+                    f,
+                    |v| format!("[{}, {}, {}]", v.x, v.y, v.z),
+                    "[0, 0, 0]",
+                )
+            })
+            .or_else(|| {
+                get_field_as::<Vec4>(
+                    f,
+                    |v| format!("[{}, {}, {}, {}]", v.x, v.y, v.z, v.w),
+                    "[0, 0, 0, 0]",
+                )
+            })
+            .or_else(|| get_field_as::<f64>(f, |v| v.to_string(), "0"))
+            .or_else(|| {
+                get_field_as::<fidget::context::Tree>(
+                    f,
+                    |_| {
+                        warn!("can't format Tree yet");
+                        "".to_owned()
+                    },
+                    "",
+                )
+            })
+            .or_else(|| {
+                get_field_as::<Vec<fidget::context::Tree>>(
+                    f,
+                    |_| {
+                        warn!("can't format Vec<Tree> yet");
+                        "".to_owned()
+                    },
+                    "[]",
+                )
+            });
+    if s.is_none() {
+        warn!("unknown field type '{}'", f.shape().type_identifier);
+    }
+    s.unwrap_or_default() // fall back to empty string
 }
 
 fn get_field_as<T: Facet<'static>>(

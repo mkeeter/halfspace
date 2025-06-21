@@ -3,89 +3,11 @@ use std::{
     sync::{Arc, RwLock},
 };
 
+use fidget::context::Tree;
+
 pub use crate::state::BlockIndex;
 use crate::state::{BlockState, WorldState};
-use fidget::{
-    context::Tree,
-    shapes::{Vec2, Vec3},
-};
 use heck::ToSnakeCase;
-
-#[derive(Clone)]
-pub enum Value {
-    Float(f64),
-    Vec2(Vec2),
-    Vec3(Vec3),
-    Tree(Tree),
-    String(String),
-    Dynamic(rhai::Dynamic),
-}
-
-impl std::fmt::Display for Value {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Value::Float(v) => write!(f, "{v}"),
-            Value::Vec2(v) => write!(f, "vec2({}, {})", v.x, v.y),
-            Value::Vec3(v) => write!(f, "vec3({}, {}, {})", v.x, v.y, v.z),
-            Value::Tree(_) => write!(f, "Tree(..)"),
-            Value::String(s) => write!(f, "\"{s}\""),
-            Value::Dynamic(d) => write!(f, "{d}"),
-        }
-    }
-}
-
-impl From<rhai::Dynamic> for Value {
-    fn from(d: rhai::Dynamic) -> Self {
-        let get_f64 = |d: &rhai::Dynamic| {
-            d.clone()
-                .try_cast::<f64>()
-                .or_else(|| d.clone().try_cast::<i64>().map(|f| f as f64))
-        };
-
-        if let Some(v) = get_f64(&d) {
-            Value::Float(v)
-        } else if let Some(v) = d.clone().try_cast::<Vec2>() {
-            Value::Vec2(v)
-        } else if let Some(v) = d.clone().try_cast::<Vec3>() {
-            Value::Vec3(v)
-        } else if let Some(v) = d.clone().try_cast::<Tree>() {
-            Value::Tree(v)
-        } else if let Some(v) = d.clone().try_cast::<String>() {
-            Value::String(v)
-        } else if let Some(arr) = d.clone().into_array().ok().and_then(|arr| {
-            arr.iter().map(get_f64).collect::<Option<Vec<f64>>>()
-        }) {
-            match arr.len() {
-                2 => Value::Vec2(Vec2 {
-                    x: arr[0],
-                    y: arr[1],
-                }),
-                3 => Value::Vec3(Vec3 {
-                    x: arr[0],
-                    y: arr[1],
-                    z: arr[2],
-                }),
-                _ => Value::Dynamic(d),
-            }
-        } else {
-            // TODO handle array of integers?
-            Value::Dynamic(d)
-        }
-    }
-}
-
-impl Value {
-    fn to_dynamic(&self) -> rhai::Dynamic {
-        match self {
-            Value::Vec2(v) => rhai::Dynamic::from(*v),
-            Value::Vec3(v) => rhai::Dynamic::from(*v),
-            Value::Float(v) => rhai::Dynamic::from(*v),
-            Value::Tree(v) => rhai::Dynamic::from(v.clone()),
-            Value::String(v) => rhai::Dynamic::from(v.clone()),
-            Value::Dynamic(v) => v.clone(),
-        }
-    }
-}
 
 pub struct Block {
     pub name: String,
@@ -175,8 +97,8 @@ pub enum NameError {
 
 #[derive(Clone)]
 pub enum IoValue {
-    Input(Result<Value, String>),
-    Output(Value),
+    Input(Result<rhai::Dynamic, String>),
+    Output { value: rhai::Dynamic, text: String },
 }
 
 #[derive(Clone)]
@@ -342,29 +264,7 @@ impl World {
         });
         let data = block.data.as_mut().unwrap();
 
-        let mut engine = rhai::Engine::new();
-        fidget::rhai::tree::register(&mut engine);
-        fidget::rhai::vec::register(&mut engine);
-        fidget::rhai::shapes::register(&mut engine);
-        engine.register_fn("axes", || -> rhai::Array {
-            let (x, y, z) = fidget::context::Tree::axes();
-            vec![
-                rhai::Dynamic::from(x),
-                rhai::Dynamic::from(y),
-                rhai::Dynamic::from(z),
-            ]
-        });
-        engine.set_fail_on_invalid_map_property(true);
-        engine.set_max_expr_depths(64, 32);
-        engine.on_progress(move |count| {
-            // Pick a number, any number
-            if count > 50_000 {
-                Some("script runtime exceeded".into())
-            } else {
-                None
-            }
-        });
-
+        let mut engine = fidget::rhai::engine();
         let ast = match engine.compile(&block.script) {
             Ok(ast) => ast,
             Err(e) => {
@@ -383,12 +283,7 @@ impl World {
         )));
         BlockEvalData::bind(&eval_data, &mut engine);
 
-        // Local scope for evaluating the body of the script
-        let mut scope = rhai::Scope::new();
-        scope.push_constant("x", fidget::context::Tree::x());
-        scope.push_constant("y", fidget::context::Tree::y());
-        scope.push_constant("z", fidget::context::Tree::z());
-        let r = engine.eval_ast_with_scope::<rhai::Dynamic>(&mut scope, &ast);
+        let r = engine.eval_ast::<rhai::Dynamic>(&ast);
 
         // Update block state based on actions taken by the script
         let eval_data = std::mem::take(&mut *eval_data.write().unwrap());
@@ -445,20 +340,20 @@ impl World {
         let mut input_values = vec![];
         for (name, value) in &data.io_values {
             match value {
-                IoValue::Output(value) => {
-                    output_values.push((name.into(), value));
+                IoValue::Output { value, .. } => {
+                    output_values.push((name.into(), value.clone()));
                 }
                 IoValue::Input(Ok(value)) => {
-                    input_values.push((name.into(), value))
+                    input_values.push((name.into(), value.clone()))
                 }
                 IoValue::Input(Err(..)) => (),
             }
         }
         if output_values.len() == 1 {
             let (_name, value) = output_values.pop().unwrap();
-            input_scope.push(&block.name, value.to_dynamic());
+            input_scope.push(&block.name, value.clone());
             // Automatically add a View if there's a single tree output
-            if let Value::Tree(tree) = value {
+            if let Some(tree) = value.try_cast::<Tree>() {
                 if data.view.is_none() {
                     data.view = Some(BlockView { tree: tree.clone() })
                 }
@@ -467,7 +362,7 @@ impl World {
             let obj: rhai::Map = output_values
                 .into_iter()
                 .chain(input_values)
-                .map(|(n, v)| (n, v.to_dynamic()))
+                .map(|(n, v)| (n, v))
                 .collect();
             input_scope.push(&block.name, obj);
         }
@@ -536,8 +431,12 @@ impl BlockEvalData {
         v: rhai::Dynamic,
     ) -> Result<(), Box<rhai::EvalAltResult>> {
         self.insert_name(&ctx, name)?;
+        let e = ctx.engine();
+        let mut scope = rhai::Scope::new();
+        scope.push("v", v.clone());
+        let text = e.eval_with_scope(&mut scope, "to_string(v)").unwrap();
         self.values
-            .push((name.to_owned(), IoValue::Output(Value::from(v))));
+            .push((name.to_owned(), IoValue::Output { value: v, text }));
         Ok(())
     }
 
@@ -559,7 +458,7 @@ impl BlockEvalData {
         let v =
             e.eval_expression_with_scope::<rhai::Dynamic>(&mut self.scope, txt);
         let i = match &v {
-            Ok(value) => Ok(Value::from(value.clone())),
+            Ok(value) => Ok(value.clone()),
             Err(e) => Err(e.to_string()),
         };
         self.values.push((name.to_owned(), IoValue::Input(i)));
@@ -568,7 +467,6 @@ impl BlockEvalData {
 
     fn view(
         &mut self,
-
         ctx: rhai::NativeCallContext,
         tree: fidget::context::Tree,
     ) -> Result<(), Box<rhai::EvalAltResult>> {

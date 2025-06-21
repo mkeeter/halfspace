@@ -264,7 +264,7 @@ dependencies = [
  "objc2-foundation 0.3.1",
  "parking_lot",
  "percent-encoding",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
  "x11rb",
 ]
 
@@ -1481,7 +1481,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cea14ef9355e3beab063703aa9dab15afd25f0667c341310c1e5274bb1d0da18"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1603,7 +1603,7 @@ dependencies = [
 [[package]]
 name = "fidget"
 version = "0.3.8"
-source = "git+https://github.com/mkeeter/fidget#947a81393af905f6b6fb25d01e956427e469463f"
+source = "git+https://github.com/mkeeter/fidget#ffdb0d93c58573dfda29f4561394aacfa1dc9ac6"
 dependencies = [
  "arrayvec",
  "bimap",
@@ -3730,7 +3730,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3743,7 +3743,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.9.4",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4125,7 +4125,7 @@ dependencies = [
  "getrandom 0.3.3",
  "once_cell",
  "rustix 1.0.7",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4856,7 +4856,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5378,7 +5378,7 @@ dependencies = [
 [[package]]
 name = "workspace-hack"
 version = "0.1.0"
-source = "git+https://github.com/mkeeter/fidget#947a81393af905f6b6fb25d01e956427e469463f"
+source = "git+https://github.com/mkeeter/fidget#ffdb0d93c58573dfda29f4561394aacfa1dc9ac6"
 dependencies = [
  "ahash",
  "anstream",

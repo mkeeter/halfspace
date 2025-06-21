@@ -7,9 +7,10 @@ use crate::{
         self, ViewCanvas, ViewData, ViewData2, ViewData3, ViewImage, ViewMode2,
         ViewMode3,
     },
-    world::{Block, BlockError, BlockIndex, IoValue, NameError, Value, World},
+    world::{Block, BlockError, BlockIndex, IoValue, NameError, World},
     BlockResponse, Message, ViewResponse,
 };
+use fidget::shapes::types::{Vec2, Vec3};
 
 pub struct WorldView<'a> {
     pub world: &'a mut World,
@@ -620,11 +621,13 @@ fn block_io(
 ) -> bool {
     ui.label(name);
     match value {
-        IoValue::Output(value) => {
-            let mut txt = value.to_string();
+        IoValue::Output { text, .. } => {
+            // XXX awkward cloning here, but passing a &mut &str discards most
+            // of the text box formatting, leaving just a label.
+            let mut text = text.clone();
             ui.add_enabled(
                 false,
-                egui::TextEdit::singleline(&mut txt)
+                egui::TextEdit::singleline(&mut text)
                     .desired_width(f32::INFINITY),
             );
             false
@@ -635,23 +638,23 @@ fn block_io(
     }
 }
 
-fn try_parse_vec2(s: &str) -> Option<fidget::shapes::Vec2> {
+fn try_parse_vec2(s: &str) -> Option<Vec2> {
     let s = s.trim();
     let s = s.strip_prefix('[')?;
     let mut iter = s.split(',');
     let x = iter.next()?.trim().parse().ok()?;
     let y = iter.next()?.trim().strip_suffix(']')?.parse().ok()?;
-    Some(fidget::shapes::Vec2 { x, y })
+    Some(Vec2 { x, y })
 }
 
-fn try_parse_vec3(s: &str) -> Option<fidget::shapes::Vec3> {
+fn try_parse_vec3(s: &str) -> Option<Vec3> {
     let s = s.trim();
     let s = s.strip_prefix('[')?;
     let mut iter = s.split(',');
     let x = iter.next()?.trim().parse().ok()?;
     let y = iter.next()?.trim().parse().ok()?;
     let z = iter.next()?.trim().strip_suffix(']')?.parse().ok()?;
-    Some(fidget::shapes::Vec3 { x, y, z })
+    Some(Vec3 { x, y, z })
 }
 
 /// Draws an editable input field for a block input
@@ -661,7 +664,7 @@ fn block_io_input(
     index: BlockIndex,
     block: &mut Block,
     name: &str,
-    value: &Result<Value, String>,
+    value: &Result<rhai::Dynamic, String>,
     mat: nalgebra::Matrix4<f32>,
 ) -> bool {
     let s = block.inputs.get_mut(name).unwrap();
@@ -837,8 +840,8 @@ fn block_name(ui: &mut egui::Ui, index: BlockIndex, block: &mut Block) -> bool {
 
 enum DraggableInputValue {
     Float(f32),
-    Vec2(fidget::shapes::Vec2),
-    Vec3(fidget::shapes::Vec3),
+    Vec2(Vec2),
+    Vec3(Vec3),
 }
 
 impl DraggableInputValue {
