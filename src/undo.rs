@@ -42,7 +42,7 @@ impl Undo {
 
     /// Checks whether the current state is marked as saved
     pub fn is_saved(&self) -> bool {
-        self.undo.last().saved
+        self.undo.last().saved && self.last_changed.is_none()
     }
 
     pub fn has_undo(&self, world: &World) -> bool {

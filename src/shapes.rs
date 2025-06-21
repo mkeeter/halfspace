@@ -102,7 +102,7 @@ impl ShapeVisitor for Visitor {
         );
         script +=
             &format!("\nlet out = {}({obj});\n", shape_name.to_snake_case());
-        script += "output(\"out\", out);\nview(out);";
+        script += "output(\"out\", out);";
         self.lib.shapes.push(ShapeDefinition {
             name: shape_name.to_owned(),
             script,

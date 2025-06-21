@@ -1,2 +1,3 @@
 /target
 *.half
+!/examples/*.half

@@ -1,0 +1,169 @@
+{
+  "tag": "halfspace",
+  "major": 1,
+  "minor": 1,
+  "world": {
+    "next_index": 3,
+    "order": [
+      0,
+      1,
+      2
+    ],
+    "blocks": {
+      "0": {
+        "name": "a",
+        "script": "// auto-generated script for fidget::shapes::Circle\n\n//  Center of the circle (in XY)\nlet center = input(\"center\");\n\n//  Circle radius\nlet radius = input(\"radius\");\n\nlet out = circle(#{ center: center, radius: radius });\noutput(\"out\", out);\nview(out);",
+        "inputs": {
+          "center": "[0, 0]",
+          "radius": "1"
+        }
+      },
+      "2": {
+        "name": "smooth_min",
+        "script": "let a = input(\"a\");\nlet b = input(\"b\");\n\nlet k = input(\"k\");\nlet out = if k > 0.0 {\n\tmin(a, b) -\n\t1.0 / (4.0 * k) * max(k - abs(a - b), 0.0).square()\n} else {\n\tmin(a, b)\n};\nview(out);",
+        "inputs": {
+          "b": "b",
+          "a": "a",
+          "k": "0.12"
+        }
+      },
+      "1": {
+        "name": "b",
+        "script": "// auto-generated script for fidget::shapes::Circle\n\n//  Center of the circle (in XY)\nlet center = input(\"center\");\n\n//  Circle radius\nlet radius = input(\"radius\");\n\nlet out = circle(#{ center: center, radius: radius });\noutput(\"out\", out);\nview(out);",
+        "inputs": {
+          "center": "[1.25, 0.59]",
+          "radius": "1"
+        }
+      }
+    }
+  },
+  "views": {
+    "2": {
+      "View2": {
+        "mode": "Sdf",
+        "center": [
+          0.7497899,
+          0.25264585
+        ],
+        "scale": 1.9588418,
+        "width": 550,
+        "height": 292
+      }
+    }
+  },
+  "dock": {
+    "surfaces": [
+      {
+        "Main": {
+          "nodes": [
+            {
+              "Vertical": {
+                "rect": {
+                  "min": {
+                    "x": 250.0,
+                    "y": 0.0
+                  },
+                  "max": {
+                    "x": 800.0,
+                    "y": 600.0
+                  }
+                },
+                "fraction": 0.47231767,
+                "fully_collapsed": false,
+                "collapsed_leaf_count": 0
+              }
+            },
+            {
+              "Leaf": {
+                "rect": {
+                  "min": {
+                    "x": 250.0,
+                    "y": 0.0
+                  },
+                  "max": {
+                    "x": 800.0,
+                    "y": 283.0
+                  }
+                },
+                "viewport": {
+                  "min": {
+                    "x": 250.0,
+                    "y": 24.0
+                  },
+                  "max": {
+                    "x": 800.0,
+                    "y": 283.0
+                  }
+                },
+                "tabs": [
+                  {
+                    "index": 2,
+                    "mode": "Script"
+                  }
+                ],
+                "active": 0,
+                "scroll": 0.0,
+                "collapsed": false
+              }
+            },
+            {
+              "Leaf": {
+                "rect": {
+                  "min": {
+                    "x": 250.0,
+                    "y": 284.0
+                  },
+                  "max": {
+                    "x": 800.0,
+                    "y": 600.0
+                  }
+                },
+                "viewport": {
+                  "min": {
+                    "x": 250.0,
+                    "y": 308.0
+                  },
+                  "max": {
+                    "x": 800.0,
+                    "y": 600.0
+                  }
+                },
+                "tabs": [
+                  {
+                    "index": 2,
+                    "mode": "View"
+                  }
+                ],
+                "active": 0,
+                "scroll": 0.0,
+                "collapsed": false
+              }
+            }
+          ],
+          "focused_node": 1,
+          "collapsed": false,
+          "collapsed_leaf_count": 0
+        }
+      }
+    ],
+    "focused_surface": 0,
+    "translations": {
+      "tab_context_menu": {
+        "close_button": "Close",
+        "eject_button": "Eject"
+      },
+      "leaf": {
+        "close_button_disabled_tooltip": "This leaf contains non-closable tabs.",
+        "close_all_button": "Close window",
+        "close_all_button_menu_hint": "Right click to close this window.",
+        "close_all_button_modifier_hint": "Press modifier keys (Shift by default) to close this window.",
+        "close_all_button_modifier_menu_hint": "Press modifier keys (Shift by default) or right click to close this window.",
+        "close_all_button_disabled_tooltip": "This window contains non-closable tabs.",
+        "minimize_button": "Minimize window",
+        "minimize_button_menu_hint": "Right click to minimize this window.",
+        "minimize_button_modifier_hint": "Press modifier keys (Shift by default) to minimize this window.",
+        "minimize_button_modifier_menu_hint": "Press modifier keys (Shift by default) or right click to minimize this window."
+      }
+    }
+  }
+}

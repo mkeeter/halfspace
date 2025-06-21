@@ -437,26 +437,39 @@ impl World {
             }
         }
 
-        // Write outputs into the shared input scope
-        let mut obj: rhai::Map = data
-            .io_values
-            .iter()
-            .filter_map(|(name, value)| match value {
+        // Write IO values into the shared input scope.  The value which is
+        // written depends on a few heuristics:
+        // - If there is a single output, then write it with the object name
+        // - Otherwise, write both outputs and inputs as an object map
+        let mut output_values = vec![];
+        let mut input_values = vec![];
+        for (name, value) in &data.io_values {
+            match value {
                 IoValue::Output(value) => {
-                    Some((name.into(), value.to_dynamic()))
+                    output_values.push((name.into(), value));
                 }
-                IoValue::Input(..) => None,
-            })
-            .collect();
-        match obj.len() {
-            0 => (),
-            1 => {
-                let (_name, value) = obj.pop_last().unwrap();
-                input_scope.push(&block.name, value);
+                IoValue::Input(Ok(value)) => {
+                    input_values.push((name.into(), value))
+                }
+                IoValue::Input(Err(..)) => (),
             }
-            _ => {
-                input_scope.push(&block.name, obj);
+        }
+        if output_values.len() == 1 {
+            let (_name, value) = output_values.pop().unwrap();
+            input_scope.push(&block.name, value.to_dynamic());
+            // Automatically add a View if there's a single tree output
+            if let Value::Tree(tree) = value {
+                if data.view.is_none() {
+                    data.view = Some(BlockView { tree: tree.clone() })
+                }
             }
+        } else {
+            let obj: rhai::Map = output_values
+                .into_iter()
+                .chain(input_values)
+                .map(|(n, v)| (n, v.to_dynamic()))
+                .collect();
+            input_scope.push(&block.name, obj);
         }
 
         input_scope
