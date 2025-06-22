@@ -15,12 +15,19 @@
       9
     ],
     "blocks": {
-      "5": {
-        "name": "cutout",
-        "script": "// auto-generated script for fidget::shapes::Circle\n\n//  Center of the circle (in XY)\nlet center = input(\"center\");\n\n//  Circle radius\nlet radius = input(\"radius\");\n\nlet out = circle(#{ radius: radius, center: center });\noutput(\"out\", out);\nview(out);",
+      "4": {
+        "name": "params",
+        "script": "let r_outer = input(\"r_outer\");\nlet r_inner = input(\"r_inner\");",
         "inputs": {
-          "center": "[0, 0]",
-          "radius": "params.r_outer * 0.7"
+          "r_inner": "0.25",
+          "r_outer": "1"
+        }
+      },
+      "3": {
+        "name": "puck",
+        "script": "let params = input(\"params\");\nlet r_outer = params.r_outer;\nlet r_inner = params.r_inner;\n\nlet r = sqrt(square(x) + square(y));\nlet cross = union(\n  sqrt(square(x - r_outer) + square(z)) - r_inner,\n  intersection(\n    x - r_outer,\n    z - r_inner,\n    -r_inner - z\n  ));\n\nlet puck = cross.remap(r, y, z);\noutput(\"puck\", puck);\n",
+        "inputs": {
+          "params": "params"
         }
       },
       "8": {
@@ -39,27 +46,21 @@
           "shapes": "[puck, cutout]"
         }
       },
-      "4": {
-        "name": "params",
-        "script": "let r_outer = input(\"r_outer\");\nlet r_inner = input(\"r_inner\");",
+      "5": {
+        "name": "cutout",
+        "script": "// auto-generated script for fidget::shapes::Circle\n\n//  Center of the circle (in XY)\nlet center = input(\"center\");\n\n//  Circle radius\nlet radius = input(\"radius\");\n\nlet out = circle(#{ radius: radius, center: center });\noutput(\"out\", out);\nview(out);",
         "inputs": {
-          "r_inner": "0.25",
-          "r_outer": "1"
+          "center": "[0, 0]",
+          "radius": "params.r_outer * 0.7"
         }
       },
-      "3": {
-        "name": "puck",
-        "script": "let params = input(\"params\");\nlet r_outer = params.r_outer;\nlet r_inner = params.r_inner;\n\nlet r = sqrt(square(x) + square(y));\nlet cross = union(\n  sqrt(square(x - r_outer) + square(z)) - r_inner,\n  intersection(x - r_outer,\n    intersection(z - r_inner, -r_inner - z)));\nlet puck = cross.remap_xyz(r, y, z);\nview(puck);\noutput(\"puck\", puck);\n",
+      "2": {
+        "name": "smooth_min",
+        "script": "let a = input(\"a\");\nlet b = input(\"b\");\n\nlet k = input(\"k\");\nlet out = if k > 0 {\n\tmin(a, b) -\n\t1 / (4 * k) *\n    max(k - abs(a - b), 0).square()\n} else {\n\tmin(a, b)\n};\noutput(\"out\", out);\n\n// more legible field lines\nview(out / 2);",
         "inputs": {
-          "params": "params"
-        }
-      },
-      "7": {
-        "name": "clamp",
-        "script": "let shape = input(\"shape\");\nlet dz = input(\"z\");\noutput(\"out\", intersection([z - dz, -dz - z, shape]));",
-        "inputs": {
-          "shape": "smooth_min",
-          "z": "params.r_inner"
+          "a": "puck",
+          "b": "three[0]",
+          "k": "0.45"
         }
       },
       "9": {
@@ -69,18 +70,29 @@
           "shape": "out"
         }
       },
-      "2": {
-        "name": "smooth_min",
-        "script": "let a = input(\"a\");\nlet b = input(\"b\");\n\nlet k = input(\"k\");\nlet out = if k > 0 {\n\tmin(a, b) -\n\t1 / (4 * k) *\n    max(k - abs(a - b), 0).square()\n} else {\n\tmin(a, b)\n};\noutput(\"out\", out);\n\n// more legible field lines\nview(out / 2);",
+      "7": {
+        "name": "clamp",
+        "script": "let shape = input(\"shape\");\nlet dz = input(\"z\");\noutput(\"out\", intersection([z - dz, -dz - z, shape]));",
         "inputs": {
-          "b": "three[0]",
-          "a": "puck",
-          "k": "0.45"
+          "shape": "smooth_min",
+          "z": "params.r_inner"
         }
       }
     }
   },
   "views": {
+    "9": {
+      "View2": {
+        "mode": "Bitfield",
+        "center": [
+          0.19013417,
+          -0.30268472
+        ],
+        "scale": 4.314243,
+        "width": 428,
+        "height": 329
+      }
+    },
     "2": {
       "View2": {
         "mode": "Sdf",
@@ -89,8 +101,8 @@
           -0.059989393
         ],
         "scale": 3.732143,
-        "width": 386,
-        "height": 296
+        "width": 418,
+        "height": 307
       }
     },
     "8": {
@@ -104,25 +116,9 @@
         "scale": 3.2906027,
         "pitch": 0.90553856,
         "yaw": -0.25253975,
-        "width": 386,
-        "height": 317,
-        "depth": 386
-      }
-    },
-    "3": {
-      "View3": {
-        "mode": "Shaded",
-        "center": [
-          0.14096057,
-          -0.75480175,
-          0.95986724
-        ],
-        "scale": 1.6934919,
-        "pitch": 0.6836364,
-        "yaw": 0.13090897,
-        "width": 634,
-        "height": 678,
-        "depth": 678
+        "width": 465,
+        "height": 329,
+        "depth": 465
       }
     },
     "7": {
@@ -141,18 +137,6 @@
         "depth": 533
       }
     },
-    "9": {
-      "View2": {
-        "mode": "Bitfield",
-        "center": [
-          0.31127226,
-          -0.24910453
-        ],
-        "scale": 4.0533304,
-        "width": 355,
-        "height": 317
-      }
-    },
     "6": {
       "View2": {
         "mode": "Sdf",
@@ -163,6 +147,22 @@
         "scale": 3.8105514,
         "width": 328,
         "height": 678
+      }
+    },
+    "3": {
+      "View3": {
+        "mode": "Shaded",
+        "center": [
+          0.14096057,
+          -0.75480175,
+          0.95986724
+        ],
+        "scale": 1.6934919,
+        "pitch": 0.6836364,
+        "yaw": 0.13090897,
+        "width": 604,
+        "height": 448,
+        "depth": 604
       }
     }
   },
@@ -175,12 +175,12 @@
               "Vertical": {
                 "rect": {
                   "min": {
-                    "x": 284.625,
+                    "x": 272.78125,
                     "y": 0.0
                   },
                   "max": {
-                    "x": 1027.0,
-                    "y": 662.0
+                    "x": 1168.0,
+                    "y": 685.0
                   }
                 },
                 "fraction": 0.48430312,
@@ -192,15 +192,15 @@
               "Horizontal": {
                 "rect": {
                   "min": {
-                    "x": 284.625,
+                    "x": 272.78125,
                     "y": 0.0
                   },
                   "max": {
-                    "x": 1027.0,
-                    "y": 320.0
+                    "x": 1168.0,
+                    "y": 331.0
                   }
                 },
-                "fraction": 0.47907668,
+                "fraction": 0.53258204,
                 "fully_collapsed": false,
                 "collapsed_leaf_count": 0
               }
@@ -209,12 +209,12 @@
               "Horizontal": {
                 "rect": {
                   "min": {
-                    "x": 284.625,
-                    "y": 321.0
+                    "x": 272.78125,
+                    "y": 332.0
                   },
                   "max": {
-                    "x": 1027.0,
-                    "y": 662.0
+                    "x": 1168.0,
+                    "y": 685.0
                   }
                 },
                 "fraction": 0.4795652,
@@ -226,27 +226,27 @@
               "Leaf": {
                 "rect": {
                   "min": {
-                    "x": 284.625,
+                    "x": 272.78125,
                     "y": 0.0
                   },
                   "max": {
-                    "x": 639.5,
-                    "y": 320.0
+                    "x": 749.0,
+                    "y": 331.0
                   }
                 },
                 "viewport": {
                   "min": {
-                    "x": 284.625,
+                    "x": 272.78125,
                     "y": 24.0
                   },
                   "max": {
-                    "x": 639.5,
-                    "y": 320.0
+                    "x": 749.0,
+                    "y": 331.0
                   }
                 },
                 "tabs": [
                   {
-                    "index": 2,
+                    "index": 3,
                     "mode": "Script"
                   }
                 ],
@@ -259,22 +259,22 @@
               "Leaf": {
                 "rect": {
                   "min": {
-                    "x": 640.5,
+                    "x": 750.0,
                     "y": 0.0
                   },
                   "max": {
-                    "x": 1027.0,
-                    "y": 320.0
+                    "x": 1168.0,
+                    "y": 331.0
                   }
                 },
                 "viewport": {
                   "min": {
-                    "x": 640.5,
+                    "x": 750.0,
                     "y": 24.0
                   },
                   "max": {
-                    "x": 1027.0,
-                    "y": 320.0
+                    "x": 1168.0,
+                    "y": 331.0
                   }
                 },
                 "tabs": [
@@ -292,22 +292,22 @@
               "Leaf": {
                 "rect": {
                   "min": {
-                    "x": 284.625,
-                    "y": 321.0
+                    "x": 272.78125,
+                    "y": 332.0
                   },
                   "max": {
-                    "x": 640.0,
-                    "y": 662.0
+                    "x": 701.5,
+                    "y": 685.0
                   }
                 },
                 "viewport": {
                   "min": {
-                    "x": 284.625,
-                    "y": 345.0
+                    "x": 272.78125,
+                    "y": 356.0
                   },
                   "max": {
-                    "x": 640.0,
-                    "y": 662.0
+                    "x": 701.5,
+                    "y": 685.0
                   }
                 },
                 "tabs": [
@@ -325,22 +325,22 @@
               "Leaf": {
                 "rect": {
                   "min": {
-                    "x": 641.0,
-                    "y": 321.0
+                    "x": 702.5,
+                    "y": 332.0
                   },
                   "max": {
-                    "x": 1027.0,
-                    "y": 662.0
+                    "x": 1168.0,
+                    "y": 685.0
                   }
                 },
                 "viewport": {
                   "min": {
-                    "x": 641.0,
-                    "y": 345.0
+                    "x": 702.5,
+                    "y": 356.0
                   },
                   "max": {
-                    "x": 1027.0,
-                    "y": 662.0
+                    "x": 1168.0,
+                    "y": 685.0
                   }
                 },
                 "tabs": [
