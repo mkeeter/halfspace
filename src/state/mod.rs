@@ -23,7 +23,7 @@
 //! don't have control over its internals (because they're within a separate
 //! crate).  Within a major version, we _try_ to deserialize it, but return a
 //! default state if deserialization fails.
-use crate::{view::ViewData, ReadError};
+use crate::view::ViewData;
 use log::warn;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -47,6 +47,32 @@ impl BlockIndex {
         // XXX should this be somewhere else, to remove the egui dep?
         egui::Id::new("block").with(self.0)
     }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum ReadError {
+    #[error("io error encountered when reading file")]
+    IoError(#[from] std::io::Error),
+
+    #[error("file is not UTF-8")]
+    NotUtf8(#[from] std::str::Utf8Error),
+
+    #[error("could not parse JSON")]
+    ParseError(#[from] serde_json::Error),
+
+    #[error("bad tag: expected {expected}, got {actual}")]
+    BadTag { expected: String, actual: String },
+
+    #[error(
+        "file is too new: our version is {expected_major}.{expected_minor}, \
+         file's is {actual_major}.{actual_minor}"
+    )]
+    TooNew {
+        expected_major: usize,
+        expected_minor: usize,
+        actual_major: usize,
+        actual_minor: usize,
+    },
 }
 
 ////////////////////////////////////////////////////////////////////////////////

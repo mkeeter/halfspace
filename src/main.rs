@@ -222,7 +222,7 @@ pub fn main() -> Result<(), eframe::Error> {
                         app.load_from_state(state);
                         app.start_world_rebuild(&cc.egui_ctx);
                     }
-                    Err(ReadError::IoError(e))
+                    Err(state::ReadError::IoError(e))
                         if e.kind() == std::io::ErrorKind::NotFound =>
                     {
                         // We can specify a filename to create
@@ -363,7 +363,7 @@ impl App {
     /// If `self.file` is `None`
     fn load_from_file(
         filename: &std::path::Path,
-    ) -> Result<AppState, ReadError> {
+    ) -> Result<AppState, state::ReadError> {
         info!("loading {filename:?}");
         let mut f = std::fs::File::options().read(true).open(filename)?;
         let mut data = vec![];
@@ -418,32 +418,6 @@ impl App {
             }
         })
     }
-}
-
-#[derive(thiserror::Error, Debug)]
-enum ReadError {
-    #[error("io error encountered when reading file")]
-    IoError(#[from] std::io::Error),
-
-    #[error("file is not UTF-8")]
-    NotUtf8(#[from] std::str::Utf8Error),
-
-    #[error("could not parse JSON")]
-    ParseError(#[from] serde_json::Error),
-
-    #[error("bad tag: expected {expected}, got {actual}")]
-    BadTag { expected: String, actual: String },
-
-    #[error(
-        "file is too new: our version is {expected_major}.{expected_minor}, \
-         file's is {actual_major}.{actual_minor}"
-    )]
-    TooNew {
-        expected_major: usize,
-        expected_minor: usize,
-        actual_major: usize,
-        actual_minor: usize,
-    },
 }
 
 impl eframe::App for App {
