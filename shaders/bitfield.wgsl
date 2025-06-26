@@ -56,7 +56,7 @@ fn fs_main(@location(0) tex_coords: vec2<f32>) -> @location(0) vec4<f32> {
     if (rgba.r > 0.0) {
         discard;
     } else {
-        return vec4(1.0);
+        return uniforms.color;
     }
 }
 

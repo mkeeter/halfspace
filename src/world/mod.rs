@@ -265,6 +265,7 @@ impl World {
         let data = block.data.as_mut().unwrap();
 
         let mut engine = fidget::rhai::engine();
+        scene::register_types(&mut engine); // add scene and drawable types
         let ast = match engine.compile(&block.script) {
             Ok(ast) => ast,
             Err(e) => {
@@ -462,10 +463,10 @@ impl BlockEvalData {
         v.map_err(|_| "error in input expression".into())
     }
 
-    fn view(
+    fn view<T: Into<Scene>>(
         &mut self,
         ctx: rhai::NativeCallContext,
-        tree: fidget::context::Tree,
+        t: T,
     ) -> Result<(), Box<rhai::EvalAltResult>> {
         if self.view.is_some() {
             return Err(rhai::EvalAltResult::ErrorRuntime(
@@ -474,7 +475,7 @@ impl BlockEvalData {
             )
             .into());
         }
-        self.view = Some(tree.into());
+        self.view = Some(t.into());
         Ok(())
     }
 
@@ -523,6 +524,16 @@ impl BlockEvalData {
                   -> Result<(), Box<rhai::EvalAltResult>> {
                 let mut eval_data = eval_data_.write().unwrap();
                 eval_data.view(ctx, tree)
+            },
+        );
+        let eval_data_ = eval_data.clone();
+        engine.register_fn(
+            "view",
+            move |ctx: rhai::NativeCallContext,
+                  scene: Scene|
+                  -> Result<(), Box<rhai::EvalAltResult>> {
+                let mut eval_data = eval_data_.write().unwrap();
+                eval_data.view(ctx, scene)
             },
         );
     }
