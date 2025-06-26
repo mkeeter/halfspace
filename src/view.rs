@@ -179,42 +179,54 @@ impl<T> ImageData<T> {
     }
 }
 
+#[derive(Clone)]
+pub struct SdfViewImage {
+    pub data: Vec<ImageData<f32>>,
+    pub view: fidget::render::View2,
+    pub size: fidget::render::ImageSize,
+    pub level: usize,
+}
+
+#[derive(Clone)]
+pub struct BitfieldViewImage {
+    pub data: Vec<ImageData<f32>>,
+    pub view: fidget::render::View2,
+    pub size: fidget::render::ImageSize,
+    pub level: usize,
+}
+
+#[derive(Clone)]
+pub struct HeightmapViewImage {
+    pub data: Vec<ImageData<u8>>,
+    pub view: fidget::render::View3,
+    pub size: fidget::render::VoxelSize,
+    pub level: usize,
+}
+
+#[derive(Clone)]
+pub struct ShadedViewImage {
+    pub data: Vec<ImageData<[u8; 4]>>,
+    pub view: fidget::render::View3,
+    pub size: fidget::render::VoxelSize,
+    pub level: usize,
+}
+
 /// Rendered image, along with the settings that generated it
 #[derive(Clone)]
 pub enum ViewImage {
-    Sdf {
-        data: Vec<ImageData<f32>>,
-        view: fidget::render::View2,
-        size: fidget::render::ImageSize,
-        level: usize,
-    },
-    Bitfield {
-        data: Vec<ImageData<f32>>,
-        view: fidget::render::View2,
-        size: fidget::render::ImageSize,
-        level: usize,
-    },
-    Heightmap {
-        data: Vec<ImageData<u8>>,
-        view: fidget::render::View3,
-        size: fidget::render::VoxelSize,
-        level: usize,
-    },
-    Shaded {
-        data: Vec<ImageData<[u8; 4]>>,
-        view: fidget::render::View3,
-        size: fidget::render::VoxelSize,
-        level: usize,
-    },
+    Sdf(SdfViewImage),
+    Bitfield(BitfieldViewImage),
+    Heightmap(HeightmapViewImage),
+    Shaded(ShadedViewImage),
 }
 
 impl ViewImage {
     pub fn level(&self) -> usize {
         match self {
-            ViewImage::Sdf { level, .. }
-            | ViewImage::Bitfield { level, .. }
-            | ViewImage::Heightmap { level, .. }
-            | ViewImage::Shaded { level, .. } => *level,
+            ViewImage::Sdf(i) => i.level,
+            ViewImage::Bitfield(i) => i.level,
+            ViewImage::Heightmap(i) => i.level,
+            ViewImage::Shaded(i) => i.level,
         }
     }
 }

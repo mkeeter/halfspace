@@ -1,7 +1,7 @@
 use super::{Uniforms, WgpuResources};
 
 /// Painter drawing SDFs
-use crate::{view::ViewImage, world::BlockIndex};
+use crate::{view::SdfViewImage, world::BlockIndex};
 use eframe::{
     egui,
     egui_wgpu::{self, wgpu},
@@ -19,7 +19,7 @@ pub struct WgpuSdfPainter {
     index: BlockIndex,
 
     /// Image to render, which must be of type `ImageData::Distance`
-    image: ViewImage,
+    image: SdfViewImage,
 }
 
 impl WgpuSdfPainter {
@@ -32,11 +32,10 @@ impl WgpuSdfPainter {
     /// If image data is not an SDF
     pub fn new(
         index: BlockIndex,
-        image: ViewImage,
+        image: SdfViewImage,
         size: fidget::render::ImageSize,
         view: fidget::render::View2,
     ) -> Self {
-        assert!(matches!(image, ViewImage::Sdf { .. }));
         Self {
             index,
             image,
@@ -303,16 +302,9 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
     ) -> Vec<wgpu::CommandBuffer> {
         let gr: &mut WgpuResources = resources.get_mut().unwrap();
 
-        let (width, height, data) = match &self.image {
-            ViewImage::Sdf {
-                size, level, data, ..
-            } => (
-                (size.width() / (1 << level)).max(1),
-                (size.height() / (1 << level)).max(1),
-                data,
-            ),
-            _ => panic!("invalid render mode for SDF painter"),
-        };
+        let image_size = self.image.size;
+        let width = (image_size.width() / (1 << self.image.level)).max(1);
+        let height = (image_size.height() / (1 << self.image.level)).max(1);
         let texture_size = wgpu::Extent3d {
             width,
             height,
@@ -320,39 +312,36 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
         };
 
         // Create the uniform
-        let transform = match &self.image {
-            ViewImage::Sdf { size, view, .. } => {
-                // don't blame me, I just twiddled the matrices until things
-                // looked right
-                let aspect_ratio = |size: fidget::render::ImageSize| {
-                    let width = size.width() as f32;
-                    let height = size.height() as f32;
-                    if width > height {
-                        nalgebra::Scale2::new(height / width, 1.0)
-                    } else {
-                        nalgebra::Scale2::new(1.0, width / height)
-                    }
-                };
-                let prev_aspect_ratio = aspect_ratio(*size);
-                let curr_aspect_ratio = aspect_ratio(self.size);
-                let m =
-                    prev_aspect_ratio.to_homogeneous().try_inverse().unwrap()
-                        * curr_aspect_ratio.to_homogeneous()
-                        * self.view.world_to_model().try_inverse().unwrap()
-                        * view.world_to_model();
-                #[rustfmt::skip]
-                let transform = nalgebra::Matrix4::new(
-                    m[(0, 0)], m[(0, 1)], 0.0, m[(0, 2)] * curr_aspect_ratio.x,
-                    m[(1, 0)], m[(1, 1)], 0.0, m[(1, 2)] * curr_aspect_ratio.y,
-                    0.0,         0.0,         1.0, 0.0,
-                    0.0,         0.0,         0.0, 1.0,
-                );
-                transform
-            }
-            _ => unreachable!(),
+        let transform = {
+            let view = self.image.view;
+            // don't blame me, I just twiddled the matrices until things
+            // looked right
+            let aspect_ratio = |size: fidget::render::ImageSize| {
+                let width = size.width() as f32;
+                let height = size.height() as f32;
+                if width > height {
+                    nalgebra::Scale2::new(height / width, 1.0)
+                } else {
+                    nalgebra::Scale2::new(1.0, width / height)
+                }
+            };
+            let prev_aspect_ratio = aspect_ratio(image_size);
+            let curr_aspect_ratio = aspect_ratio(self.size);
+            let m = prev_aspect_ratio.to_homogeneous().try_inverse().unwrap()
+                * curr_aspect_ratio.to_homogeneous()
+                * self.view.world_to_model().try_inverse().unwrap()
+                * view.world_to_model();
+            #[rustfmt::skip]
+            let transform = nalgebra::Matrix4::new(
+                m[(0, 0)], m[(0, 1)], 0.0, m[(0, 2)] * curr_aspect_ratio.x,
+                m[(1, 0)], m[(1, 1)], 0.0, m[(1, 2)] * curr_aspect_ratio.y,
+                0.0,         0.0,         1.0, 0.0,
+                0.0,         0.0,         0.0, 1.0,
+            );
+            transform
         };
 
-        for image in data.iter() {
+        for image in self.image.data.iter() {
             let (texture, uniform_buffer) =
                 gr.sdf.get_data(device, self.index, texture_size);
 

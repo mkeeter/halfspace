@@ -206,7 +206,7 @@ impl<'a> WorldView<'a> {
         // mode based on the selected image's settings
         match (&image, current_canvas) {
             (
-                ViewImage::Bitfield { .. },
+                ViewImage::Bitfield(image),
                 ViewCanvas::Canvas2 {
                     mode: ViewMode2::Bitfield,
                     canvas,
@@ -223,7 +223,7 @@ impl<'a> WorldView<'a> {
                 ));
             }
             (
-                ViewImage::Sdf { .. },
+                ViewImage::Sdf(image),
                 ViewCanvas::Canvas2 {
                     mode: ViewMode2::Sdf,
                     canvas,
@@ -240,7 +240,7 @@ impl<'a> WorldView<'a> {
                 ));
             }
             (
-                ViewImage::Heightmap { .. },
+                ViewImage::Heightmap(image),
                 ViewCanvas::Canvas3 {
                     mode: ViewMode3::Heightmap,
                     canvas,
@@ -257,7 +257,7 @@ impl<'a> WorldView<'a> {
                 ));
             }
             (
-                ViewImage::Shaded { .. },
+                ViewImage::Shaded(image),
                 ViewCanvas::Canvas3 {
                     mode: ViewMode3::Shaded,
                     canvas,

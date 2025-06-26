@@ -1,5 +1,5 @@
 use super::{Uniforms, WgpuResources};
-use crate::{view::ViewImage, world::BlockIndex};
+use crate::{view::HeightmapViewImage, world::BlockIndex};
 use eframe::{
     egui,
     egui_wgpu::{self, wgpu},
@@ -19,7 +19,7 @@ pub struct WgpuHeightmapPainter {
     index: BlockIndex,
 
     /// Image to render
-    image: ViewImage,
+    image: HeightmapViewImage,
 }
 
 impl WgpuHeightmapPainter {
@@ -32,11 +32,10 @@ impl WgpuHeightmapPainter {
     /// If image data is not a heightmap
     pub fn new(
         index: BlockIndex,
-        image: ViewImage,
+        image: HeightmapViewImage,
         size: fidget::render::ImageSize,
         view: fidget::render::View3,
     ) -> Self {
-        assert!(matches!(image, ViewImage::Heightmap { .. }));
         Self {
             index,
             image,
@@ -57,16 +56,9 @@ impl egui_wgpu::CallbackTrait for WgpuHeightmapPainter {
     ) -> Vec<wgpu::CommandBuffer> {
         let gr: &mut WgpuResources = resources.get_mut().unwrap();
 
-        let (width, height, data) = match &self.image {
-            ViewImage::Heightmap {
-                size, level, data, ..
-            } => (
-                (size.width() / (1 << level)).max(1),
-                (size.height() / (1 << level)).max(1),
-                data,
-            ),
-            _ => panic!("invalid painter"),
-        };
+        let image_size = self.image.size;
+        let width = (image_size.width() / (1 << self.image.level)).max(1);
+        let height = (image_size.height() / (1 << self.image.level)).max(1);
         let texture_size = wgpu::Extent3d {
             width,
             height,
@@ -74,41 +66,38 @@ impl egui_wgpu::CallbackTrait for WgpuHeightmapPainter {
         };
 
         // Create the uniform
-        let transform = match &self.image {
-            ViewImage::Heightmap { size, view, .. } => {
-                // don't blame me, I just twiddled the matrices until things
-                // looked right
-                let aspect_ratio = |width: u32, height: u32| {
-                    let width = width as f32;
-                    let height = height as f32;
-                    if width > height {
-                        nalgebra::Scale3::new(height / width, 1.0, 1.0)
-                    } else {
-                        nalgebra::Scale3::new(1.0, width / height, 1.0)
-                    }
-                };
-                let prev_aspect_ratio =
-                    aspect_ratio(size.width(), size.height());
-                let curr_aspect_ratio =
-                    aspect_ratio(self.size.width(), self.size.height());
-                let m =
-                    prev_aspect_ratio.to_homogeneous().try_inverse().unwrap()
-                        * curr_aspect_ratio.to_homogeneous()
-                        * self.view.world_to_model().try_inverse().unwrap()
-                        * view.world_to_model();
-                #[rustfmt::skip]
-                let transform = nalgebra::Matrix4::new(
-                    m[(0, 0)], m[(0, 1)], m[(0, 2)], m[(0, 3)] * curr_aspect_ratio.x,
-                    m[(1, 0)], m[(1, 1)], m[(1, 2)], m[(1, 3)] * curr_aspect_ratio.y,
-                    m[(2, 0)], m[(2, 1)], m[(2, 2)], m[(2, 3)],
-                    0.0,         0.0,         0.0, 1.0,
-                );
-                transform
-            }
-            _ => unreachable!(),
+        let transform = {
+            let view = self.image.view;
+            // don't blame me, I just twiddled the matrices until things
+            // looked right
+            let aspect_ratio = |width: u32, height: u32| {
+                let width = width as f32;
+                let height = height as f32;
+                if width > height {
+                    nalgebra::Scale3::new(height / width, 1.0, 1.0)
+                } else {
+                    nalgebra::Scale3::new(1.0, width / height, 1.0)
+                }
+            };
+            let prev_aspect_ratio =
+                aspect_ratio(image_size.width(), image_size.height());
+            let curr_aspect_ratio =
+                aspect_ratio(self.size.width(), self.size.height());
+            let m = prev_aspect_ratio.to_homogeneous().try_inverse().unwrap()
+                * curr_aspect_ratio.to_homogeneous()
+                * self.view.world_to_model().try_inverse().unwrap()
+                * view.world_to_model();
+            #[rustfmt::skip]
+            let transform = nalgebra::Matrix4::new(
+                m[(0, 0)], m[(0, 1)], m[(0, 2)], m[(0, 3)] * curr_aspect_ratio.x,
+                m[(1, 0)], m[(1, 1)], m[(1, 2)], m[(1, 3)] * curr_aspect_ratio.y,
+                m[(2, 0)], m[(2, 1)], m[(2, 2)], m[(2, 3)],
+                0.0,         0.0,         0.0, 1.0,
+            );
+            transform
         };
 
-        for image in data.iter() {
+        for image in self.image.data.iter() {
             let (texture, uniform_buffer) =
                 gr.heightmap.get_data(device, self.index, texture_size);
 

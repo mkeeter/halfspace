@@ -1,6 +1,9 @@
 //! Image rendering
 use crate::{
-    view::{ImageData, ViewCanvas, ViewImage, ViewMode2, ViewMode3},
+    view::{
+        BitfieldViewImage, HeightmapViewImage, ImageData, SdfViewImage,
+        ShadedViewImage, ViewCanvas, ViewImage, ViewMode2, ViewMode3,
+    },
     world::Scene,
     BlockIndex, Message,
 };
@@ -120,52 +123,60 @@ impl RenderTask {
                     .collect::<Option<_>>()?;
 
                 match mode {
-                    ViewMode2::Bitfield => ViewImage::Bitfield {
-                        view: *view,
-                        size: *size,
-                        level,
-                        data: images
-                            .into_iter()
-                            .map(|(image, color)| {
-                                let image = image.map(|d| match d.distance() {
-                                    Ok(d) => d,
-                                    Err(e) => {
-                                        if e.inside {
-                                            -f32::INFINITY
+                    ViewMode2::Bitfield => {
+                        let image = BitfieldViewImage {
+                            view: *view,
+                            size: *size,
+                            level,
+                            data: images
+                                .into_iter()
+                                .map(|(image, color)| {
+                                    let image =
+                                        image.map(|d| match d.distance() {
+                                            Ok(d) => d,
+                                            Err(e) => {
+                                                if e.inside {
+                                                    -f32::INFINITY
+                                                } else {
+                                                    f32::INFINITY
+                                                }
+                                            }
+                                        });
+                                    ImageData {
+                                        data: image.take().0,
+                                        color,
+                                    }
+                                })
+                                .collect(),
+                        };
+                        ViewImage::Bitfield(image)
+                    }
+
+                    ViewMode2::Sdf => {
+                        let image = SdfViewImage {
+                            view: *view,
+                            size: *size,
+                            level,
+                            data: images
+                                .into_iter()
+                                .map(|(image, color)| {
+                                    let image = image.map(|d| {
+                                        let d = d.distance().unwrap();
+                                        if d.is_infinite() {
+                                            1e12f32.copysign(d)
                                         } else {
-                                            f32::INFINITY
+                                            d
                                         }
+                                    });
+                                    ImageData {
+                                        data: image.take().0,
+                                        color,
                                     }
-                                });
-                                ImageData {
-                                    data: image.take().0,
-                                    color,
-                                }
-                            })
-                            .collect(),
-                    },
-                    ViewMode2::Sdf => ViewImage::Sdf {
-                        view: *view,
-                        size: *size,
-                        level,
-                        data: images
-                            .into_iter()
-                            .map(|(image, color)| {
-                                let image = image.map(|d| {
-                                    let d = d.distance().unwrap();
-                                    if d.is_infinite() {
-                                        1e12f32.copysign(d)
-                                    } else {
-                                        d
-                                    }
-                                });
-                                ImageData {
-                                    data: image.take().0,
-                                    color,
-                                }
-                            })
-                            .collect(),
-                    },
+                                })
+                                .collect(),
+                        };
+                        ViewImage::Sdf(image)
+                    }
                 }
             }
             RenderSettings::Render3 {
@@ -203,7 +214,7 @@ impl RenderTask {
                             .max()
                             .unwrap_or(0)
                             .max(1);
-                        ViewImage::Heightmap {
+                        let image = HeightmapViewImage {
                             view: *view,
                             size: *size,
                             level,
@@ -217,10 +228,11 @@ impl RenderTask {
                                     ImageData { data, color }
                                 })
                                 .collect(),
-                        }
+                        };
+                        ViewImage::Heightmap(image)
                     }
                     ViewMode3::Shaded => {
-                        ViewImage::Shaded {
+                        let image = ShadedViewImage {
                             view: *view,
                             size: *size,
                             level,
@@ -260,7 +272,8 @@ impl RenderTask {
                                     ImageData { data, color }
                                 })
                                 .collect(),
-                        }
+                        };
+                        ViewImage::Shaded(image)
                     }
                 }
             }
