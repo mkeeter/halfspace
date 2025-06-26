@@ -28,7 +28,9 @@ use log::warn;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+mod undo;
 mod v1;
+pub use undo::Undo;
 pub use v1::*;
 
 /// Unique index for blocks

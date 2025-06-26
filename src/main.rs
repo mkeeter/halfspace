@@ -10,7 +10,6 @@ mod painters;
 mod render;
 mod shapes;
 mod state;
-mod undo;
 mod view;
 mod world;
 
@@ -255,7 +254,7 @@ struct App {
     data: World,
     generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
     library: shapes::ShapeLibrary,
-    undo: undo::Undo,
+    undo: state::Undo,
 
     file: Option<std::path::PathBuf>,
 
@@ -324,7 +323,7 @@ impl App {
 
         let (tx, rx) = std::sync::mpsc::channel();
         let data = World::new();
-        let undo = undo::Undo::new(&data);
+        let undo = state::Undo::new(&data);
         Self {
             data,
             library: shapes::ShapeLibrary::build(),
@@ -383,7 +382,7 @@ impl App {
             .collect();
         self.generation
             .store(0, std::sync::atomic::Ordering::Relaxed);
-        self.undo = undo::Undo::new(&self.data);
+        self.undo = state::Undo::new(&self.data);
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx = tx; // use a new channel to orphan previous tasks
         self.rx = rx;
