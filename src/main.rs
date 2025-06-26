@@ -8,7 +8,6 @@ use std::io::{Read, Write};
 mod gui;
 mod painters;
 mod render;
-mod shapes;
 mod state;
 mod view;
 mod world;
@@ -253,7 +252,7 @@ enum Message {
 struct App {
     data: World,
     generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
-    library: shapes::ShapeLibrary,
+    library: world::ShapeLibrary,
     undo: state::Undo,
 
     file: Option<std::path::PathBuf>,
@@ -326,7 +325,7 @@ impl App {
         let undo = state::Undo::new(&data);
         Self {
             data,
-            library: shapes::ShapeLibrary::build(),
+            library: world::ShapeLibrary::build(),
             tree: egui_dock::DockState::new(vec![]),
             undo,
             file: None,

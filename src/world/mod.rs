@@ -9,6 +9,9 @@ pub use crate::state::BlockIndex;
 use crate::state::{BlockState, WorldState};
 use heck::ToSnakeCase;
 
+mod shapes;
+pub use shapes::ShapeLibrary;
+
 pub struct Block {
     pub name: String,
     pub script: String,
@@ -209,10 +212,7 @@ impl World {
     }
 
     #[must_use]
-    pub fn new_block_from(
-        &mut self,
-        s: &crate::shapes::ShapeDefinition,
-    ) -> bool {
+    pub fn new_block_from(&mut self, s: &shapes::ShapeDefinition) -> bool {
         let index = BlockIndex::new(self.next_index);
         self.next_index += 1;
         let name = self.next_name_with_prefix(&s.name.to_snake_case());
