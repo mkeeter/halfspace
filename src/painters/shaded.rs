@@ -1,8 +1,5 @@
 use super::{Uniforms, WgpuResources};
-use crate::{
-    view::{ViewData3, ViewImage},
-    world::BlockIndex,
-};
+use crate::{view::ViewImage, world::BlockIndex};
 use eframe::{
     egui,
     egui_wgpu::{self, wgpu},
@@ -40,13 +37,7 @@ impl WgpuShadedPainter {
         size: fidget::render::ImageSize,
         view: fidget::render::View3,
     ) -> Self {
-        assert!(matches!(
-            image,
-            ViewImage::View3 {
-                data: ViewData3::Shaded(..),
-                ..
-            }
-        ));
+        assert!(matches!(image, ViewImage::Shaded { .. }));
         Self {
             index,
             image,
@@ -68,7 +59,7 @@ impl egui_wgpu::CallbackTrait for WgpuShadedPainter {
         let gr: &mut WgpuResources = resources.get_mut().unwrap();
 
         let (width, height, data) = match &self.image {
-            ViewImage::View3 {
+            ViewImage::Shaded {
                 size, level, data, ..
             } => (
                 (size.width() / (1 << level)).max(1),
@@ -84,7 +75,7 @@ impl egui_wgpu::CallbackTrait for WgpuShadedPainter {
         };
 
         let transform = match &self.image {
-            ViewImage::View3 { size, view, .. } => {
+            ViewImage::Shaded { size, view, .. } => {
                 // don't blame me, I just twiddled the matrices until things
                 // looked right
                 let aspect_ratio = |width: u32, height: u32| {
@@ -117,7 +108,7 @@ impl egui_wgpu::CallbackTrait for WgpuShadedPainter {
             _ => unreachable!(),
         };
 
-        for i in 0..data.len() {
+        for image in data.iter() {
             let (texture, uniform_buffer) =
                 gr.shaded.get_data(device, self.index, texture_size);
 
@@ -129,7 +120,7 @@ impl egui_wgpu::CallbackTrait for WgpuShadedPainter {
                     origin: wgpu::Origin3d::ZERO,
                     aspect: wgpu::TextureAspect::All,
                 },
-                data.as_bytes(i),
+                image.as_bytes(),
                 wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(4 * width),
@@ -139,13 +130,9 @@ impl egui_wgpu::CallbackTrait for WgpuShadedPainter {
             );
 
             // Create the uniform
-            let [r, g, b] = data
-                .color(i)
-                .unwrap_or([u8::MAX; 3])
-                .map(|i| i as f32 / 255.0);
             let uniforms = Uniforms {
                 transform: transform.into(),
-                color: [r, g, b, 1.0],
+                color: image.rgba(),
             };
             let mut writer = queue
                 .write_buffer_with(

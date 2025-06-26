@@ -1,9 +1,6 @@
 //! Image rendering
 use crate::{
-    view::{
-        ImageData, ViewCanvas, ViewData2, ViewData3, ViewImage, ViewMode2,
-        ViewMode3,
-    },
+    view::{ImageData, ViewCanvas, ViewImage, ViewMode2, ViewMode3},
     world::Scene,
     BlockIndex, Message,
 };
@@ -122,9 +119,12 @@ impl RenderTask {
                     })
                     .collect::<Option<_>>()?;
 
-                let data = match mode {
-                    ViewMode2::Bitfield => ViewData2::Bitfield(
-                        images
+                match mode {
+                    ViewMode2::Bitfield => ViewImage::Bitfield {
+                        view: *view,
+                        size: *size,
+                        level,
+                        data: images
                             .into_iter()
                             .map(|(image, color)| {
                                 let image = image.map(|d| match d.distance() {
@@ -143,9 +143,12 @@ impl RenderTask {
                                 }
                             })
                             .collect(),
-                    ),
-                    ViewMode2::Sdf => ViewData2::Sdf(
-                        images
+                    },
+                    ViewMode2::Sdf => ViewImage::Sdf {
+                        view: *view,
+                        size: *size,
+                        level,
+                        data: images
                             .into_iter()
                             .map(|(image, color)| {
                                 let image = image.map(|d| {
@@ -162,13 +165,7 @@ impl RenderTask {
                                 }
                             })
                             .collect(),
-                    ),
-                };
-                ViewImage::View2 {
-                    data,
-                    view: *view,
-                    size: *size,
-                    level,
+                    },
                 }
             }
             RenderSettings::Render3 {
@@ -197,7 +194,7 @@ impl RenderTask {
                         Some((data, shape.color))
                     })
                     .collect::<Option<_>>()?;
-                let data = match mode {
+                match mode {
                     ViewMode3::Heightmap => {
                         let max = images
                             .iter()
@@ -206,8 +203,11 @@ impl RenderTask {
                             .max()
                             .unwrap_or(0)
                             .max(1);
-                        ViewData3::Heightmap(
-                            images
+                        ViewImage::Heightmap {
+                            view: *view,
+                            size: *size,
+                            level,
+                            data: images
                                 .into_iter()
                                 .map(|(image, color)| {
                                     let data = image
@@ -217,48 +217,51 @@ impl RenderTask {
                                     ImageData { data, color }
                                 })
                                 .collect(),
-                        )
+                        }
                     }
-                    ViewMode3::Shaded => ViewData3::Shaded(
-                        // XXX this should all happen on the GPU, probably
-                        images
-                            .into_iter()
-                            .map(|(image, color)| {
-                                let threads =
-                                    Some(&fidget::render::ThreadPool::Global);
-                                let image =
+                    ViewMode3::Shaded => {
+                        ViewImage::Shaded {
+                            view: *view,
+                            size: *size,
+                            level,
+                            data: images
+                                .into_iter()
+                                .map(|(image, color)| {
+                                    // XXX this should all happen on the GPU,
+                                    // probably!
+                                    let threads = Some(
+                                        &fidget::render::ThreadPool::Global,
+                                    );
+                                    let image =
                                     fidget::render::effects::denoise_normals(
                                         &image, threads,
                                     );
-                                let shaded =
-                                    fidget::render::effects::apply_shading(
-                                        &image, true, threads,
+                                    let shaded =
+                                        fidget::render::effects::apply_shading(
+                                            &image, true, threads,
+                                        );
+                                    let mut out: fidget::render::Image<
+                                        [u8; 4],
+                                        _,
+                                    > = fidget::render::Image::new(image_size);
+                                    out.apply_effect(
+                                        |x, y| {
+                                            let p = image[(y, x)];
+                                            if p.depth > 0 {
+                                                let c = shaded[(y, x)];
+                                                [c[0], c[1], c[2], 255]
+                                            } else {
+                                                [0, 0, 0, 0]
+                                            }
+                                        },
+                                        threads,
                                     );
-                                let mut out: fidget::render::Image<[u8; 4], _> =
-                                    fidget::render::Image::new(image_size);
-                                out.apply_effect(
-                                    |x, y| {
-                                        let p = image[(y, x)];
-                                        if p.depth > 0 {
-                                            let c = shaded[(y, x)];
-                                            [c[0], c[1], c[2], 255]
-                                        } else {
-                                            [0, 0, 0, 0]
-                                        }
-                                    },
-                                    threads,
-                                );
-                                let (data, _size) = out.take();
-                                ImageData { data, color }
-                            })
-                            .collect(),
-                    ),
-                };
-                ViewImage::View3 {
-                    data,
-                    view: *view,
-                    size: *size,
-                    level,
+                                    let (data, _size) = out.take();
+                                    ImageData { data, color }
+                                })
+                                .collect(),
+                        }
+                    }
                 }
             }
         };

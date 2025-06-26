@@ -1,9 +1,6 @@
 //! Painter drawing bitfield bitmaps in a 2D view
 use super::{Uniforms, WgpuResources};
-use crate::{
-    view::{ViewData2, ViewImage},
-    world::BlockIndex,
-};
+use crate::{view::ViewImage, world::BlockIndex};
 use eframe::{
     egui,
     egui_wgpu::{self, wgpu},
@@ -38,13 +35,7 @@ impl WgpuBitfieldPainter {
         size: fidget::render::ImageSize,
         view: fidget::render::View2,
     ) -> Self {
-        assert!(matches!(
-            image,
-            ViewImage::View2 {
-                data: ViewData2::Bitfield(..),
-                ..
-            }
-        ));
+        assert!(matches!(image, ViewImage::Bitfield { .. }));
         Self {
             index,
             image,
@@ -315,7 +306,7 @@ impl egui_wgpu::CallbackTrait for WgpuBitfieldPainter {
         let gr: &mut WgpuResources = resources.get_mut().unwrap();
 
         let (width, height, data) = match &self.image {
-            ViewImage::View2 {
+            ViewImage::Bitfield {
                 size, level, data, ..
             } => (
                 (size.width() / (1 << level)).max(1),
@@ -332,7 +323,7 @@ impl egui_wgpu::CallbackTrait for WgpuBitfieldPainter {
 
         // Create the uniform
         let transform = match &self.image {
-            ViewImage::View2 { size, view, .. } => {
+            ViewImage::Bitfield { size, view, .. } => {
                 // don't blame me, I just twiddled the matrices until things
                 // looked right
                 let aspect_ratio = |size: fidget::render::ImageSize| {
@@ -363,7 +354,7 @@ impl egui_wgpu::CallbackTrait for WgpuBitfieldPainter {
             _ => unreachable!(),
         };
 
-        for i in 0..data.len() {
+        for image in data.iter() {
             let (texture, uniform_buffer) =
                 gr.bitfield.get_data(device, self.index, texture_size);
 
@@ -375,7 +366,7 @@ impl egui_wgpu::CallbackTrait for WgpuBitfieldPainter {
                     origin: wgpu::Origin3d::ZERO,
                     aspect: wgpu::TextureAspect::All,
                 },
-                data.as_bytes(i),
+                image.as_bytes(),
                 wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(4 * width),
@@ -385,13 +376,9 @@ impl egui_wgpu::CallbackTrait for WgpuBitfieldPainter {
             );
 
             // Build and write the uniform buffer
-            let [r, g, b] = data
-                .color(i)
-                .unwrap_or([u8::MAX; 3])
-                .map(|i| i as f32 / 255.0);
             let uniforms = Uniforms {
                 transform: transform.into(),
-                color: [r, g, b, 1.0],
+                color: image.rgba(),
             };
             let mut writer = queue
                 .write_buffer_with(

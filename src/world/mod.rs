@@ -359,11 +359,8 @@ impl World {
                 }
             }
         } else {
-            let obj: rhai::Map = output_values
-                .into_iter()
-                .chain(input_values)
-                .map(|(n, v)| (n, v))
-                .collect();
+            let obj: rhai::Map =
+                output_values.into_iter().chain(input_values).collect();
             input_scope.push(&block.name, obj);
         }
 

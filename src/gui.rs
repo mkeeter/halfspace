@@ -3,10 +3,7 @@ use std::collections::HashMap;
 
 pub use crate::state::{Tab, TabMode};
 use crate::{
-    view::{
-        self, ViewCanvas, ViewData, ViewData2, ViewData3, ViewImage, ViewMode2,
-        ViewMode3,
-    },
+    view::{self, ViewCanvas, ViewData, ViewImage, ViewMode2, ViewMode3},
     world::{Block, BlockError, BlockIndex, IoValue, NameError, World},
     BlockResponse, Message, ViewResponse,
 };
@@ -209,10 +206,7 @@ impl<'a> WorldView<'a> {
         // mode based on the selected image's settings
         match (&image, current_canvas) {
             (
-                ViewImage::View2 {
-                    data: ViewData2::Bitfield(..),
-                    ..
-                },
+                ViewImage::Bitfield { .. },
                 ViewCanvas::Canvas2 {
                     mode: ViewMode2::Bitfield,
                     canvas,
@@ -229,10 +223,7 @@ impl<'a> WorldView<'a> {
                 ));
             }
             (
-                ViewImage::View2 {
-                    data: ViewData2::Sdf(..),
-                    ..
-                },
+                ViewImage::Sdf { .. },
                 ViewCanvas::Canvas2 {
                     mode: ViewMode2::Sdf,
                     canvas,
@@ -249,10 +240,7 @@ impl<'a> WorldView<'a> {
                 ));
             }
             (
-                ViewImage::View3 {
-                    data: ViewData3::Heightmap(..),
-                    ..
-                },
+                ViewImage::Heightmap { .. },
                 ViewCanvas::Canvas3 {
                     mode: ViewMode3::Heightmap,
                     canvas,
@@ -269,10 +257,7 @@ impl<'a> WorldView<'a> {
                 ));
             }
             (
-                ViewImage::View3 {
-                    data: ViewData3::Shaded(..),
-                    ..
-                },
+                ViewImage::Shaded { .. },
                 ViewCanvas::Canvas3 {
                     mode: ViewMode3::Shaded,
                     canvas,

@@ -157,65 +157,6 @@ impl From<ViewState> for ViewCanvas {
     }
 }
 
-#[derive(Clone)]
-pub enum ViewData2 {
-    Sdf(Vec<ImageData<f32>>),
-    Bitfield(Vec<ImageData<f32>>),
-}
-
-impl ViewData2 {
-    pub fn len(&self) -> usize {
-        match self {
-            ViewData2::Sdf(v) => v.len(),
-            ViewData2::Bitfield(v) => v.len(),
-        }
-    }
-
-    pub fn as_bytes(&self, i: usize) -> &[u8] {
-        match self {
-            ViewData2::Sdf(v) => v[i].as_bytes(),
-            ViewData2::Bitfield(v) => v[i].as_bytes(),
-        }
-    }
-
-    pub fn color(&self, i: usize) -> Option<[u8; 3]> {
-        match self {
-            ViewData2::Sdf(v) => v[i].color,
-            ViewData2::Bitfield(v) => v[i].color,
-        }
-    }
-}
-
-#[derive(Clone)]
-pub enum ViewData3 {
-    /// Normalized heightmap values, with 0 indicating an empty position
-    Heightmap(Vec<ImageData<u8>>),
-    Shaded(Vec<ImageData<[u8; 4]>>),
-}
-
-impl ViewData3 {
-    pub fn len(&self) -> usize {
-        match self {
-            ViewData3::Heightmap(v) => v.len(),
-            ViewData3::Shaded(v) => v.len(),
-        }
-    }
-
-    pub fn as_bytes(&self, i: usize) -> &[u8] {
-        match self {
-            ViewData3::Heightmap(v) => v[i].as_bytes(),
-            ViewData3::Shaded(v) => v[i].as_bytes(),
-        }
-    }
-
-    pub fn color(&self, i: usize) -> Option<[u8; 3]> {
-        match self {
-            ViewData3::Heightmap(v) => v[i].color,
-            ViewData3::Shaded(v) => v[i].color,
-        }
-    }
-}
-
 #[derive(Clone)] // XXX can we avoid cloning?
 pub struct ImageData<T> {
     pub data: Vec<T>,
@@ -223,23 +164,44 @@ pub struct ImageData<T> {
 }
 
 impl<T: zerocopy::IntoBytes + zerocopy::Immutable> ImageData<T> {
-    fn as_bytes(&self) -> &[u8] {
+    pub fn as_bytes(&self) -> &[u8] {
         use zerocopy::IntoBytes;
         self.data.as_bytes()
+    }
+}
+
+impl<T> ImageData<T> {
+    /// Returns the color as an RGBA float array, or `[1, 1, 1, 1]` if empty
+    pub fn rgba(&self) -> [f32; 4] {
+        let [r, g, b] =
+            self.color.unwrap_or([u8::MAX; 3]).map(|i| i as f32 / 255.0);
+        [r, g, b, 1.0]
     }
 }
 
 /// Rendered image, along with the settings that generated it
 #[derive(Clone)]
 pub enum ViewImage {
-    View2 {
-        data: ViewData2,
+    Sdf {
+        data: Vec<ImageData<f32>>,
         view: fidget::render::View2,
         size: fidget::render::ImageSize,
         level: usize,
     },
-    View3 {
-        data: ViewData3,
+    Bitfield {
+        data: Vec<ImageData<f32>>,
+        view: fidget::render::View2,
+        size: fidget::render::ImageSize,
+        level: usize,
+    },
+    Heightmap {
+        data: Vec<ImageData<u8>>,
+        view: fidget::render::View3,
+        size: fidget::render::VoxelSize,
+        level: usize,
+    },
+    Shaded {
+        data: Vec<ImageData<[u8; 4]>>,
         view: fidget::render::View3,
         size: fidget::render::VoxelSize,
         level: usize,
@@ -249,9 +211,10 @@ pub enum ViewImage {
 impl ViewImage {
     pub fn level(&self) -> usize {
         match self {
-            ViewImage::View2 { level, .. } | ViewImage::View3 { level, .. } => {
-                *level
-            }
+            ViewImage::Sdf { level, .. }
+            | ViewImage::Bitfield { level, .. }
+            | ViewImage::Heightmap { level, .. }
+            | ViewImage::Shaded { level, .. } => *level,
         }
     }
 }
