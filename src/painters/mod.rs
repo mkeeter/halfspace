@@ -48,6 +48,7 @@ pub struct WgpuResources {
 #[derive(Copy, Clone, zerocopy::IntoBytes, zerocopy::Immutable)]
 pub struct Uniforms {
     pub transform: [[f32; 4]; 4],
+    pub color: [f32; 4],
 }
 
 impl WgpuResources {

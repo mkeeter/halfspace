@@ -1,6 +1,10 @@
 //! Image rendering
 use crate::{
-    view::{ViewCanvas, ViewData2, ViewData3, ViewImage, ViewMode2, ViewMode3},
+    view::{
+        ImageData, ViewCanvas, ViewData2, ViewData3, ViewImage, ViewMode2,
+        ViewMode3,
+    },
+    world::Scene,
     BlockIndex, Message,
 };
 
@@ -92,7 +96,7 @@ impl RenderTask {
         let scale = 1 << level;
         let data = match settings {
             RenderSettings::Render2 {
-                tree,
+                scene,
                 mode,
                 view,
                 size,
@@ -108,31 +112,53 @@ impl RenderTask {
                     pixel_perfect: matches!(mode, ViewMode2::Sdf),
                     ..Default::default()
                 };
-                let shape = RenderShape::from(tree.clone());
-                let tmp = cfg.run(shape)?;
+                let images: Vec<_> = scene
+                    .shapes
+                    .iter()
+                    .map(|shape| {
+                        let rs = RenderShape::from(shape.tree.clone());
+                        let data = cfg.run(rs)?;
+                        Some((data, shape.color))
+                    })
+                    .collect::<Option<_>>()?;
+
                 let data = match mode {
                     ViewMode2::Bitfield => ViewData2::Bitfield(
-                        tmp.into_iter()
-                            .map(|d| match d.distance() {
-                                Ok(d) => d,
-                                Err(e) => {
-                                    if e.inside {
-                                        -f32::INFINITY
-                                    } else {
-                                        f32::INFINITY
+                        images
+                            .into_iter()
+                            .map(|(image, color)| {
+                                let image = image.map(|d| match d.distance() {
+                                    Ok(d) => d,
+                                    Err(e) => {
+                                        if e.inside {
+                                            -f32::INFINITY
+                                        } else {
+                                            f32::INFINITY
+                                        }
                                     }
+                                });
+                                ImageData {
+                                    data: image.take().0,
+                                    color,
                                 }
                             })
                             .collect(),
                     ),
                     ViewMode2::Sdf => ViewData2::Sdf(
-                        tmp.into_iter()
-                            .map(|d| {
-                                let d = d.distance().unwrap();
-                                if d.is_infinite() {
-                                    1e12f32.copysign(d)
-                                } else {
-                                    d
+                        images
+                            .into_iter()
+                            .map(|(image, color)| {
+                                let image = image.map(|d| {
+                                    let d = d.distance().unwrap();
+                                    if d.is_infinite() {
+                                        1e12f32.copysign(d)
+                                    } else {
+                                        d
+                                    }
+                                });
+                                ImageData {
+                                    data: image.take().0,
+                                    color,
                                 }
                             })
                             .collect(),
@@ -146,7 +172,7 @@ impl RenderTask {
                 }
             }
             RenderSettings::Render3 {
-                tree,
+                scene,
                 mode,
                 view,
                 size,
@@ -162,46 +188,71 @@ impl RenderTask {
                     cancel,
                     ..Default::default()
                 };
-                let shape = RenderShape::from(tree.clone());
-                let image = cfg.run(shape)?;
+                let images: Vec<_> = scene
+                    .shapes
+                    .iter()
+                    .map(|shape| {
+                        let rs = RenderShape::from(shape.tree.clone());
+                        let data = cfg.run(rs)?;
+                        Some((data, shape.color))
+                    })
+                    .collect::<Option<_>>()?;
                 let data = match mode {
                     ViewMode3::Heightmap => {
-                        let max = image
+                        let max = images
                             .iter()
+                            .flat_map(|(image, _color)| image.iter())
                             .map(|v| v.depth)
                             .max()
                             .unwrap_or(0)
                             .max(1);
-                        let (data, _size) =
-                            image.map(|v| ((v.depth * 255) / max) as u8).take();
-                        ViewData3::Heightmap(data)
+                        ViewData3::Heightmap(
+                            images
+                                .into_iter()
+                                .map(|(image, color)| {
+                                    let data = image
+                                        .map(|v| ((v.depth * 255) / max) as u8)
+                                        .take()
+                                        .0;
+                                    ImageData { data, color }
+                                })
+                                .collect(),
+                        )
                     }
-                    ViewMode3::Shaded => {
+                    ViewMode3::Shaded => ViewData3::Shaded(
                         // XXX this should all happen on the GPU, probably
-                        let threads = Some(&fidget::render::ThreadPool::Global);
-                        let image = fidget::render::effects::denoise_normals(
-                            &image, threads,
-                        );
-                        let color = fidget::render::effects::apply_shading(
-                            &image, true, threads,
-                        );
-                        let mut out: fidget::render::Image<[u8; 4], _> =
-                            fidget::render::Image::new(image_size);
-                        out.apply_effect(
-                            |x, y| {
-                                let p = image[(y, x)];
-                                if p.depth > 0 {
-                                    let c = color[(y, x)];
-                                    [c[0], c[1], c[2], 255]
-                                } else {
-                                    [0, 0, 0, 0]
-                                }
-                            },
-                            threads,
-                        );
-                        let (data, _size) = out.take();
-                        ViewData3::Shaded(data)
-                    }
+                        images
+                            .into_iter()
+                            .map(|(image, color)| {
+                                let threads =
+                                    Some(&fidget::render::ThreadPool::Global);
+                                let image =
+                                    fidget::render::effects::denoise_normals(
+                                        &image, threads,
+                                    );
+                                let shaded =
+                                    fidget::render::effects::apply_shading(
+                                        &image, true, threads,
+                                    );
+                                let mut out: fidget::render::Image<[u8; 4], _> =
+                                    fidget::render::Image::new(image_size);
+                                out.apply_effect(
+                                    |x, y| {
+                                        let p = image[(y, x)];
+                                        if p.depth > 0 {
+                                            let c = shaded[(y, x)];
+                                            [c[0], c[1], c[2], 255]
+                                        } else {
+                                            [0, 0, 0, 0]
+                                        }
+                                    },
+                                    threads,
+                                );
+                                let (data, _size) = out.take();
+                                ImageData { data, color }
+                            })
+                            .collect(),
+                    ),
                 };
                 ViewImage::View3 {
                     data,
@@ -219,13 +270,13 @@ impl RenderTask {
 #[derive(Clone)]
 pub enum RenderSettings {
     Render2 {
-        tree: fidget::context::Tree,
+        scene: Scene,
         mode: ViewMode2,
         view: fidget::render::View2,
         size: fidget::render::ImageSize,
     },
     Render3 {
-        tree: fidget::context::Tree,
+        scene: Scene,
         mode: ViewMode3,
         view: fidget::render::View3,
         size: fidget::render::VoxelSize,
@@ -233,13 +284,10 @@ pub enum RenderSettings {
 }
 
 impl RenderSettings {
-    pub fn from_canvas(
-        canvas: &ViewCanvas,
-        tree: fidget::context::Tree,
-    ) -> Self {
+    pub fn from_canvas(canvas: &ViewCanvas, scene: Scene) -> Self {
         match canvas {
             ViewCanvas::Canvas2 { canvas, mode } => RenderSettings::Render2 {
-                tree,
+                scene,
                 view: canvas.view(),
                 size: canvas.image_size(),
                 mode: *mode,
@@ -247,7 +295,7 @@ impl RenderSettings {
             ViewCanvas::Canvas3 { canvas, mode } => {
                 let size = canvas.image_size();
                 RenderSettings::Render3 {
-                    tree,
+                    scene,
                     view: canvas.view(),
                     size: fidget::render::VoxelSize::new(
                         size.width(),
@@ -269,13 +317,13 @@ impl std::cmp::PartialEq for RenderSettings {
         match (self, other) {
             (
                 Self::Render2 {
-                    tree: tree_a,
+                    scene: scene_a,
                     mode: mode_a,
                     view: view_a,
                     size: size_a,
                 },
                 Self::Render2 {
-                    tree: tree_b,
+                    scene: scene_b,
                     mode: mode_b,
                     view: view_b,
                     size: size_b,
@@ -284,17 +332,23 @@ impl std::cmp::PartialEq for RenderSettings {
                 mode_a == mode_b
                     && view_a == view_b
                     && size_a == size_b
-                    && ctx.import(tree_a) == ctx.import(tree_b)
+                    && scene_a.shapes.len() == scene_b.shapes.len()
+                    && scene_a.shapes.iter().zip(&scene_b.shapes).all(
+                        |(a, b)| {
+                            a.color == b.color
+                                && ctx.import(&a.tree) == ctx.import(&b.tree)
+                        },
+                    )
             }
             (
                 Self::Render3 {
-                    tree: tree_a,
+                    scene: scene_a,
                     mode: mode_a,
                     view: view_a,
                     size: size_a,
                 },
                 Self::Render3 {
-                    tree: tree_b,
+                    scene: scene_b,
                     mode: mode_b,
                     view: view_b,
                     size: size_b,
@@ -303,7 +357,13 @@ impl std::cmp::PartialEq for RenderSettings {
                 mode_a == mode_b
                     && view_a == view_b
                     && size_a == size_b
-                    && ctx.import(tree_a) == ctx.import(tree_b)
+                    && scene_a.shapes.len() == scene_b.shapes.len()
+                    && scene_a.shapes.iter().zip(&scene_b.shapes).all(
+                        |(a, b)| {
+                            a.color == b.color
+                                && ctx.import(&a.tree) == ctx.import(&b.tree)
+                        },
+                    )
             }
             _ => false,
         }

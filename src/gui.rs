@@ -175,7 +175,7 @@ impl<'a> WorldView<'a> {
 
             let Some(image) = entry.image(
                 index,
-                block_view.tree.clone(),
+                block_view.scene.clone(),
                 self.tx.clone(),
                 notify,
             ) else {

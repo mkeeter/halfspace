@@ -9,7 +9,9 @@ pub use crate::state::BlockIndex;
 use crate::state::{BlockState, WorldState};
 use heck::ToSnakeCase;
 
+mod scene;
 mod shapes;
+pub use scene::Scene;
 pub use shapes::ShapeLibrary;
 
 pub struct Block {
@@ -104,16 +106,14 @@ pub enum IoValue {
     Output { value: rhai::Dynamic, text: String },
 }
 
-#[derive(Clone)]
 pub struct BlockView {
-    pub tree: fidget::context::Tree,
+    pub scene: scene::Scene,
 }
 
 /// Transient block data (e.g. evaluation results)
 ///
 /// This data is _not_ saved or serialized; it can be recalculated on-demand
 /// from the world's state.
-#[derive(Clone)]
 pub struct BlockData {
     /// Output from `print` calls in the script
     pub stdout: String,
@@ -290,7 +290,7 @@ impl World {
         data.stdout = eval_data.stdout.join("\n");
         data.debug = eval_data.debug;
         data.io_values = eval_data.values;
-        data.view = eval_data.view.map(|tree| BlockView { tree });
+        data.view = eval_data.view.map(|scene| BlockView { scene });
 
         // Update inputs, which may have been modified
         block.inputs = eval_data.inputs;
@@ -355,7 +355,7 @@ impl World {
             // Automatically add a View if there's a single tree output
             if let Some(tree) = value.try_cast::<Tree>() {
                 if data.view.is_none() {
-                    data.view = Some(BlockView { tree: tree.clone() })
+                    data.view = Some(BlockView { scene: tree.into() })
                 }
             }
         } else {
@@ -376,7 +376,7 @@ impl World {
 struct BlockEvalData {
     names: HashSet<String>,
     values: Vec<(String, IoValue)>,
-    view: Option<fidget::context::Tree>,
+    view: Option<scene::Scene>,
 
     stdout: Vec<String>,
     debug: HashMap<usize, Vec<String>>,
@@ -477,7 +477,7 @@ impl BlockEvalData {
             )
             .into());
         }
-        self.view = Some(tree);
+        self.view = Some(tree.into());
         Ok(())
     }
 

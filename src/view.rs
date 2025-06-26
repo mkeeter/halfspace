@@ -3,6 +3,7 @@ use crate::{
     render::{RenderSettings, RenderTask},
     state,
     state::ViewState,
+    world::Scene,
     BlockIndex, Message, ViewResponse,
 };
 
@@ -158,16 +159,29 @@ impl From<ViewState> for ViewCanvas {
 
 #[derive(Clone)]
 pub enum ViewData2 {
-    Sdf(Vec<f32>),
-    Bitfield(Vec<f32>),
+    Sdf(Vec<ImageData<f32>>),
+    Bitfield(Vec<ImageData<f32>>),
 }
 
 impl ViewData2 {
-    pub fn as_bytes(&self) -> &[u8] {
-        use zerocopy::IntoBytes;
+    pub fn len(&self) -> usize {
         match self {
-            ViewData2::Sdf(data) => data.as_bytes(),
-            ViewData2::Bitfield(data) => data.as_bytes(),
+            ViewData2::Sdf(v) => v.len(),
+            ViewData2::Bitfield(v) => v.len(),
+        }
+    }
+
+    pub fn as_bytes(&self, i: usize) -> &[u8] {
+        match self {
+            ViewData2::Sdf(v) => v[i].as_bytes(),
+            ViewData2::Bitfield(v) => v[i].as_bytes(),
+        }
+    }
+
+    pub fn color(&self, i: usize) -> Option<[u8; 3]> {
+        match self {
+            ViewData2::Sdf(v) => v[i].color,
+            ViewData2::Bitfield(v) => v[i].color,
         }
     }
 }
@@ -175,17 +189,43 @@ impl ViewData2 {
 #[derive(Clone)]
 pub enum ViewData3 {
     /// Normalized heightmap values, with 0 indicating an empty position
-    Heightmap(Vec<u8>),
-    Shaded(Vec<[u8; 4]>),
+    Heightmap(Vec<ImageData<u8>>),
+    Shaded(Vec<ImageData<[u8; 4]>>),
 }
 
 impl ViewData3 {
-    pub fn as_bytes(&self) -> &[u8] {
-        use zerocopy::IntoBytes;
+    pub fn len(&self) -> usize {
         match self {
-            ViewData3::Heightmap(data) => data.as_bytes(),
-            ViewData3::Shaded(data) => data.as_bytes(),
+            ViewData3::Heightmap(v) => v.len(),
+            ViewData3::Shaded(v) => v.len(),
         }
+    }
+
+    pub fn as_bytes(&self, i: usize) -> &[u8] {
+        match self {
+            ViewData3::Heightmap(v) => v[i].as_bytes(),
+            ViewData3::Shaded(v) => v[i].as_bytes(),
+        }
+    }
+
+    pub fn color(&self, i: usize) -> Option<[u8; 3]> {
+        match self {
+            ViewData3::Heightmap(v) => v[i].color,
+            ViewData3::Shaded(v) => v[i].color,
+        }
+    }
+}
+
+#[derive(Clone)] // XXX can we avoid cloning?
+pub struct ImageData<T> {
+    pub data: Vec<T>,
+    pub color: Option<[u8; 3]>,
+}
+
+impl<T: zerocopy::IntoBytes + zerocopy::Immutable> ImageData<T> {
+    fn as_bytes(&self) -> &[u8] {
+        use zerocopy::IntoBytes;
+        self.data.as_bytes()
     }
 }
 
@@ -207,13 +247,6 @@ pub enum ViewImage {
 }
 
 impl ViewImage {
-    pub fn as_bytes(&self) -> &[u8] {
-        match self {
-            ViewImage::View2 { data, .. } => data.as_bytes(),
-            ViewImage::View3 { data, .. } => data.as_bytes(),
-        }
-    }
-
     pub fn level(&self) -> usize {
         match self {
             ViewImage::View2 { level, .. } | ViewImage::View3 { level, .. } => {
@@ -275,14 +308,14 @@ impl ViewData {
     pub fn image<F: FnOnce() + Send + Sync + 'static>(
         &mut self,
         block: BlockIndex,
-        tree: fidget::context::Tree,
+        scene: Scene,
         tx: std::sync::mpsc::Sender<Message>,
         notify: F,
     ) -> Option<&ViewImage> {
         // If the image settings have changed, then clear `task` (which causes
         // us to reinitialize it below).  Only clear the task if it's not a
         // max-level render (to preserve responsiveness)
-        let settings = RenderSettings::from_canvas(&self.canvas, tree);
+        let settings = RenderSettings::from_canvas(&self.canvas, scene);
         if let Some(prev) = &self.task {
             if prev.should_cancel(&settings, self.start_level) {
                 self.task = None;

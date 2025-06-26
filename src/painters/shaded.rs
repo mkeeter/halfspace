@@ -67,10 +67,13 @@ impl egui_wgpu::CallbackTrait for WgpuShadedPainter {
     ) -> Vec<wgpu::CommandBuffer> {
         let gr: &mut WgpuResources = resources.get_mut().unwrap();
 
-        let (width, height) = match &self.image {
-            ViewImage::View3 { size, level, .. } => (
+        let (width, height, data) = match &self.image {
+            ViewImage::View3 {
+                size, level, data, ..
+            } => (
                 (size.width() / (1 << level)).max(1),
                 (size.height() / (1 << level)).max(1),
+                data,
             ),
             _ => panic!("invalid painter"),
         };
@@ -80,27 +83,6 @@ impl egui_wgpu::CallbackTrait for WgpuShadedPainter {
             depth_or_array_layers: 1,
         };
 
-        let (texture, uniform_buffer) =
-            gr.shaded.get_data(device, self.index, texture_size);
-
-        // Upload RGBA image data
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            self.image.as_bytes(),
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(4 * width),
-                rows_per_image: Some(height),
-            },
-            texture_size,
-        );
-
-        // Create the uniform
         let transform = match &self.image {
             ViewImage::View3 { size, view, .. } => {
                 // don't blame me, I just twiddled the matrices until things
@@ -134,19 +116,48 @@ impl egui_wgpu::CallbackTrait for WgpuShadedPainter {
             }
             _ => unreachable!(),
         };
-        let uniforms = Uniforms {
-            transform: transform.into(),
-        };
-        let mut writer = queue
-            .write_buffer_with(
-                uniform_buffer,
-                0,
-                (std::mem::size_of_val(&uniforms) as u64)
-                    .try_into()
-                    .unwrap(),
-            )
-            .unwrap();
-        writer.copy_from_slice(uniforms.as_bytes());
+
+        for i in 0..data.len() {
+            let (texture, uniform_buffer) =
+                gr.shaded.get_data(device, self.index, texture_size);
+
+            // Upload RGBA image data
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                data.as_bytes(i),
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(4 * width),
+                    rows_per_image: Some(height),
+                },
+                texture_size,
+            );
+
+            // Create the uniform
+            let [r, g, b] = data
+                .color(i)
+                .unwrap_or([u8::MAX; 3])
+                .map(|i| i as f32 / 255.0);
+            let uniforms = Uniforms {
+                transform: transform.into(),
+                color: [r, g, b, 1.0],
+            };
+            let mut writer = queue
+                .write_buffer_with(
+                    uniform_buffer,
+                    0,
+                    (std::mem::size_of_val(&uniforms) as u64)
+                        .try_into()
+                        .unwrap(),
+                )
+                .unwrap();
+            writer.copy_from_slice(uniforms.as_bytes());
+        }
 
         Vec::new()
     }
@@ -169,7 +180,7 @@ pub(crate) struct ShadedResources {
     bind_group_layout: wgpu::BindGroupLayout,
 
     spare_data: HashMap<wgpu::Extent3d, Vec<ShadedData>>,
-    bound_data: HashMap<BlockIndex, ShadedData>,
+    bound_data: HashMap<BlockIndex, Vec<ShadedData>>,
 }
 
 impl ShadedResources {
@@ -295,8 +306,10 @@ impl ShadedResources {
         // Only keep around bitmaps which were bound for the last render
         self.spare_data.clear();
         for (_k, b) in std::mem::take(&mut self.bound_data) {
-            self.spare_data.entry(b.texture.size()).or_default().push(b);
-            self.spare_data.retain(|_k, v| !v.is_empty());
+            for b in b {
+                self.spare_data.entry(b.texture.size()).or_default().push(b);
+                self.spare_data.retain(|_k, v| !v.is_empty());
+            }
         }
     }
 
@@ -380,16 +393,17 @@ impl ShadedResources {
                     uniform_buffer,
                 }
             });
-        let prev = self.bound_data.insert(index, r);
-        assert!(prev.is_none());
-        let r = &self.bound_data[&index];
+        self.bound_data.entry(index).or_default().push(r);
+        let r = &self.bound_data[&index].last().unwrap();
         (&r.texture, &r.uniform_buffer)
     }
 
     pub fn paint(&self, render_pass: &mut wgpu::RenderPass, index: BlockIndex) {
         render_pass.set_pipeline(&self.pipeline);
-        render_pass.set_bind_group(0, &self.bound_data[&index].bind_group, &[]);
-        render_pass.draw(0..6, 0..1);
+        for b in &self.bound_data[&index] {
+            render_pass.set_bind_group(0, &b.bind_group, &[]);
+            render_pass.draw(0..6, 0..1);
+        }
     }
 }
 
