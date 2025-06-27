@@ -1,4 +1,4 @@
-use super::{Uniforms, WgpuResources};
+use super::WgpuResources;
 
 /// Painter drawing SDFs
 use crate::{view::SdfViewImage, world::BlockIndex};
@@ -8,6 +8,14 @@ use eframe::{
 };
 use std::collections::HashMap;
 use zerocopy::IntoBytes;
+
+/// Equivalent to the `struct Uniforms` in the WebGPU shader
+#[repr(C)]
+#[derive(Copy, Clone, zerocopy::IntoBytes, zerocopy::Immutable)]
+struct Uniforms {
+    transform: [[f32; 4]; 4],
+    color: [f32; 4],
+}
 
 /// GPU callback
 pub struct WgpuSdfPainter {

@@ -1,4 +1,4 @@
-use super::{Uniforms, WgpuResources};
+use super::WgpuResources;
 use crate::{view::HeightmapViewImage, world::BlockIndex};
 use eframe::{
     egui,
@@ -6,6 +6,14 @@ use eframe::{
 };
 use std::collections::HashMap;
 use zerocopy::IntoBytes;
+
+/// Equivalent to the `struct Uniforms` in the WebGPU shader
+#[repr(C)]
+#[derive(Copy, Clone, zerocopy::IntoBytes, zerocopy::Immutable)]
+struct Uniforms {
+    transform: [[f32; 4]; 4],
+    color: [f32; 4],
+}
 
 /// GPU callback for painting heightmaps
 ///

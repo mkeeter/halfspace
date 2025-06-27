@@ -171,12 +171,15 @@ impl<T: zerocopy::IntoBytes + zerocopy::Immutable> ImageData<T> {
 }
 
 impl<T> ImageData<T> {
-    /// Returns the color as an RGBA float array, or `[1, 1, 1, 1]` if empty
     pub fn rgba(&self) -> [f32; 4] {
-        let [r, g, b] =
-            self.color.unwrap_or([u8::MAX; 3]).map(|i| i as f32 / 255.0);
-        [r, g, b, 1.0]
+        rgba(self.color)
     }
+}
+
+/// Returns the color as an RGBA float array, or `[1, 1, 1, 1]` if empty
+fn rgba(color: Option<[u8; 3]>) -> [f32; 4] {
+    let [r, g, b] = color.unwrap_or([u8::MAX; 3]).map(|i| i as f32 / 255.0);
+    [r, g, b, 1.0]
 }
 
 #[derive(Clone)]
@@ -288,8 +291,21 @@ pub struct HeightmapViewImage {
 }
 
 #[derive(Clone)]
+pub struct SsaoImageData {
+    pub pixels: Vec<fidget::render::GeometryPixel>,
+    pub ssao: Vec<f32>,
+    pub color: Option<[u8; 3]>,
+}
+
+impl SsaoImageData {
+    pub fn rgba(&self) -> [f32; 4] {
+        rgba(self.color)
+    }
+}
+
+#[derive(Clone)]
 pub struct ShadedViewImage {
-    pub data: Vec<ImageData<[u8; 4]>>,
+    pub data: Vec<SsaoImageData>,
     pub view: fidget::render::View3,
     pub size: fidget::render::VoxelSize,
     pub level: usize,

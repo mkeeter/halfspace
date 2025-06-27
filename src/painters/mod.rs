@@ -46,14 +46,6 @@ pub struct WgpuResources {
     sdf: sdf::SdfResources,
 }
 
-/// Equivalent to the `struct Uniforms` in the WebGPU shader
-#[repr(C)]
-#[derive(Copy, Clone, zerocopy::IntoBytes, zerocopy::Immutable)]
-pub struct Uniforms {
-    pub transform: [[f32; 4]; 4],
-    pub color: [f32; 4],
-}
-
 impl WgpuResources {
     pub fn reset(&mut self) {
         self.bitfield.reset();

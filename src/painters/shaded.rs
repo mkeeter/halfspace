@@ -1,4 +1,4 @@
-use super::{Uniforms, WgpuResources};
+use super::WgpuResources;
 use crate::{view::ShadedViewImage, world::BlockIndex};
 use eframe::{
     egui,
@@ -21,6 +21,16 @@ pub struct WgpuShadedPainter {
 
     /// Image to render
     image: ShadedViewImage,
+}
+
+/// Equivalent to the `struct Uniforms` in the WebGPU shader
+#[repr(C)]
+#[derive(Copy, Clone, zerocopy::IntoBytes, zerocopy::Immutable)]
+struct Uniforms {
+    transform: [[f32; 4]; 4],
+    color: [f32; 4],
+    max_depth: u32,
+    _padding: [u32; 3],
 }
 
 impl WgpuShadedPainter {
@@ -98,18 +108,18 @@ impl egui_wgpu::CallbackTrait for WgpuShadedPainter {
         };
 
         for image in self.image.data.iter() {
-            let (texture, uniform_buffer) =
+            let (ssao_texture, pixel_texture, uniform_buffer) =
                 gr.shaded.get_data(device, self.index, texture_size);
 
-            // Upload RGBA image data
+            // Upload SSAO texture data
             queue.write_texture(
                 wgpu::TexelCopyTextureInfo {
-                    texture,
+                    texture: ssao_texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d::ZERO,
                     aspect: wgpu::TextureAspect::All,
                 },
-                image.as_bytes(),
+                image.ssao.as_bytes(),
                 wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(4 * width),
@@ -117,11 +127,38 @@ impl egui_wgpu::CallbackTrait for WgpuShadedPainter {
                 },
                 texture_size,
             );
+            // Upload geometry pixel texture data
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: pixel_texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                image.pixels.as_bytes(),
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(16 * width),
+                    rows_per_image: Some(height),
+                },
+                texture_size,
+            );
+
+            // TODO compute this off-thread?
+            let max_depth = image
+                .pixels
+                .iter()
+                .map(|p| p.depth)
+                .max()
+                .unwrap_or(0)
+                .max(1);
 
             // Create the uniform
             let uniforms = Uniforms {
                 transform: transform.into(),
                 color: image.rgba(),
+                max_depth,
+                _padding: [0; 3],
             };
             let mut writer = queue
                 .write_buffer_with(
@@ -172,7 +209,7 @@ impl ShadedResources {
                 source: wgpu::ShaderSource::Wgsl(
                     include_str!(concat!(
                         env!("CARGO_MANIFEST_DIR"),
-                        "/shaders/image.wgsl"
+                        "/shaders/shaded.wgsl"
                     ))
                     .into(),
                 ),
@@ -205,9 +242,30 @@ impl ShadedResources {
                         ),
                         count: None,
                     },
-                    // Transform matrix
                     wgpu::BindGroupLayoutEntry {
                         binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float {
+                                filterable: true,
+                            },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    // Sampler
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(
+                            wgpu::SamplerBindingType::Filtering,
+                        ),
+                        count: None,
+                    },
+                    // Uniforms
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
                         visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Uniform,
@@ -283,7 +341,10 @@ impl ShadedResources {
         self.spare_data.clear();
         for (_k, b) in std::mem::take(&mut self.bound_data) {
             for b in b {
-                self.spare_data.entry(b.texture.size()).or_default().push(b);
+                self.spare_data
+                    .entry(b.pixel_texture.size())
+                    .or_default()
+                    .push(b);
                 self.spare_data.retain(|_k, v| !v.is_empty());
             }
         }
@@ -294,39 +355,68 @@ impl ShadedResources {
         device: &wgpu::Device,
         index: BlockIndex,
         size: wgpu::Extent3d,
-    ) -> (&wgpu::Texture, &wgpu::Buffer) {
+    ) -> (&wgpu::Texture, &wgpu::Texture, &wgpu::Buffer) {
         let r = self
             .spare_data
             .get_mut(&size)
             .and_then(|v| v.pop())
             .unwrap_or_else(|| {
                 // Create the texture
-                let texture = device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("shaded texture"),
-                    size,
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Rgba8Unorm,
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING
-                        | wgpu::TextureUsages::COPY_DST,
-                    view_formats: &[],
-                });
+                let ssao_texture =
+                    device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some("shaded ssao texture"),
+                        size,
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: wgpu::TextureFormat::R32Float,
+                        usage: wgpu::TextureUsages::TEXTURE_BINDING
+                            | wgpu::TextureUsages::COPY_DST,
+                        view_formats: &[],
+                    });
                 // Create the texture view
-                let texture_view = texture
+                let ssao_texture_view = ssao_texture
                     .create_view(&wgpu::TextureViewDescriptor::default());
 
                 // Create samplers
-                let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-                    label: Some("shaded sampler"),
-                    address_mode_u: wgpu::AddressMode::ClampToEdge,
-                    address_mode_v: wgpu::AddressMode::ClampToEdge,
-                    address_mode_w: wgpu::AddressMode::ClampToEdge,
-                    mag_filter: wgpu::FilterMode::Linear,
-                    min_filter: wgpu::FilterMode::Linear,
-                    mipmap_filter: wgpu::FilterMode::Linear,
-                    ..Default::default()
-                });
+                let ssao_sampler =
+                    device.create_sampler(&wgpu::SamplerDescriptor {
+                        label: Some("shaded ssao sampler"),
+                        address_mode_u: wgpu::AddressMode::ClampToEdge,
+                        address_mode_v: wgpu::AddressMode::ClampToEdge,
+                        address_mode_w: wgpu::AddressMode::ClampToEdge,
+                        mag_filter: wgpu::FilterMode::Linear,
+                        min_filter: wgpu::FilterMode::Linear,
+                        mipmap_filter: wgpu::FilterMode::Linear,
+                        ..Default::default()
+                    });
+
+                // Create the texture
+                let pixel_texture =
+                    device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some("shaded pixel texture"),
+                        size,
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: wgpu::TextureFormat::Rgba32Float,
+                        usage: wgpu::TextureUsages::TEXTURE_BINDING
+                            | wgpu::TextureUsages::COPY_DST,
+                        view_formats: &[],
+                    });
+                let pixel_texture_view = pixel_texture
+                    .create_view(&wgpu::TextureViewDescriptor::default());
+                let pixel_sampler =
+                    device.create_sampler(&wgpu::SamplerDescriptor {
+                        label: Some("shaded pixel sampler"),
+                        address_mode_u: wgpu::AddressMode::ClampToEdge,
+                        address_mode_v: wgpu::AddressMode::ClampToEdge,
+                        address_mode_w: wgpu::AddressMode::ClampToEdge,
+                        mag_filter: wgpu::FilterMode::Nearest,
+                        min_filter: wgpu::FilterMode::Nearest,
+                        mipmap_filter: wgpu::FilterMode::Nearest,
+                        ..Default::default()
+                    });
 
                 // Create the buffer
                 let uniform_buffer =
@@ -346,32 +436,46 @@ impl ShadedResources {
                             wgpu::BindGroupEntry {
                                 binding: 0,
                                 resource: wgpu::BindingResource::TextureView(
-                                    &texture_view,
+                                    &ssao_texture_view,
                                 ),
                             },
                             wgpu::BindGroupEntry {
                                 binding: 1,
                                 resource: wgpu::BindingResource::Sampler(
-                                    &sampler,
+                                    &ssao_sampler,
                                 ),
                             },
                             wgpu::BindGroupEntry {
                                 binding: 2,
+                                resource: wgpu::BindingResource::TextureView(
+                                    &pixel_texture_view,
+                                ),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: wgpu::BindingResource::Sampler(
+                                    &pixel_sampler,
+                                ),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 4,
                                 resource: uniform_buffer.as_entire_binding(),
                             },
                         ],
                     });
 
                 ShadedData {
-                    sampler,
-                    texture,
+                    ssao_sampler,
+                    ssao_texture,
+                    pixel_sampler,
+                    pixel_texture,
                     bind_group,
                     uniform_buffer,
                 }
             });
         self.bound_data.entry(index).or_default().push(r);
         let r = &self.bound_data[&index].last().unwrap();
-        (&r.texture, &r.uniform_buffer)
+        (&r.ssao_texture, &r.pixel_texture, &r.uniform_buffer)
     }
 
     pub fn paint(&self, render_pass: &mut wgpu::RenderPass, index: BlockIndex) {
@@ -386,10 +490,16 @@ impl ShadedResources {
 /// Resources used to render a single shaded image
 pub(crate) struct ShadedData {
     #[expect(unused)] // kept alive for lifetime purposes
-    sampler: wgpu::Sampler,
+    ssao_sampler: wgpu::Sampler,
 
-    /// Texture to render
-    texture: wgpu::Texture,
+    /// SSAO texture for shading
+    ssao_texture: wgpu::Texture,
+
+    #[expect(unused)] // kept alive for lifetime purposes
+    pixel_sampler: wgpu::Sampler,
+
+    /// GeometryPixel texture to render
+    pixel_texture: wgpu::Texture,
 
     /// Uniform buffer
     uniform_buffer: wgpu::Buffer,

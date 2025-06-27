@@ -2,8 +2,8 @@
 use crate::{
     view::{
         BitfieldViewImage, DebugViewImage, HeightmapViewImage, ImageData,
-        SdfViewImage, ShadedViewImage, ViewCanvas, ViewImage, ViewMode2,
-        ViewMode3,
+        SdfViewImage, ShadedViewImage, SsaoImageData, ViewCanvas, ViewImage,
+        ViewMode2, ViewMode3,
     },
     world::Scene,
     BlockIndex, Message, MessageQueue,
@@ -254,27 +254,17 @@ impl RenderTask {
                                     let image = effects::denoise_normals(
                                         &image, threads,
                                     );
-                                    let shaded = effects::apply_shading(
-                                        &image, true, threads,
-                                    );
-                                    let mut out: fidget::render::Image<
-                                        [u8; 4],
-                                        _,
-                                    > = fidget::render::Image::new(image_size);
-                                    out.apply_effect(
-                                        |x, y| {
-                                            let p = image[(y, x)];
-                                            if p.depth > 0 {
-                                                let c = shaded[(y, x)];
-                                                [c[0], c[1], c[2], 255]
-                                            } else {
-                                                [0, 0, 0, 0]
-                                            }
-                                        },
+                                    let ssao = effects::blur_ssao(
+                                        &effects::compute_ssao(&image, threads),
                                         threads,
                                     );
-                                    let (data, _size) = out.take();
-                                    ImageData { data, color }
+                                    let (pixels, _size) = image.take();
+                                    let (ssao, _size) = ssao.take();
+                                    SsaoImageData {
+                                        pixels,
+                                        ssao,
+                                        color,
+                                    }
                                 })
                                 .collect(),
                         };
