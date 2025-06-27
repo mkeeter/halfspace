@@ -5,7 +5,7 @@ pub use crate::state::{Tab, TabMode};
 use crate::{
     view::{self, ViewCanvas, ViewData, ViewImage, ViewMode2, ViewMode3},
     world::{Block, BlockError, BlockIndex, IoValue, NameError, World},
-    BlockResponse, Message, ViewResponse,
+    BlockResponse, MessageQueue, ViewResponse,
 };
 use fidget::shapes::types::{Vec2, Vec3};
 
@@ -14,7 +14,7 @@ pub struct WorldView<'a> {
     pub syntax: &'a egui_extras::syntax_highlighting::SyntectSettings,
     pub views: &'a mut HashMap<BlockIndex, ViewData>,
     pub out: &'a mut Vec<(BlockIndex, ViewResponse)>,
-    pub tx: &'a std::sync::mpsc::Sender<Message>,
+    pub tx: &'a MessageQueue,
 }
 
 impl Tab {
@@ -162,20 +162,14 @@ impl<'a> WorldView<'a> {
             }
         };
 
-        let ctx = ui.ctx().clone();
         // If we have a block view, then use it (or fall back to the previous
         // image, drawing it in a valid state).  Otherwise, fall back to the
         // previous image, drawing it in an *invalid* state (with a red border).
         let current_canvas = entry.canvas;
         let (image, valid) = if let Some(block_view) = block_view {
-            let notify = move || ctx.request_repaint();
-
-            let Some(image) = entry.image(
-                index,
-                block_view.scene.clone(),
-                self.tx.clone(),
-                notify,
-            ) else {
+            let Some(image) =
+                entry.image(index, block_view.scene.clone(), self.tx)
+            else {
                 return out
                     | view::fallback_ui(
                         ui,

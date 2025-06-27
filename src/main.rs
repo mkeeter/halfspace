@@ -219,7 +219,7 @@ pub fn main() -> Result<(), eframe::Error> {
                         info!("restoring state from file");
                         app.file = Some(filename);
                         app.load_from_state(state);
-                        app.start_world_rebuild(&cc.egui_ctx);
+                        app.start_world_rebuild();
                     }
                     Err(state::ReadError::IoError(e))
                         if e.kind() == std::io::ErrorKind::NotFound =>
@@ -249,6 +249,20 @@ enum Message {
     },
 }
 
+#[derive(Clone)]
+struct MessageQueue {
+    queue: std::sync::mpsc::Sender<Message>,
+    ctx: egui::Context,
+}
+
+impl MessageQueue {
+    fn send(&self, m: Message) {
+        if let Ok(_) = self.queue.send(m) {
+            self.ctx.request_repaint();
+        }
+    }
+}
+
 struct App {
     data: World,
     generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
@@ -262,7 +276,7 @@ struct App {
     views: HashMap<BlockIndex, view::ViewData>,
 
     rx: std::sync::mpsc::Receiver<Message>,
-    tx: std::sync::mpsc::Sender<Message>,
+    tx: MessageQueue,
 }
 
 impl App {
@@ -332,7 +346,10 @@ impl App {
             syntax,
             views: HashMap::new(),
             generation: std::sync::Arc::new(0.into()),
-            tx,
+            tx: MessageQueue {
+                queue: tx,
+                ctx: cc.egui_ctx.clone(),
+            },
             rx,
         }
     }
@@ -383,20 +400,19 @@ impl App {
             .store(0, std::sync::atomic::Ordering::Relaxed);
         self.undo = state::Undo::new(&self.data);
         let (tx, rx) = std::sync::mpsc::channel();
-        self.tx = tx; // use a new channel to orphan previous tasks
+        self.tx.queue = tx; // use a new channel to orphan previous tasks
         self.rx = rx;
     }
 
-    fn start_world_rebuild(&self, ctx: &egui::Context) {
+    fn start_world_rebuild(&self) {
         // Send the world to a worker thread for re-evaluation
         let world = WorldState::from(&self.data);
-        let ctx = ctx.clone();
-        let tx = self.tx.clone();
         let generation = self
             .generation
             .fetch_add(1u64, std::sync::atomic::Ordering::Release)
             + 1;
         let gen_handle = self.generation.clone();
+        let tx = self.tx.clone();
         rayon::spawn(move || {
             // The world may have moved on before this script
             // evaluation started; if so, then skip it entirely.
@@ -407,12 +423,8 @@ impl App {
                 // Re-check generation before sending
                 let current_gen =
                     gen_handle.load(std::sync::atomic::Ordering::Acquire);
-                if current_gen == generation
-                    && tx
-                        .send(Message::RebuildWorld { generation, world })
-                        .is_ok()
-                {
-                    ctx.request_repaint();
+                if current_gen == generation {
+                    tx.send(Message::RebuildWorld { generation, world })
                 }
             }
         })
@@ -673,7 +685,7 @@ impl eframe::App for App {
                     }
                 }
                 AppResponse::WORLD_CHANGED => {
-                    self.start_world_rebuild(ctx);
+                    self.start_world_rebuild();
                 }
                 AppResponse::QUIT => {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -905,7 +917,7 @@ impl App {
         self.tree
             .retain_tabs(|t| self.data.blocks.contains_key(&t.index));
         self.views.retain(|i, _| self.data.blocks.contains_key(i));
-        self.start_world_rebuild(ctx);
+        self.start_world_rebuild();
         ctx.request_repaint();
     }
 

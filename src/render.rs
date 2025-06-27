@@ -6,7 +6,7 @@ use crate::{
         ViewMode3,
     },
     world::Scene,
-    BlockIndex, Message,
+    BlockIndex, Message, MessageQueue,
 };
 
 use fidget::render::effects;
@@ -55,13 +55,12 @@ impl RenderTask {
     }
 
     /// Begins a new image rendering task in the global thread pool
-    pub fn spawn<F: FnOnce() + Send + Sync + 'static>(
+    pub fn spawn(
         block: BlockIndex,
         generation: u64,
         settings: RenderSettings,
         level: usize,
-        tx: std::sync::mpsc::Sender<Message>,
-        notify: F,
+        tx: MessageQueue,
     ) -> Self {
         let cancel = fidget::render::CancelToken::new();
         let cancel_ = cancel.clone();
@@ -69,17 +68,12 @@ impl RenderTask {
         let start_time = std::time::Instant::now();
         rayon::spawn(move || {
             if let Some(data) = Self::run(&settings_, level, cancel_) {
-                if tx
-                    .send(Message::RenderView {
-                        block,
-                        generation,
-                        start_time,
-                        data,
-                    })
-                    .is_ok()
-                {
-                    notify();
-                }
+                tx.send(Message::RenderView {
+                    block,
+                    generation,
+                    start_time,
+                    data,
+                })
             }
         });
         Self {

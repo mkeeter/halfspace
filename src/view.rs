@@ -4,7 +4,7 @@ use crate::{
     state,
     state::ViewState,
     world::Scene,
-    BlockIndex, Message, ViewResponse,
+    BlockIndex, MessageQueue, ViewResponse,
 };
 
 pub use state::{ViewMode2, ViewMode3};
@@ -196,6 +196,16 @@ pub struct BitfieldViewImage {
 }
 
 impl BitfieldViewImage {
+    /// Convert a distance image into a bitfield image, with denoising
+    ///
+    /// Filled pixels are normally converted to ±∞, but this can cause glitches
+    /// if they're on the edge of the model: linear interpolation in the texture
+    /// unit means that any pixel touching the infinite pixel will also be
+    /// infinite.
+    ///
+    /// Denoising converts those infinite pixels into the average of their
+    /// neighbors, to reduce visual glitches when rendering lower-than-native
+    /// resolution images.
     pub fn denoise(
         image: fidget::render::Image<fidget::render::DistancePixel>,
         threads: Option<&fidget::render::ThreadPool>,
@@ -356,12 +366,11 @@ impl ViewData {
     ///
     /// This should be called in the main GUI loop, or whenever `notify` has
     /// pinged the main loop.
-    pub fn image<F: FnOnce() + Send + Sync + 'static>(
+    pub fn image(
         &mut self,
         block: BlockIndex,
         scene: Scene,
-        tx: std::sync::mpsc::Sender<Message>,
-        notify: F,
+        tx: &MessageQueue,
     ) -> Option<&ViewImage> {
         // If the image settings have changed, then clear `task` (which causes
         // us to reinitialize it below).  Only clear the task if it's not a
@@ -380,8 +389,7 @@ impl ViewData {
                 self.generation,
                 settings,
                 self.start_level,
-                tx,
-                notify,
+                tx.clone(),
             ));
         } else if let Some(next) = self.pending.take() {
             self.generation += 1;
@@ -390,8 +398,7 @@ impl ViewData {
                 self.generation,
                 settings,
                 next,
-                tx,
-                notify,
+                tx.clone(),
             ));
         }
 
