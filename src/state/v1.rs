@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub const MAJOR_VERSION: usize = 1;
-pub const MINOR_VERSION: usize = 1;
+pub const MINOR_VERSION: usize = 2;
 
 /// Serialization-friendly subset of world state
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -49,6 +49,7 @@ pub enum ViewState {
 pub enum ViewMode2 {
     Sdf,
     Bitfield,
+    Debug,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]

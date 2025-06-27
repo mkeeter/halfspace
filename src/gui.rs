@@ -223,6 +223,23 @@ impl<'a> WorldView<'a> {
                 ));
             }
             (
+                ViewImage::Debug(image),
+                ViewCanvas::Canvas2 {
+                    mode: ViewMode2::Debug,
+                    canvas,
+                },
+            ) => {
+                ui.painter().add(egui_wgpu::Callback::new_paint_callback(
+                    rect,
+                    crate::painters::WgpuDebugPainter::new(
+                        index,
+                        image.clone(),
+                        size,
+                        canvas.view(),
+                    ),
+                ));
+            }
+            (
                 ViewImage::Sdf(image),
                 ViewCanvas::Canvas2 {
                     mode: ViewMode2::Sdf,

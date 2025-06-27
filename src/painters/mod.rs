@@ -22,11 +22,13 @@ use eframe::egui_wgpu::wgpu;
 
 mod bitfield;
 mod clear;
+mod debug;
 mod heightmap;
 mod sdf;
 mod shaded;
 
 pub use bitfield::WgpuBitfieldPainter;
+pub use debug::WgpuDebugPainter;
 pub use heightmap::WgpuHeightmapPainter;
 pub use sdf::WgpuSdfPainter;
 pub use shaded::WgpuShadedPainter;
@@ -39,6 +41,7 @@ pub struct WgpuResources {
     bitfield: bitfield::BitfieldResources,
     heightmap: heightmap::HeightmapResources,
     shaded: shaded::ShadedResources,
+    debug: debug::DebugResources,
     clear: clear::ClearResources,
     sdf: sdf::SdfResources,
 }
@@ -57,6 +60,7 @@ impl WgpuResources {
         self.heightmap.reset();
         self.shaded.reset();
         self.sdf.reset();
+        self.debug.reset();
     }
 
     /// Installs an instance of `WgpuResources` into the callback resources
@@ -76,6 +80,7 @@ impl WgpuResources {
         let shaded = shaded::ShadedResources::new(device, target_format);
         let bitfield = bitfield::BitfieldResources::new(device, target_format);
         let sdf = sdf::SdfResources::new(device, target_format);
+        let debug = debug::DebugResources::new(device, target_format);
 
         WgpuResources {
             clear,
@@ -83,6 +88,7 @@ impl WgpuResources {
             shaded,
             bitfield,
             sdf,
+            debug,
         }
     }
 }

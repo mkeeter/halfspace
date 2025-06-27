@@ -1,12 +1,15 @@
 //! Image rendering
 use crate::{
     view::{
-        BitfieldViewImage, HeightmapViewImage, ImageData, SdfViewImage,
-        ShadedViewImage, ViewCanvas, ViewImage, ViewMode2, ViewMode3,
+        BitfieldViewImage, DebugViewImage, HeightmapViewImage, ImageData,
+        SdfViewImage, ShadedViewImage, ViewCanvas, ViewImage, ViewMode2,
+        ViewMode3,
     },
     world::Scene,
     BlockIndex, Message,
 };
+
+use fidget::render::effects;
 
 #[cfg(feature = "jit")]
 type RenderShape = fidget::jit::JitShape;
@@ -94,6 +97,7 @@ impl RenderTask {
         cancel: fidget::render::CancelToken,
     ) -> Option<ViewImage> {
         let scale = 1 << level;
+        let threads = Some(&fidget::render::ThreadPool::Global);
         let data = match settings {
             RenderSettings::Render2 {
                 scene,
@@ -177,6 +181,26 @@ impl RenderTask {
                         };
                         ViewImage::Sdf(image)
                     }
+                    ViewMode2::Debug => {
+                        let image = DebugViewImage {
+                            view: *view,
+                            size: *size,
+                            level,
+                            data: images
+                                .into_iter()
+                                .map(|(image, color)| {
+                                    let image = effects::to_debug_bitmap(
+                                        image, threads,
+                                    );
+                                    ImageData {
+                                        data: image.take().0,
+                                        color,
+                                    }
+                                })
+                                .collect(),
+                        };
+                        ViewImage::Debug(image)
+                    }
                 }
             }
             RenderSettings::Render3 {
@@ -241,17 +265,12 @@ impl RenderTask {
                                 .map(|(image, color)| {
                                     // XXX this should all happen on the GPU,
                                     // probably!
-                                    let threads = Some(
-                                        &fidget::render::ThreadPool::Global,
-                                    );
-                                    let image =
-                                    fidget::render::effects::denoise_normals(
+                                    let image = effects::denoise_normals(
                                         &image, threads,
                                     );
-                                    let shaded =
-                                        fidget::render::effects::apply_shading(
-                                            &image, true, threads,
-                                        );
+                                    let shaded = effects::apply_shading(
+                                        &image, true, threads,
+                                    );
                                     let mut out: fidget::render::Image<
                                         [u8; 4],
                                         _,
