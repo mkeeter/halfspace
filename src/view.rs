@@ -195,6 +195,72 @@ pub struct BitfieldViewImage {
     pub level: usize,
 }
 
+impl BitfieldViewImage {
+    pub fn denoise(
+        image: fidget::render::Image<fidget::render::DistancePixel>,
+        threads: Option<&fidget::render::ThreadPool>,
+    ) -> fidget::render::Image<f32> {
+        let mut out = fidget::render::Image::new(image.size());
+        out.apply_effect(
+            |x, y| match image[(y, x)].distance() {
+                Ok(v) => v,
+                Err(f) => {
+                    // Replace fill pixels with the average of their
+                    // actual-distance neighbors, falling back to infinity if
+                    // that fails.  This prevents glitchiness on the edges of
+                    // models.  If a fill pixel is exactly at the edge of a
+                    // model, linear interpolation in the texture means that
+                    // every pixel interpolated with the infinite pixel is also
+                    // infinite.
+                    let mut inside_count = 0;
+                    let mut inside_avg = 0.0;
+                    let mut outside_count = 0;
+                    let mut outside_avg = 0.0;
+                    for dx in [-1, 0, 1] {
+                        let Some(x) = x.checked_add_signed(dx) else {
+                            continue;
+                        };
+                        if x >= image.width() {
+                            continue;
+                        }
+                        for dy in [-1, 0, 1] {
+                            let Some(y) = y.checked_add_signed(dy) else {
+                                continue;
+                            };
+                            if y >= image.height() {
+                                continue;
+                            }
+                            if let Ok(d) = image[(y, x)].distance() {
+                                if d < 0.0 {
+                                    inside_avg += d;
+                                    inside_count += 1;
+                                } else if d > 0.0 {
+                                    outside_avg += d;
+                                    outside_count += 1;
+                                }
+                            }
+                        }
+                    }
+                    if f.inside && inside_count > 0 {
+                        inside_avg / inside_count as f32
+                    } else if !f.inside && outside_count > 0 {
+                        outside_avg / outside_count as f32
+                    } else if inside_count + outside_count > 0 {
+                        (inside_avg + outside_avg)
+                            / (inside_count + outside_count) as f32
+                    } else if f.inside {
+                        -f32::INFINITY
+                    } else {
+                        f32::INFINITY
+                    }
+                }
+            },
+            threads,
+        );
+        out
+    }
+}
+
 #[derive(Clone)]
 pub struct DebugViewImage {
     pub data: Vec<ImageData<[u8; 4]>>,

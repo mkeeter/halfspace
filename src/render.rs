@@ -135,17 +135,9 @@ impl RenderTask {
                             data: images
                                 .into_iter()
                                 .map(|(image, color)| {
-                                    let image =
-                                        image.map(|d| match d.distance() {
-                                            Ok(d) => d,
-                                            Err(e) => {
-                                                if e.inside {
-                                                    -f32::INFINITY
-                                                } else {
-                                                    f32::INFINITY
-                                                }
-                                            }
-                                        });
+                                    let image = BitfieldViewImage::denoise(
+                                        image, threads,
+                                    );
                                     ImageData {
                                         data: image.take().0,
                                         color,
