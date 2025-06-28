@@ -26,7 +26,7 @@ pub struct WgpuSdfPainter {
     /// Index of the block being rendered
     index: BlockIndex,
 
-    /// Image to render, which must be of type `ImageData::Distance`
+    /// Image(s) to draw to the screen
     image: SdfViewImage,
 }
 
@@ -35,9 +35,6 @@ impl WgpuSdfPainter {
     ///
     /// Note that `size` and `view` are associated with the current rendering
     /// quad; the `image` contains its own size and view transforms.
-    ///
-    /// # Panics
-    /// If image data is not an SDF
     pub fn new(
         index: BlockIndex,
         image: SdfViewImage,

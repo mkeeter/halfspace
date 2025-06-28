@@ -25,7 +25,7 @@ pub struct WgpuBitfieldPainter {
     /// Index of the block being rendered
     index: BlockIndex,
 
-    /// Image data to render (which may contain multiple images with colors)
+    /// Image(s) to draw to the screen
     image: BitfieldViewImage,
 }
 
@@ -34,9 +34,6 @@ impl WgpuBitfieldPainter {
     ///
     /// Note that `size` and `view` are associated with the current rendering
     /// quad; the `image` contains its own size and view transforms.
-    ///
-    /// # Panics
-    /// If image data is not a bitfield
     pub fn new(
         index: BlockIndex,
         image: BitfieldViewImage,

@@ -16,7 +16,7 @@ pub struct WgpuShadedPainter {
     /// Index of the block being rendered
     index: BlockIndex,
 
-    /// Image to render
+    /// Image(s) to draw to the screen
     image: ShadedViewImage,
 }
 
@@ -35,9 +35,6 @@ impl WgpuShadedPainter {
     ///
     /// Note that `size` and `view` are associated with the current rendering
     /// quad; the `image` contains its own size and view transforms.
-    ///
-    /// # Panics
-    /// If image data is not shaded
     pub fn new(
         index: BlockIndex,
         image: ShadedViewImage,
