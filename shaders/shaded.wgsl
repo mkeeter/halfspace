@@ -55,10 +55,14 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     return output;
 }
 
+struct RgbaDepth {
+  @location(0) color: vec4<f32>,
+  @builtin(frag_depth) depth: f32
+}
 
 // Fragment shader
 @fragment
-fn fs_main(@location(0) tex_coords: vec2<f32>) -> @location(0) vec4<f32> {
+fn fs_main(@location(0) tex_coords: vec2<f32>) -> RgbaDepth {
     var ssao = textureSample(t_ssao, s_ssao, tex_coords);
     var pixel = textureSample(t_pixel, s_pixel, tex_coords);
     var depth = bitcast<u32>(pixel.r);
@@ -88,5 +92,6 @@ fn fs_main(@location(0) tex_coords: vec2<f32>) -> @location(0) vec4<f32> {
         accum = accum + max(dot(light_dir, n), 0.0) * light.intensity;
     }
     accum = clamp(accum * (ssao.r * 0.6 + 0.4), 0.0, 1.0);
-    return vec4<f32>(accum * uniforms.color.rgb, 1.0);
+    let color = vec4<f32>(accum * uniforms.color.rgb, 1.0);
+    return RgbaDepth(color, 1.0 - f32(depth) / f32(uniforms.max_depth));
 }

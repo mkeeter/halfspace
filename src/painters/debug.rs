@@ -320,8 +320,7 @@ impl DebugResources {
                     view_formats: &[],
                 });
                 // Create the texture view
-                let texture_view = texture
-                    .create_view(&wgpu::TextureViewDescriptor::default());
+                let texture_view = texture.create_view(&Default::default());
 
                 // Create samplers
                 let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -370,7 +369,6 @@ impl DebugResources {
                     });
 
                 DebugData {
-                    sampler,
                     texture,
                     bind_group,
                     uniform_buffer,
@@ -391,10 +389,7 @@ impl DebugResources {
 }
 
 /// Resources used to render a single shaded image
-pub(crate) struct DebugData {
-    #[expect(unused)] // kept alive for lifetime purposes
-    sampler: wgpu::Sampler,
-
+struct DebugData {
     /// Texture to render
     texture: wgpu::Texture,
 

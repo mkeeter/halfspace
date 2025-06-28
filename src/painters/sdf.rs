@@ -214,8 +214,7 @@ impl SdfResources {
                     view_formats: &[],
                 });
                 // Create the texture view
-                let texture_view = texture
-                    .create_view(&wgpu::TextureViewDescriptor::default());
+                let texture_view = texture.create_view(&Default::default());
 
                 // Create samplers
                 let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -264,7 +263,6 @@ impl SdfResources {
                     });
 
                 SdfData {
-                    sampler,
                     texture,
                     bind_group,
                     uniform_buffer,
@@ -285,10 +283,7 @@ impl SdfResources {
 }
 
 /// Resources used to render a single SDF
-pub(crate) struct SdfData {
-    #[expect(unused)] // kept alive for lifetime purposes
-    sampler: wgpu::Sampler,
-
+struct SdfData {
     /// Texture to render
     texture: wgpu::Texture,
 

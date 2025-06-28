@@ -55,3 +55,6 @@ default = ["jit"]
 [patch.crates-io]
 egui = { git = "https://github.com/mkeeter/egui", branch = "custom-syntect-settings-0.31.1-backport" }
 epaint = { git = "https://github.com/mkeeter/egui", branch = "custom-syntect-settings-0.31.1-backport" }
+
+[profile.dev.package."*"]
+opt-level = 1

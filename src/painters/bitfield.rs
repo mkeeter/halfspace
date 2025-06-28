@@ -216,8 +216,7 @@ impl BitfieldResources {
                     view_formats: &[],
                 });
                 // Create the texture view
-                let texture_view = texture
-                    .create_view(&wgpu::TextureViewDescriptor::default());
+                let texture_view = texture.create_view(&Default::default());
 
                 // Create samplers
                 let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -266,7 +265,6 @@ impl BitfieldResources {
                     });
 
                 BitfieldData {
-                    sampler,
                     texture,
                     bind_group,
                     uniform_buffer,
@@ -287,10 +285,7 @@ impl BitfieldResources {
 }
 
 /// Resources used to render a single bitfield
-pub(crate) struct BitfieldData {
-    #[expect(unused)] // kept alive for lifetime purposes
-    sampler: wgpu::Sampler,
-
+struct BitfieldData {
     /// Texture to render
     texture: wgpu::Texture,
 

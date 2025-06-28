@@ -320,8 +320,7 @@ impl HeightmapResources {
                     view_formats: &[],
                 });
                 // Create the texture view
-                let texture_view = texture
-                    .create_view(&wgpu::TextureViewDescriptor::default());
+                let texture_view = texture.create_view(&Default::default());
 
                 // Create samplers
                 let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -370,7 +369,6 @@ impl HeightmapResources {
                     });
 
                 HeightmapData {
-                    sampler,
                     texture,
                     bind_group,
                     uniform_buffer,
@@ -391,10 +389,7 @@ impl HeightmapResources {
 }
 
 /// Resources used to render a single heightmap
-pub(crate) struct HeightmapData {
-    #[expect(unused)] // kept alive for lifetime purposes
-    sampler: wgpu::Sampler,
-
+struct HeightmapData {
     /// Texture to render
     texture: wgpu::Texture,
 
