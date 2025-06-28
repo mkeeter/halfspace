@@ -83,6 +83,17 @@ impl egui_wgpu::CallbackTrait for WgpuShadedPainter {
             texture_size,
             gr.shaded.target_format,
         );
+
+        // TODO compute this off-thread?
+        let max_depth = self
+            .image
+            .data
+            .iter()
+            .flat_map(|i| i.pixels.iter())
+            .map(|p| p.depth)
+            .max()
+            .unwrap_or(0)
+            .max(1);
         for image in self.image.data.iter() {
             let (ssao_texture, pixel_texture, uniform_buffer) =
                 gr.shaded.get_data(device, self.index, texture_size);
@@ -119,15 +130,6 @@ impl egui_wgpu::CallbackTrait for WgpuShadedPainter {
                 },
                 texture_size,
             );
-
-            // TODO compute this off-thread?
-            let max_depth = image
-                .pixels
-                .iter()
-                .map(|p| p.depth)
-                .max()
-                .unwrap_or(0)
-                .max(1);
 
             // Create the uniform
             let uniforms = Uniforms {
