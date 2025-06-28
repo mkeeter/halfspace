@@ -72,13 +72,13 @@ fn fs_main(@location(0) tex_coords: vec2<f32>) -> RgbaDepth {
         discard;
     }
 
-    let normal = vec3<f32>(pixel.yzw);
-
-    // Shaded mode
+    // Pixel position (for lighting calculations)
     let p = vec3<f32>(
         (tex_coords.xy - 0.5) * 2.0,
         2.0 * (f32(depth) / f32(uniforms.max_depth) - 0.5)
     );
+
+    let normal = vec3<f32>(pixel.yzw);
     let n = normalize(normal);
     const LIGHTS = array<Light, 3>(
         Light(vec3<f32>(5.0, -5.0, 10.0), 0.5),

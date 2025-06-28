@@ -2,10 +2,11 @@
 struct Uniforms {
     transform: mat4x4<f32>,
     color: vec4<f32>,
+    max_depth: f32,
 };
 
-@group(0) @binding(0) var t_diffuse: texture_2d<f32>;
-@group(0) @binding(1) var s_diffuse: sampler;
+@group(0) @binding(0) var t_height: texture_2d<f32>;
+@group(0) @binding(1) var s_height: sampler;
 @group(0) @binding(2) var<uniform> uniforms: Uniforms;
 
 struct VertexOutput {
@@ -47,16 +48,22 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     return output;
 }
 
+struct RgbaDepth {
+  @location(0) color: vec4<f32>,
+  @builtin(frag_depth) depth: f32
+}
 
 // Fragment shader
 @fragment
-fn fs_main(@location(0) tex_coords: vec2<f32>) -> @location(0) vec4<f32> {
-    let rgba = textureSample(t_diffuse, s_diffuse, tex_coords);
-    if (rgba.r == 0) {
+fn fs_main(@location(0) tex_coords: vec2<f32>) -> RgbaDepth {
+    let rgba = textureSample(t_height, s_height, tex_coords);
+    let depth = rgba.r;
+    if (depth == 0) {
         discard;
     } else {
-        let d = rgba.r;
-        return vec4<f32>(d, d, d, 1.0);
+        let d = depth / uniforms.max_depth;
+        let color = vec4<f32>(d * uniforms.color.rgb, 1.0);
+        return RgbaDepth(color, 1.0 - f32(depth) / f32(uniforms.max_depth));
     }
 }
 

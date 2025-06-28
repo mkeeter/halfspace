@@ -489,7 +489,7 @@ impl ShadedResources {
         index: BlockIndex,
         size: wgpu::Extent3d,
         render_format: wgpu::TextureFormat,
-    ) -> (wgpu::TextureView, wgpu::TextureView) {
+    ) {
         let desc = wgpu::TextureDescriptor {
             label: Some("shaded rendering depth texture"),
             size,
@@ -519,7 +519,7 @@ impl ShadedResources {
         let rgba_view = rgba_texture.create_view(&Default::default());
 
         let rgba_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("shaded ssao sampler"),
+            label: Some("shaded rgba sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
@@ -558,10 +558,6 @@ impl ShadedResources {
                 images: vec![],
             },
         );
-        (
-            self.bound_data[&index].depth_view.clone(),
-            self.bound_data[&index].rgba_view.clone(),
-        )
     }
 
     fn get_data(

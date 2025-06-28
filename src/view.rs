@@ -284,7 +284,7 @@ pub struct DebugViewImage {
 
 #[derive(Clone)]
 pub struct HeightmapViewImage {
-    pub data: Vec<ImageData<u8>>,
+    pub data: Vec<ImageData<f32>>,
     pub view: fidget::render::View3,
     pub size: fidget::render::VoxelSize,
     pub level: usize,

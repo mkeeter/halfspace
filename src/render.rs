@@ -17,10 +17,6 @@ type RenderShape = fidget::jit::JitShape;
 #[cfg(not(feature = "jit"))]
 type RenderShape = fidget::vm::VmShape;
 
-/// Globally unique ID for a render task and its result
-#[derive(Copy, Clone, Debug)]
-pub struct RenderId(u64);
-
 /// State representing an in-progress render
 pub struct RenderTask {
     settings: RenderSettings,
@@ -221,13 +217,6 @@ impl RenderTask {
                     .collect::<Option<_>>()?;
                 match mode {
                     ViewMode3::Heightmap => {
-                        let max = images
-                            .iter()
-                            .flat_map(|(image, _color)| image.iter())
-                            .map(|v| v.depth)
-                            .max()
-                            .unwrap_or(0)
-                            .max(1);
                         let image = HeightmapViewImage {
                             view: *view,
                             size: *size,
@@ -235,10 +224,8 @@ impl RenderTask {
                             data: images
                                 .into_iter()
                                 .map(|(image, color)| {
-                                    let data = image
-                                        .map(|v| ((v.depth * 255) / max) as u8)
-                                        .take()
-                                        .0;
+                                    let data =
+                                        image.map(|v| v.depth as f32).take().0;
                                     ImageData { data, color }
                                 })
                                 .collect(),
