@@ -25,9 +25,10 @@ pub struct WgpuHeightmapPainter {
 #[derive(Copy, Clone, zerocopy::IntoBytes, zerocopy::Immutable)]
 struct Uniforms {
     transform: [[f32; 4]; 4],
-    color: [f32; 4],
+    min_depth: f32,
     max_depth: f32,
-    _padding: [u32; 3],
+    has_color: u32,
+    _padding: [u8; 4],
 }
 
 impl WgpuHeightmapPainter {
@@ -85,29 +86,30 @@ impl egui_wgpu::CallbackTrait for WgpuHeightmapPainter {
         );
 
         // TODO compute this off-thread?
-        let max_depth = self
-            .image
-            .data
-            .iter()
-            .flat_map(|i| i.data.iter())
-            .map(|p| egui::emath::OrderedFloat(*p))
-            .max()
-            .map(|p| p.0)
-            .unwrap_or(0.0)
-            .max(1.0);
+        let mut max_depth = 1f32;
+        let mut min_depth = f32::INFINITY;
+        for d in self.image.data.iter().flat_map(|i| i.depth.iter()) {
+            max_depth = max_depth.max(*d);
+            if *d != 0.0 {
+                min_depth = min_depth.min(*d);
+            }
+        }
+        if min_depth.is_infinite() {
+            min_depth = 0.0;
+        }
+
         for image in self.image.data.iter() {
-            let (height_texture, uniform_buffer) =
-                gr.heightmap.get_data(device, self.index, texture_size);
+            let data = gr.heightmap.get_data(device, texture_size);
 
             // Upload heightmap pixel texture data
             queue.write_texture(
                 wgpu::TexelCopyTextureInfo {
-                    texture: height_texture,
+                    texture: &data.depth_texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d::ZERO,
                     aspect: wgpu::TextureAspect::All,
                 },
-                image.as_bytes(),
+                image.depth.as_bytes(),
                 wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(4 * width),
@@ -116,23 +118,55 @@ impl egui_wgpu::CallbackTrait for WgpuHeightmapPainter {
                 texture_size,
             );
 
+            // Upload heightmap color texture data
+            let has_color = if let Some(color) = &image.color {
+                queue.write_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &data.color_texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    color.as_bytes(),
+                    wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(4 * width),
+                        rows_per_image: Some(height),
+                    },
+                    texture_size,
+                );
+                true
+            } else {
+                false
+            };
+
             // Create the uniform
             let uniforms = Uniforms {
                 transform: transform.into(),
-                color: image.rgba(),
+                min_depth,
                 max_depth,
-                _padding: [0; 3],
+                has_color: u32::from(has_color),
+                _padding: Default::default(),
             };
-            let mut writer = queue
-                .write_buffer_with(
-                    uniform_buffer,
-                    0,
-                    (std::mem::size_of_val(&uniforms) as u64)
-                        .try_into()
-                        .unwrap(),
-                )
-                .unwrap();
-            writer.copy_from_slice(uniforms.as_bytes());
+            {
+                let mut writer = queue
+                    .write_buffer_with(
+                        &data.uniform_buffer,
+                        0,
+                        (std::mem::size_of_val(&uniforms) as u64)
+                            .try_into()
+                            .unwrap(),
+                    )
+                    .unwrap();
+                writer.copy_from_slice(uniforms.as_bytes());
+            }
+
+            gr.heightmap
+                .bound_data
+                .get_mut(&self.index)
+                .unwrap()
+                .images
+                .push(data);
         }
 
         // Do deferred painting (with depth buffer) in a separate render pass
@@ -199,8 +233,6 @@ pub(crate) struct HeightmapResources {
 
     target_format: wgpu::TextureFormat,
 
-    spare_data: HashMap<wgpu::Extent3d, Vec<HeightmapData>>,
-    spare_depth: HashMap<wgpu::Extent3d, Vec<wgpu::Texture>>,
     bound_data: HashMap<BlockIndex, HeightmapBundleData>,
 }
 
@@ -226,7 +258,7 @@ impl HeightmapResources {
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("heightmap bind group layout"),
                 entries: &[
-                    // Texture
+                    // Depth texture and sampler
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
                         visibility: wgpu::ShaderStages::FRAGMENT,
@@ -239,7 +271,6 @@ impl HeightmapResources {
                         },
                         count: None,
                     },
-                    // Sampler
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
                         visibility: wgpu::ShaderStages::FRAGMENT,
@@ -248,9 +279,31 @@ impl HeightmapResources {
                         ),
                         count: None,
                     },
-                    // Uniforms
+                    // Color texture and sampler
                     wgpu::BindGroupLayoutEntry {
                         binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float {
+                                filterable: true,
+                            },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    // Sampler
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(
+                            wgpu::SamplerBindingType::Filtering,
+                        ),
+                        count: None,
+                    },
+                    // Uniforms
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
                         visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Uniform,
@@ -419,31 +472,11 @@ impl HeightmapResources {
             paint_bind_group_layout,
             target_format,
             bound_data: HashMap::new(),
-            spare_depth: HashMap::new(),
-            spare_data: HashMap::new(),
         }
     }
 
     pub fn reset(&mut self) {
-        // Only keep around bitmaps which were bound for the last render
-        self.spare_data.clear();
-        self.spare_depth.clear();
-
-        // Move all bound objects into spare objects
-        for (_k, b) in std::mem::take(&mut self.bound_data) {
-            for b in b.images {
-                self.spare_data
-                    .entry(b.height_texture.size())
-                    .or_default()
-                    .push(b);
-            }
-            self.spare_depth
-                .entry(b.depth_texture.size())
-                .or_default()
-                .push(b.depth_texture);
-        }
-        self.spare_data.retain(|_k, v| !v.is_empty());
-        self.spare_depth.retain(|_k, v| !v.is_empty());
+        self.bound_data.clear();
     }
 
     /// Prepare deferred textures for a separate render pass
@@ -527,85 +560,99 @@ impl HeightmapResources {
     fn get_data(
         &mut self,
         device: &wgpu::Device,
-        index: BlockIndex,
         size: wgpu::Extent3d,
-    ) -> (&wgpu::Texture, &wgpu::Buffer) {
-        let r = self
-            .spare_data
-            .get_mut(&size)
-            .and_then(|v| v.pop())
-            .unwrap_or_else(|| {
-                // Create the texture
-                let height_texture =
-                    device.create_texture(&wgpu::TextureDescriptor {
-                        label: Some("heightmap pixel texture"),
-                        size,
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: wgpu::TextureDimension::D2,
-                        format: wgpu::TextureFormat::R32Float,
-                        usage: wgpu::TextureUsages::TEXTURE_BINDING
-                            | wgpu::TextureUsages::COPY_DST,
-                        view_formats: &[],
-                    });
-                let height_texture_view =
-                    height_texture.create_view(&Default::default());
-                let height_sampler =
-                    device.create_sampler(&wgpu::SamplerDescriptor {
-                        label: Some("heightmap pixel sampler"),
-                        address_mode_u: wgpu::AddressMode::ClampToEdge,
-                        address_mode_v: wgpu::AddressMode::ClampToEdge,
-                        address_mode_w: wgpu::AddressMode::ClampToEdge,
-                        mag_filter: wgpu::FilterMode::Linear,
-                        min_filter: wgpu::FilterMode::Linear,
-                        mipmap_filter: wgpu::FilterMode::Linear,
-                        ..Default::default()
-                    });
+    ) -> HeightmapData {
+        let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("heightmap depth texture"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let depth_texture_view = depth_texture.create_view(&Default::default());
+        let depth_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("heightmap depth sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
 
-                // Create the buffer
-                let uniform_buffer =
-                    device.create_buffer(&wgpu::BufferDescriptor {
-                        label: Some("uniform buffer"),
-                        size: std::mem::size_of::<Uniforms>() as u64,
-                        mapped_at_creation: false,
-                        usage: wgpu::BufferUsages::UNIFORM
-                            | wgpu::BufferUsages::COPY_DST,
-                    });
+        let color_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("heightmap color texture"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let color_texture_view = color_texture.create_view(&Default::default());
+        let color_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("heightmap color sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
 
-                let bind_group =
-                    device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("heightmap bind group"),
-                        layout: &self.deferred_bind_group_layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: wgpu::BindingResource::TextureView(
-                                    &height_texture_view,
-                                ),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::Sampler(
-                                    &height_sampler,
-                                ),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: uniform_buffer.as_entire_binding(),
-                            },
-                        ],
-                    });
+        // Create the buffer
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("uniform buffer"),
+            size: std::mem::size_of::<Uniforms>() as u64,
+            mapped_at_creation: false,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
 
-                HeightmapData {
-                    height_texture,
-                    bind_group,
-                    uniform_buffer,
-                }
-            });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("heightmap bind group"),
+            layout: &self.deferred_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(
+                        &depth_texture_view,
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&depth_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(
+                        &color_texture_view,
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(&color_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+            ],
+        });
 
-        self.bound_data.get_mut(&index).unwrap().images.push(r);
-        let r = &self.bound_data[&index].images.last().unwrap();
-        (&r.height_texture, &r.uniform_buffer)
+        HeightmapData {
+            depth_texture,
+            color_texture,
+            bind_group,
+            uniform_buffer,
+        }
     }
 
     pub fn paint_deferred(
@@ -637,6 +684,7 @@ impl HeightmapResources {
 
 /// Resources used to render a view of heightmap images
 struct HeightmapBundleData {
+    #[expect(unused, reason = "used as a render target")]
     depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
 
@@ -651,8 +699,8 @@ struct HeightmapBundleData {
 
 /// Resources used to render a single heightmap image
 struct HeightmapData {
-    /// GeometryPixel texture to render
-    height_texture: wgpu::Texture,
+    depth_texture: wgpu::Texture,
+    color_texture: wgpu::Texture,
 
     /// Uniform buffer
     ///

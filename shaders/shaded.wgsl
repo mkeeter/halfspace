@@ -1,8 +1,8 @@
 // Uniform buffer containing the transform matrix
 struct Uniforms {
     transform: mat4x4<f32>,
-    color: vec4<f32>,
     max_depth: u32,
+    has_color: u32,
 }
 
 struct Light {
@@ -14,7 +14,9 @@ struct Light {
 @group(0) @binding(1) var s_ssao: sampler;
 @group(0) @binding(2) var t_pixel: texture_2d<f32>;
 @group(0) @binding(3) var s_pixel: sampler;
-@group(0) @binding(4) var<uniform> uniforms: Uniforms;
+@group(0) @binding(4) var t_color: texture_2d<f32>;
+@group(0) @binding(5) var s_color: sampler;
+@group(0) @binding(6) var<uniform> uniforms: Uniforms;
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
@@ -92,6 +94,13 @@ fn fs_main(@location(0) tex_coords: vec2<f32>) -> RgbaDepth {
         accum = accum + max(dot(light_dir, n), 0.0) * light.intensity;
     }
     accum = clamp(accum * (ssao.r * 0.6 + 0.4), 0.0, 1.0);
-    let color = vec4<f32>(accum * uniforms.color.rgb, 1.0);
-    return RgbaDepth(color, 1.0 - f32(depth) / f32(uniforms.max_depth));
+    var color = vec3<f32>(1.0);
+    if (uniforms.has_color != 0) {
+        color = textureSample(t_color, s_color, tex_coords).rgb;
+    }
+    let c = vec3<f32>(accum * color);
+    return RgbaDepth(
+        vec4<f32>(c, 1.0),
+        1.0 - f32(depth) / f32(uniforms.max_depth)
+    );
 }

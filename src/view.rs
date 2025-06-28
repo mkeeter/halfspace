@@ -157,45 +157,36 @@ impl From<ViewState> for ViewCanvas {
     }
 }
 
-#[derive(Clone)] // XXX can we avoid cloning?
-pub struct ImageData<T> {
-    pub data: Vec<T>,
-    pub color: Option<[u8; 3]>,
-}
-
-impl<T: zerocopy::IntoBytes + zerocopy::Immutable> ImageData<T> {
-    pub fn as_bytes(&self) -> &[u8] {
-        use zerocopy::IntoBytes;
-        self.data.as_bytes()
-    }
-}
-
-impl<T> ImageData<T> {
-    pub fn rgba(&self) -> [f32; 4] {
-        rgba(self.color)
-    }
-}
-
-/// Returns the color as an RGBA float array, or `[1, 1, 1, 1]` if empty
-fn rgba(color: Option<[u8; 3]>) -> [f32; 4] {
-    let [r, g, b] = color.unwrap_or([u8::MAX; 3]).map(|i| i as f32 / 255.0);
-    [r, g, b, 1.0]
-}
-
+/// Set of SDF images, along with their position and metadata
 #[derive(Clone)]
 pub struct SdfViewImage {
-    pub data: Vec<ImageData<f32>>,
+    pub data: Vec<SdfImageData>,
     pub view: fidget::render::View2,
     pub size: fidget::render::ImageSize,
     pub level: usize,
 }
 
+/// Single SDF image to be drawn to the screen
+#[derive(Clone)]
+pub struct SdfImageData {
+    pub distance: Vec<f32>,
+    pub color: Option<Vec<[u8; 4]>>,
+}
+
+/// Set of bitfield images, along with their position and metadata
 #[derive(Clone)]
 pub struct BitfieldViewImage {
-    pub data: Vec<ImageData<f32>>,
+    pub data: Vec<BitfieldImageData>,
     pub view: fidget::render::View2,
     pub size: fidget::render::ImageSize,
     pub level: usize,
+}
+
+/// Single bitfield image to be drawn to the screen
+#[derive(Clone)]
+pub struct BitfieldImageData {
+    pub distance: Vec<f32>,
+    pub color: Option<Vec<[u8; 4]>>,
 }
 
 impl BitfieldViewImage {
@@ -274,45 +265,58 @@ impl BitfieldViewImage {
     }
 }
 
+/// Set of debug images, along with their position and metadata
 #[derive(Clone)]
 pub struct DebugViewImage {
-    pub data: Vec<ImageData<[u8; 4]>>,
+    pub data: Vec<DebugImageData>,
     pub view: fidget::render::View2,
     pub size: fidget::render::ImageSize,
     pub level: usize,
 }
 
+/// Single debug image to be drawn to the screen
+#[derive(Clone)]
+pub struct DebugImageData {
+    pub pixels: Vec<[u8; 4]>,
+    // No diffuse color here, this is just a debug view
+}
+
+/// Set of heightmap images, along with their position and metadata
 #[derive(Clone)]
 pub struct HeightmapViewImage {
-    pub data: Vec<ImageData<f32>>,
+    pub data: Vec<HeightmapImageData>,
     pub view: fidget::render::View3,
     pub size: fidget::render::VoxelSize,
     pub level: usize,
 }
 
+/// Single heightmap image to be drawn to the screen
 #[derive(Clone)]
-pub struct SsaoImageData {
-    pub pixels: Vec<fidget::render::GeometryPixel>,
-    pub ssao: Vec<f32>,
-    pub color: Option<[u8; 3]>,
+pub struct HeightmapImageData {
+    pub depth: Vec<f32>,
+    pub color: Option<Vec<[u8; 4]>>,
 }
 
-impl SsaoImageData {
-    pub fn rgba(&self) -> [f32; 4] {
-        rgba(self.color)
-    }
-}
-
+/// Set of shaded images, along with their position and metadata
 #[derive(Clone)]
 pub struct ShadedViewImage {
-    pub data: Vec<SsaoImageData>,
+    pub data: Vec<ShadedImageData>,
     pub view: fidget::render::View3,
     pub size: fidget::render::VoxelSize,
     pub level: usize,
 }
 
-/// Rendered image, along with the settings that generated it
+/// Single shaded image to be drawn to the screen
 #[derive(Clone)]
+pub struct ShadedImageData {
+    pub pixels: Vec<fidget::render::GeometryPixel>,
+    pub ssao: Vec<f32>,
+    pub color: Option<Vec<[u8; 4]>>,
+}
+
+/// Rendered image(s) to be drawn, along with the settings that generated it
+#[derive(Clone, strum::EnumDiscriminants)]
+#[strum_discriminants(name(ViewCanvasType))]
 pub enum ViewImage {
     Sdf(SdfViewImage),
     Bitfield(BitfieldViewImage),
@@ -434,14 +438,6 @@ pub fn edit_button(
 ) -> ViewResponse {
     let mut out = ViewResponse::empty();
     // Pop-up box to change render settings
-    #[derive(Copy, Clone, PartialEq, Eq)]
-    enum ViewCanvasType {
-        Sdf,
-        Bitfield,
-        Heightmap,
-        Debug,
-        Shaded,
-    }
     let initial_tag = match &entry.canvas {
         ViewCanvas::Canvas2 {
             mode: ViewMode2::Bitfield,

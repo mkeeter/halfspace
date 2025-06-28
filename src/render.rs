@@ -1,9 +1,10 @@
 //! Image rendering
 use crate::{
     view::{
-        BitfieldViewImage, DebugViewImage, HeightmapViewImage, ImageData,
-        SdfViewImage, ShadedViewImage, SsaoImageData, ViewCanvas, ViewImage,
-        ViewMode2, ViewMode3,
+        BitfieldImageData, BitfieldViewImage, DebugImageData, DebugViewImage,
+        HeightmapImageData, HeightmapViewImage, SdfImageData, SdfViewImage,
+        ShadedImageData, ShadedViewImage, ViewCanvas, ViewImage, ViewMode2,
+        ViewMode3,
     },
     world::Scene,
     BlockIndex, Message, MessageQueue,
@@ -92,6 +93,14 @@ impl RenderTask {
     ) -> Option<ViewImage> {
         let scale = 1 << level;
         let threads = Some(&fidget::render::ThreadPool::Global);
+        let pixel_count = match settings {
+            RenderSettings::Render2 { size, .. } => {
+                size.width() as usize * size.height() as usize
+            }
+            RenderSettings::Render3 { size, .. } => {
+                size.width() as usize * size.height() as usize
+            }
+        };
         let data = match settings {
             RenderSettings::Render2 {
                 scene,
@@ -132,9 +141,11 @@ impl RenderTask {
                                     let image = BitfieldViewImage::denoise(
                                         image, threads,
                                     );
-                                    ImageData {
-                                        data: image.take().0,
-                                        color,
+                                    BitfieldImageData {
+                                        distance: image.take().0,
+                                        color: color.map(|[r, g, b]| {
+                                            vec![[r, g, b, 255]; pixel_count]
+                                        }),
                                     }
                                 })
                                 .collect(),
@@ -158,9 +169,11 @@ impl RenderTask {
                                             d
                                         }
                                     });
-                                    ImageData {
-                                        data: image.take().0,
-                                        color,
+                                    SdfImageData {
+                                        distance: image.take().0,
+                                        color: color.map(|[r, g, b]| {
+                                            vec![[r, g, b, 255]; pixel_count]
+                                        }),
                                     }
                                 })
                                 .collect(),
@@ -174,13 +187,13 @@ impl RenderTask {
                             level,
                             data: images
                                 .into_iter()
-                                .map(|(image, color)| {
+                                .map(|(image, _color)| {
                                     let image = effects::to_debug_bitmap(
                                         image, threads,
                                     );
-                                    ImageData {
-                                        data: image.take().0,
-                                        color,
+                                    DebugImageData {
+                                        pixels: image.take().0,
+                                        // No color for debug images
                                     }
                                 })
                                 .collect(),
@@ -224,9 +237,13 @@ impl RenderTask {
                             data: images
                                 .into_iter()
                                 .map(|(image, color)| {
-                                    let data =
-                                        image.map(|v| v.depth as f32).take().0;
-                                    ImageData { data, color }
+                                    let data = image.map(|v| v.depth as f32);
+                                    HeightmapImageData {
+                                        depth: data.take().0,
+                                        color: color.map(|[r, g, b]| {
+                                            vec![[r, g, b, 255]; pixel_count]
+                                        }),
+                                    }
                                 })
                                 .collect(),
                         };
@@ -251,10 +268,12 @@ impl RenderTask {
                                     );
                                     let (pixels, _size) = image.take();
                                     let (ssao, _size) = ssao.take();
-                                    SsaoImageData {
+                                    ShadedImageData {
                                         pixels,
                                         ssao,
-                                        color,
+                                        color: color.map(|[r, g, b]| {
+                                            vec![[r, g, b, 255]; pixel_count]
+                                        }),
                                     }
                                 })
                                 .collect(),

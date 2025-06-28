@@ -13,7 +13,8 @@ use zerocopy::IntoBytes;
 #[derive(Copy, Clone, zerocopy::IntoBytes, zerocopy::Immutable)]
 struct Uniforms {
     transform: [[f32; 4]; 4],
-    color: [f32; 4],
+    has_color: u32,
+    _padding: [u8; 12],
 }
 
 /// GPU callback
@@ -53,9 +54,6 @@ pub(crate) struct BitfieldResources {
     pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
 
-    /// Spare data is indexed by size to avoid reallocation
-    spare_data: HashMap<wgpu::Extent3d, Vec<BitfieldData>>,
-
     /// Each block is bound to one or more objects to render (in order)
     bound_data: HashMap<BlockIndex, Vec<BitfieldData>>,
 }
@@ -83,7 +81,7 @@ impl BitfieldResources {
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("bitfield bind group layout"),
                 entries: &[
-                    // Texture
+                    // Distance texture
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
                         visibility: wgpu::ShaderStages::FRAGMENT,
@@ -96,7 +94,7 @@ impl BitfieldResources {
                         },
                         count: None,
                     },
-                    // Sampler
+                    // Distance sampler
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
                         visibility: wgpu::ShaderStages::FRAGMENT,
@@ -105,9 +103,31 @@ impl BitfieldResources {
                         ),
                         count: None,
                     },
-                    // Uniforms
+                    // Color texture
                     wgpu::BindGroupLayoutEntry {
                         binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float {
+                                filterable: true,
+                            },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    // Color sampler
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(
+                            wgpu::SamplerBindingType::Filtering,
+                        ),
+                        count: None,
+                    },
+                    // Uniforms
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
                         visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Uniform,
@@ -174,102 +194,114 @@ impl BitfieldResources {
             pipeline,
             bind_group_layout,
             bound_data: HashMap::new(),
-            spare_data: HashMap::new(),
         }
     }
 
     pub fn reset(&mut self) {
-        // Only keep around bitfields which were bound for the last render
-        self.spare_data.clear();
-        for (_k, b) in std::mem::take(&mut self.bound_data) {
-            for b in b {
-                self.spare_data.entry(b.texture.size()).or_default().push(b);
-                self.spare_data.retain(|_k, v| !v.is_empty());
-            }
-        }
+        self.bound_data.clear()
     }
 
     fn get_data(
         &mut self,
         device: &wgpu::Device,
-        index: BlockIndex,
         size: wgpu::Extent3d,
-    ) -> (&wgpu::Texture, &wgpu::Buffer) {
-        let r = self
-            .spare_data
-            .get_mut(&size)
-            .and_then(|v| v.pop())
-            .unwrap_or_else(|| {
-                // Create the texture
-                let texture = device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("bitfield texture"),
-                    size,
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::R32Float,
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING
-                        | wgpu::TextureUsages::COPY_DST,
-                    view_formats: &[],
-                });
-                // Create the texture view
-                let texture_view = texture.create_view(&Default::default());
-
-                // Create samplers
-                let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-                    label: Some("bitfield sampler"),
-                    address_mode_u: wgpu::AddressMode::ClampToEdge,
-                    address_mode_v: wgpu::AddressMode::ClampToEdge,
-                    address_mode_w: wgpu::AddressMode::ClampToEdge,
-                    mag_filter: wgpu::FilterMode::Linear,
-                    min_filter: wgpu::FilterMode::Linear,
-                    mipmap_filter: wgpu::FilterMode::Linear,
-                    ..Default::default()
-                });
-
-                // Create the buffer
-                let uniform_buffer =
-                    device.create_buffer(&wgpu::BufferDescriptor {
-                        label: Some("bitfield uniform buffer"),
-                        size: std::mem::size_of::<Uniforms>() as u64,
-                        mapped_at_creation: false,
-                        usage: wgpu::BufferUsages::UNIFORM
-                            | wgpu::BufferUsages::COPY_DST,
-                    });
-
-                let bind_group =
-                    device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("bitfield bind group"),
-                        layout: &self.bind_group_layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: wgpu::BindingResource::TextureView(
-                                    &texture_view,
-                                ),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::Sampler(
-                                    &sampler,
-                                ),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: uniform_buffer.as_entire_binding(),
-                            },
-                        ],
-                    });
-
-                BitfieldData {
-                    texture,
-                    bind_group,
-                    uniform_buffer,
-                }
+    ) -> BitfieldData {
+        // Create the distance texture and sampler
+        let distance_texture =
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("bitfield distance texture"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R32Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             });
-        self.bound_data.entry(index).or_default().push(r);
-        let r = &self.bound_data[&index].last().unwrap();
-        (&r.texture, &r.uniform_buffer)
+        let distance_texture_view =
+            distance_texture.create_view(&Default::default());
+        let distance_sampler =
+            device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("bitfield distance sampler"),
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::FilterMode::Linear,
+                ..Default::default()
+            });
+
+        // Create the texture
+        let color_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("bitfield color texture"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let color_texture_view = color_texture.create_view(&Default::default());
+        let color_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("bitfield color sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+
+        // Create the buffer
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("bitfield uniform buffer"),
+            size: std::mem::size_of::<Uniforms>() as u64,
+            mapped_at_creation: false,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("bitfield bind group"),
+            layout: &self.bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(
+                        &distance_texture_view,
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&distance_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(
+                        &color_texture_view,
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(&color_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        BitfieldData {
+            distance_texture,
+            color_texture,
+            bind_group,
+            uniform_buffer,
+        }
     }
 
     pub fn paint(&self, render_pass: &mut wgpu::RenderPass, index: BlockIndex) {
@@ -283,8 +315,11 @@ impl BitfieldResources {
 
 /// Resources used to render a single bitfield
 struct BitfieldData {
-    /// Texture to render
-    texture: wgpu::Texture,
+    /// Distance texture to render
+    distance_texture: wgpu::Texture,
+
+    /// Color texture to render
+    color_texture: wgpu::Texture,
 
     /// Uniform buffer
     uniform_buffer: wgpu::Buffer,
@@ -320,18 +355,17 @@ impl egui_wgpu::CallbackTrait for WgpuBitfieldPainter {
             self.size,
         );
         for image in self.image.data.iter() {
-            let (texture, uniform_buffer) =
-                gr.bitfield.get_data(device, self.index, texture_size);
+            let data = gr.bitfield.get_data(device, texture_size);
 
-            // Upload bitfield image data
+            // Copy data to textures
             queue.write_texture(
                 wgpu::TexelCopyTextureInfo {
-                    texture,
+                    texture: &data.distance_texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d::ZERO,
                     aspect: wgpu::TextureAspect::All,
                 },
-                image.as_bytes(),
+                image.distance.as_bytes(),
                 wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(4 * width),
@@ -339,22 +373,51 @@ impl egui_wgpu::CallbackTrait for WgpuBitfieldPainter {
                 },
                 texture_size,
             );
+            let has_color = if let Some(color) = &image.color {
+                queue.write_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &data.color_texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    color.as_bytes(),
+                    wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(4 * width),
+                        rows_per_image: Some(height),
+                    },
+                    texture_size,
+                );
+                true
+            } else {
+                false
+            };
 
             // Build and write the uniform buffer
-            let uniforms = Uniforms {
-                transform: transform.into(),
-                color: image.rgba(),
-            };
-            let mut writer = queue
-                .write_buffer_with(
-                    uniform_buffer,
-                    0,
-                    (std::mem::size_of_val(&uniforms) as u64)
-                        .try_into()
-                        .unwrap(),
-                )
-                .unwrap();
-            writer.copy_from_slice(uniforms.as_bytes());
+            {
+                let uniforms = Uniforms {
+                    transform: transform.into(),
+                    has_color: u32::from(has_color),
+                    _padding: Default::default(),
+                };
+                let mut writer = queue
+                    .write_buffer_with(
+                        &data.uniform_buffer,
+                        0,
+                        (std::mem::size_of_val(&uniforms) as u64)
+                            .try_into()
+                            .unwrap(),
+                    )
+                    .unwrap();
+                writer.copy_from_slice(uniforms.as_bytes());
+            }
+
+            gr.bitfield
+                .bound_data
+                .entry(self.index)
+                .or_default()
+                .push(data);
         }
 
         Vec::new()
