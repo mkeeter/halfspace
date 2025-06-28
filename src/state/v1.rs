@@ -24,6 +24,7 @@ pub struct BlockState {
     pub inputs: HashMap<String, String>,
 }
 
+/// Serialization-friendly state associated with a view in the GUI
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub enum ViewState {
     View2 {
@@ -45,6 +46,7 @@ pub enum ViewState {
     },
 }
 
+/// Available modes for a 2D view in the GUI
 #[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ViewMode2 {
     Sdf,
@@ -52,18 +54,24 @@ pub enum ViewMode2 {
     Debug,
 }
 
+/// Available modes for a 3D view in the GUI
 #[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ViewMode3 {
     Heightmap,
     Shaded,
 }
 
+/// Available modes for a tab in the GUI
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, Serialize, Deserialize)]
 pub enum TabMode {
     Script,
     View,
 }
 
+/// Identifier for a tab in the GUI
+///
+/// Each block may have one tab for each [`TabMode`]; right now, this is one
+/// editor and one viewer.
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Tab {
     pub index: BlockIndex,

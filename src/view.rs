@@ -389,8 +389,8 @@ impl ViewData {
         tx: &MessageQueue,
     ) -> Option<&ViewImage> {
         // If the image settings have changed, then clear `task` (which causes
-        // us to reinitialize it below).  Only clear the task if it's not a
-        // max-level render (to preserve responsiveness)
+        // us to reinitialize it below).  Skip clearing the task if it's a
+        // max-level (i.e. lowest-resolution) render, to preserve responsiveness
         let settings = RenderSettings::from_canvas(&self.canvas, scene);
         if let Some(prev) = &self.task {
             if prev.should_cancel(&settings, self.start_level) {

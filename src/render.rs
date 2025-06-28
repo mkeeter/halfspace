@@ -17,6 +17,10 @@ type RenderShape = fidget::jit::JitShape;
 #[cfg(not(feature = "jit"))]
 type RenderShape = fidget::vm::VmShape;
 
+/// Globally unique ID for a render task and its result
+#[derive(Copy, Clone, Debug)]
+pub struct RenderId(u64);
+
 /// State representing an in-progress render
 pub struct RenderTask {
     settings: RenderSettings,
@@ -280,6 +284,7 @@ impl RenderTask {
 /// Settings for rendering an image
 #[derive(Clone)]
 pub enum RenderSettings {
+    // TODO flatten this?
     Render2 {
         scene: Scene,
         mode: ViewMode2,
