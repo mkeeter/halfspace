@@ -73,37 +73,12 @@ impl egui_wgpu::CallbackTrait for WgpuHeightmapPainter {
             depth_or_array_layers: 1,
         };
 
-        // Create the uniform
-        let transform = {
-            let view = self.image.view;
-            // don't blame me, I just twiddled the matrices until things
-            // looked right
-            let aspect_ratio = |width: u32, height: u32| {
-                let width = width as f32;
-                let height = height as f32;
-                if width > height {
-                    nalgebra::Scale3::new(height / width, 1.0, 1.0)
-                } else {
-                    nalgebra::Scale3::new(1.0, width / height, 1.0)
-                }
-            };
-            let prev_aspect_ratio =
-                aspect_ratio(image_size.width(), image_size.height());
-            let curr_aspect_ratio =
-                aspect_ratio(self.size.width(), self.size.height());
-            let m = prev_aspect_ratio.to_homogeneous().try_inverse().unwrap()
-                * curr_aspect_ratio.to_homogeneous()
-                * self.view.world_to_model().try_inverse().unwrap()
-                * view.world_to_model();
-            #[rustfmt::skip]
-            let transform = nalgebra::Matrix4::new(
-                m[(0, 0)], m[(0, 1)], m[(0, 2)], m[(0, 3)] * curr_aspect_ratio.x,
-                m[(1, 0)], m[(1, 1)], m[(1, 2)], m[(1, 3)] * curr_aspect_ratio.y,
-                m[(2, 0)], m[(2, 1)], m[(2, 2)], m[(2, 3)],
-                0.0,         0.0,         0.0, 1.0,
-            );
-            transform
-        };
+        let transform = super::transform3(
+            self.image.view,
+            self.image.size,
+            self.view,
+            self.size,
+        );
 
         for image in self.image.data.iter() {
             let (texture, uniform_buffer) =

@@ -313,36 +313,12 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
             height,
             depth_or_array_layers: 1,
         };
-
-        // Create the uniform
-        let transform = {
-            let view = self.image.view;
-            // don't blame me, I just twiddled the matrices until things
-            // looked right
-            let aspect_ratio = |size: fidget::render::ImageSize| {
-                let width = size.width() as f32;
-                let height = size.height() as f32;
-                if width > height {
-                    nalgebra::Scale2::new(height / width, 1.0)
-                } else {
-                    nalgebra::Scale2::new(1.0, width / height)
-                }
-            };
-            let prev_aspect_ratio = aspect_ratio(image_size);
-            let curr_aspect_ratio = aspect_ratio(self.size);
-            let m = prev_aspect_ratio.to_homogeneous().try_inverse().unwrap()
-                * curr_aspect_ratio.to_homogeneous()
-                * self.view.world_to_model().try_inverse().unwrap()
-                * view.world_to_model();
-            #[rustfmt::skip]
-            let transform = nalgebra::Matrix4::new(
-                m[(0, 0)], m[(0, 1)], 0.0, m[(0, 2)] * curr_aspect_ratio.x,
-                m[(1, 0)], m[(1, 1)], 0.0, m[(1, 2)] * curr_aspect_ratio.y,
-                0.0,         0.0,         1.0, 0.0,
-                0.0,         0.0,         0.0, 1.0,
-            );
-            transform
-        };
+        let transform = super::transform2(
+            self.image.view,
+            self.image.size,
+            self.view,
+            self.size,
+        );
 
         for image in self.image.data.iter() {
             let (texture, uniform_buffer) =

@@ -84,3 +84,75 @@ impl WgpuResources {
         }
     }
 }
+
+/// Computes a transform matrix to put a 2D image in the right place on a canvas
+fn transform2(
+    image_view: fidget::render::View2,
+    image_size: fidget::render::ImageSize,
+    canvas_view: fidget::render::View2,
+    canvas_size: fidget::render::ImageSize,
+) -> nalgebra::Matrix4<f32> {
+    // don't blame me, I just twiddled the matrices until things
+    // looked right
+    let aspect_ratio = |size: fidget::render::ImageSize| {
+        let width = size.width() as f32;
+        let height = size.height() as f32;
+        if width > height {
+            nalgebra::Scale2::new(height / width, 1.0)
+        } else {
+            nalgebra::Scale2::new(1.0, width / height)
+        }
+    };
+    let prev_aspect_ratio = aspect_ratio(image_size);
+    let curr_aspect_ratio = aspect_ratio(canvas_size);
+    let m = prev_aspect_ratio.to_homogeneous().try_inverse().unwrap()
+        * curr_aspect_ratio.to_homogeneous()
+        * canvas_view.world_to_model().try_inverse().unwrap()
+        * image_view.world_to_model();
+
+    #[rustfmt::skip]
+    let transform = nalgebra::Matrix4::new(
+        m[(0, 0)], m[(0, 1)], 0.0, m[(0, 2)] * curr_aspect_ratio.x,
+        m[(1, 0)], m[(1, 1)], 0.0, m[(1, 2)] * curr_aspect_ratio.y,
+        0.0,         0.0,         1.0, 0.0,
+        0.0,         0.0,         0.0, 1.0,
+    );
+    transform
+}
+
+/// Computes a transform matrix to put a 3D image in the right place on a canvas
+fn transform3(
+    image_view: fidget::render::View3,
+    image_size: fidget::render::VoxelSize,
+    canvas_view: fidget::render::View3,
+    canvas_size: fidget::render::ImageSize,
+) -> nalgebra::Matrix4<f32> {
+    // don't blame me, I just twiddled the matrices until things
+    // looked right
+    let aspect_ratio = |width: u32, height: u32| {
+        let width = width as f32;
+        let height = height as f32;
+        if width > height {
+            nalgebra::Scale3::new(height / width, 1.0, 1.0)
+        } else {
+            nalgebra::Scale3::new(1.0, width / height, 1.0)
+        }
+    };
+    let prev_aspect_ratio =
+        aspect_ratio(image_size.width(), image_size.height());
+    let curr_aspect_ratio =
+        aspect_ratio(canvas_size.width(), canvas_size.height());
+    let m = prev_aspect_ratio.to_homogeneous().try_inverse().unwrap()
+        * curr_aspect_ratio.to_homogeneous()
+        * canvas_view.world_to_model().try_inverse().unwrap()
+        * image_view.world_to_model();
+
+    #[rustfmt::skip]
+    let transform = nalgebra::Matrix4::new(
+        m[(0, 0)], m[(0, 1)], m[(0, 2)], m[(0, 3)] * curr_aspect_ratio.x,
+        m[(1, 0)], m[(1, 1)], m[(1, 2)], m[(1, 3)] * curr_aspect_ratio.y,
+        m[(2, 0)], m[(2, 1)], m[(2, 2)], m[(2, 3)],
+        0.0,         0.0,         0.0, 1.0,
+    );
+    transform
+}
