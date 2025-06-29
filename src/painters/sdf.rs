@@ -14,8 +14,10 @@ use zerocopy::IntoBytes;
 #[derive(Copy, Clone, zerocopy::IntoBytes, zerocopy::Immutable)]
 struct Uniforms {
     transform: [[f32; 4]; 4],
+    min_distance: f32,
+    max_distance: f32,
     has_color: u32,
-    _padding: [u8; 12],
+    any_color: u32,
 }
 
 /// GPU callback
@@ -52,10 +54,14 @@ impl WgpuSdfPainter {
 }
 
 pub(crate) struct SdfResources {
-    pipeline: wgpu::RenderPipeline,
-    bind_group_layout: wgpu::BindGroupLayout,
+    deferred_pipeline: wgpu::RenderPipeline,
+    deferred_bind_group_layout: wgpu::BindGroupLayout,
 
-    bound_data: HashMap<BlockIndex, Vec<SdfData>>,
+    paint_pipeline: wgpu::RenderPipeline,
+    paint_bind_group_layout: wgpu::BindGroupLayout,
+
+    target_format: wgpu::TextureFormat,
+    bound_data: HashMap<BlockIndex, SdfBundleData>,
 }
 
 impl SdfResources {
@@ -77,7 +83,7 @@ impl SdfResources {
             });
 
         // Create bind group layout
-        let bind_group_layout =
+        let deferred_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("sdf bind group layout"),
                 entries: &[
@@ -138,18 +144,18 @@ impl SdfResources {
             });
 
         // Create render pipeline layouts
-        let pipeline_layout =
+        let deferred_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("sdf render pipeline layout"),
-                bind_group_layouts: &[&bind_group_layout],
+                label: Some("sdf deferred render pipeline layout"),
+                bind_group_layouts: &[&deferred_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
         // Create the SDF render pipeline
-        let pipeline =
+        let deferred_pipeline =
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("sdf render pipeline"),
-                layout: Some(&pipeline_layout),
+                layout: Some(&deferred_pipeline_layout),
                 cache: None,
                 vertex: wgpu::VertexState {
                     module: &shader,
@@ -159,6 +165,105 @@ impl SdfResources {
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: target_format,
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent::OVER,
+                            alpha: wgpu::BlendComponent::OVER,
+                        }),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    unclipped_depth: false,
+                    conservative: false,
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: wgpu::TextureFormat::Depth32Float,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::LessEqual,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview: None,
+            });
+
+        let paint_shader =
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("heightmap shader"),
+                source: wgpu::ShaderSource::Wgsl(
+                    include_str!(concat!(
+                        env!("CARGO_MANIFEST_DIR"),
+                        "/shaders/blit.wgsl"
+                    ))
+                    .into(),
+                ),
+            });
+
+        // Create bind group layout
+        let paint_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("heightmap bind group painter layout"),
+                entries: &[
+                    // Texture
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float {
+                                filterable: true,
+                            },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    // Sampler
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(
+                            wgpu::SamplerBindingType::Filtering,
+                        ),
+                        count: None,
+                    },
+                ],
+            });
+
+        // Create render pipeline layouts
+        let paint_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("heightmap render painter pipeline layout"),
+                bind_group_layouts: &[&paint_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+        // Create the heightmap render pipeline
+        let paint_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("heightmap render painter pipeline"),
+                layout: Some(&paint_pipeline_layout),
+                cache: None,
+                vertex: wgpu::VertexState {
+                    module: &paint_shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &paint_shader,
                     entry_point: Some("fs_main"),
                     targets: &[Some(wgpu::ColorTargetState {
                         format: target_format,
@@ -189,14 +294,95 @@ impl SdfResources {
             });
 
         Self {
-            pipeline,
-            bind_group_layout,
+            deferred_pipeline,
+            deferred_bind_group_layout,
+            paint_pipeline,
+            paint_bind_group_layout,
+            target_format,
             bound_data: HashMap::new(),
         }
     }
 
     pub fn reset(&mut self) {
         self.bound_data.clear();
+    }
+
+    /// Prepare deferred textures for a separate render pass
+    fn prepare_deferred_textures(
+        &mut self,
+        device: &wgpu::Device,
+        index: BlockIndex,
+        size: wgpu::Extent3d,
+        render_format: wgpu::TextureFormat,
+    ) {
+        let desc = wgpu::TextureDescriptor {
+            label: Some("heightmap rendering depth texture"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        };
+        let depth_texture = device.create_texture(&desc);
+        let depth_view = depth_texture.create_view(&Default::default());
+
+        let rgba_desc = wgpu::TextureDescriptor {
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: render_format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING,
+            label: Some("heightmap rendering rgba texture"),
+            view_formats: &[],
+        };
+        let rgba_texture = device.create_texture(&rgba_desc);
+        let rgba_view = rgba_texture.create_view(&Default::default());
+
+        let rgba_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("heightmap rgba sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+
+        let paint_bind_group =
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("heightmap painter bind group"),
+                layout: &self.paint_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(
+                            &rgba_view,
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&rgba_sampler),
+                    },
+                ],
+            });
+
+        self.bound_data.insert(
+            index,
+            SdfBundleData {
+                depth_texture,
+                depth_view,
+                rgba_texture,
+                rgba_view,
+                paint_bind_group,
+                images: vec![],
+            },
+        );
     }
 
     fn get_data(
@@ -261,8 +447,8 @@ impl SdfResources {
         });
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("sdf bind group"),
-            layout: &self.bind_group_layout,
+            label: Some("sdf deferred bind group"),
+            layout: &self.deferred_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -299,13 +485,46 @@ impl SdfResources {
         }
     }
 
-    pub fn paint(&self, render_pass: &mut wgpu::RenderPass, index: BlockIndex) {
-        render_pass.set_pipeline(&self.pipeline);
-        for b in &self.bound_data[&index] {
+    pub fn paint_deferred(
+        &self,
+        render_pass: &mut wgpu::RenderPass,
+        index: BlockIndex,
+    ) {
+        render_pass.set_pipeline(&self.deferred_pipeline);
+        for b in &self.bound_data[&index].images {
             render_pass.set_bind_group(0, &b.bind_group, &[]);
             render_pass.draw(0..6, 0..1);
         }
     }
+
+    pub fn paint_direct(
+        &self,
+        render_pass: &mut wgpu::RenderPass,
+        index: BlockIndex,
+    ) {
+        render_pass.set_pipeline(&self.paint_pipeline);
+        render_pass.set_bind_group(
+            0,
+            &self.bound_data[&index].paint_bind_group,
+            &[],
+        );
+        render_pass.draw(0..6, 0..1);
+    }
+}
+
+/// Resources used to render a view of SDF images
+struct SdfBundleData {
+    #[expect(unused, reason = "used as a render target")]
+    depth_texture: wgpu::Texture,
+    depth_view: wgpu::TextureView,
+
+    #[expect(unused, reason = "used as a render target")]
+    rgba_texture: wgpu::Texture,
+    rgba_view: wgpu::TextureView,
+
+    paint_bind_group: wgpu::BindGroup,
+
+    images: Vec<SdfData>,
 }
 
 /// Resources used to render a single SDF
@@ -329,7 +548,7 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         _screen_descriptor: &egui_wgpu::ScreenDescriptor,
-        _egui_encoder: &mut wgpu::CommandEncoder,
+        egui_encoder: &mut wgpu::CommandEncoder,
         resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
         let gr: &mut WgpuResources = resources.get_mut().unwrap();
@@ -349,6 +568,21 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
             self.size,
         );
 
+        // TODO compute this off-thread?
+        let mut min_distance = f32::INFINITY;
+        let mut max_distance = -f32::INFINITY;
+        for d in self.image.data.iter().flat_map(|i| i.distance.iter()) {
+            max_distance = max_distance.max(*d);
+            min_distance = min_distance.min(*d);
+        }
+        let any_color = self.image.data.iter().any(|i| i.color.is_some());
+
+        gr.sdf.prepare_deferred_textures(
+            device,
+            self.index,
+            texture_size,
+            gr.sdf.target_format,
+        );
         for image in self.image.data.iter() {
             let data = gr.sdf.get_data(device, texture_size);
 
@@ -393,7 +627,9 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
             let uniforms = Uniforms {
                 transform: transform.into(),
                 has_color: u32::from(has_color),
-                _padding: Default::default(),
+                any_color: u32::from(any_color),
+                min_distance,
+                max_distance,
             };
             {
                 let mut writer = queue
@@ -408,8 +644,46 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
                 writer.copy_from_slice(uniforms.as_bytes());
             }
 
-            gr.sdf.bound_data.entry(self.index).or_default().push(data);
+            gr.sdf
+                .bound_data
+                .get_mut(&self.index)
+                .unwrap()
+                .images
+                .push(data);
         }
+
+        // Do deferred painting (with depth buffer) in a separate render pass
+        let data = &gr.sdf.bound_data[&self.index];
+        let mut render_pass =
+            egui_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("sdf deferred render"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &data.rgba_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.1,
+                            g: 0.1,
+                            b: 0.1,
+                            a: 0.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(
+                    wgpu::RenderPassDepthStencilAttachment {
+                        view: &data.depth_view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(1.0),
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    },
+                ),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+        gr.sdf.paint_deferred(&mut render_pass, self.index);
 
         Vec::new()
     }
@@ -423,6 +697,6 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
         let rs: &WgpuResources = resources.get().unwrap();
 
         rs.clear.paint(render_pass);
-        rs.sdf.paint(render_pass, self.index);
+        rs.sdf.paint_direct(render_pass, self.index);
     }
 }
