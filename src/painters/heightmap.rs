@@ -187,10 +187,10 @@ impl egui_wgpu::CallbackTrait for WgpuHeightmapPainter {
         resources: &egui_wgpu::CallbackResources,
     ) {
         let rs: &WgpuResources = resources.get().unwrap();
+        let data = &rs.heightmap.bound_data[&self.index];
 
         rs.clear.paint(render_pass);
-        rs.blit
-            .paint(render_pass, &rs.heightmap.bound_data[&self.index].blit);
+        rs.blit.paint(render_pass, &data.blit);
     }
 }
 

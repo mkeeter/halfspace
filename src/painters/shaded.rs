@@ -196,10 +196,10 @@ impl egui_wgpu::CallbackTrait for WgpuShadedPainter {
         resources: &egui_wgpu::CallbackResources,
     ) {
         let rs: &WgpuResources = resources.get().unwrap();
+        let data = &rs.shaded.bound_data[&self.index];
 
         rs.clear.paint(render_pass);
-        rs.blit
-            .paint(render_pass, &rs.shaded.bound_data[&self.index].blit);
+        rs.blit.paint(render_pass, &data.blit);
     }
 }
 

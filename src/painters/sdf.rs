@@ -463,9 +463,9 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
         resources: &egui_wgpu::CallbackResources,
     ) {
         let rs: &WgpuResources = resources.get().unwrap();
+        let data = &rs.sdf.bound_data[&self.index];
 
         rs.clear.paint(render_pass);
-        rs.blit
-            .paint(render_pass, &rs.sdf.bound_data[&self.index].blit);
+        rs.blit.paint(render_pass, &data.blit);
     }
 }
