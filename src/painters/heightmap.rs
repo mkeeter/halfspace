@@ -252,6 +252,7 @@ impl HeightmapResources {
                     .into(),
                 ),
             });
+        let vert_shader = super::vert_shader(device);
 
         // Create bind group layout
         let deferred_bind_group_layout =
@@ -330,7 +331,7 @@ impl HeightmapResources {
                 layout: Some(&deferred_pipeline_layout),
                 cache: None,
                 vertex: wgpu::VertexState {
-                    module: &deferred_shader,
+                    module: &vert_shader,
                     entry_point: Some("vs_main"),
                     buffers: &[],
                     compilation_options: Default::default(),
@@ -429,7 +430,7 @@ impl HeightmapResources {
                 layout: Some(&paint_pipeline_layout),
                 cache: None,
                 vertex: wgpu::VertexState {
-                    module: &paint_shader,
+                    module: &vert_shader,
                     entry_point: Some("vs_main"),
                     buffers: &[],
                     compilation_options: Default::default(),
