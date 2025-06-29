@@ -10,8 +10,7 @@ impl BlitResources {
         device: &wgpu::Device,
         target_format: wgpu::TextureFormat,
     ) -> Self {
-        let vert_shader = super::vert_shader(device);
-        let frag_shader =
+        let shader =
             device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("blit shader"),
                 source: wgpu::ShaderSource::Wgsl(
@@ -68,13 +67,13 @@ impl BlitResources {
                 layout: Some(&pipeline_layout),
                 cache: None,
                 vertex: wgpu::VertexState {
-                    module: &vert_shader,
+                    module: &shader,
                     entry_point: Some("vs_main"),
                     buffers: &[],
                     compilation_options: Default::default(),
                 },
                 fragment: Some(wgpu::FragmentState {
-                    module: &frag_shader,
+                    module: &shader,
                     entry_point: Some("fs_main"),
                     targets: &[Some(wgpu::ColorTargetState {
                         format: target_format,

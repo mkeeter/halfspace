@@ -170,16 +170,3 @@ fn transform3(
     );
     transform
 }
-
-fn vert_shader(device: &wgpu::Device) -> wgpu::ShaderModule {
-    device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("sdf shader"),
-        source: wgpu::ShaderSource::Wgsl(
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/shaders/vert.wgsl"
-            ))
-            .into(),
-        ),
-    })
-}

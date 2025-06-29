@@ -220,7 +220,6 @@ impl HeightmapResources {
                     .into(),
                 ),
             });
-        let vert_shader = super::vert_shader(device);
 
         // Create bind group layout
         let bind_group_layout =
@@ -299,7 +298,7 @@ impl HeightmapResources {
                 layout: Some(&pipeline_layout),
                 cache: None,
                 vertex: wgpu::VertexState {
-                    module: &vert_shader,
+                    module: &shader,
                     entry_point: Some("vs_main"),
                     buffers: &[],
                     compilation_options: Default::default(),
