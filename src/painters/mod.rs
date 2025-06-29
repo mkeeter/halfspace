@@ -21,6 +21,7 @@
 use eframe::egui_wgpu::wgpu;
 
 mod bitfield;
+mod blit;
 mod clear;
 mod debug;
 mod heightmap;
@@ -44,6 +45,7 @@ pub struct WgpuResources {
     debug: debug::DebugResources,
     clear: clear::ClearResources,
     sdf: sdf::SdfResources,
+    blit: blit::BlitResources,
 }
 
 impl WgpuResources {
@@ -53,6 +55,7 @@ impl WgpuResources {
         self.shaded.reset();
         self.sdf.reset();
         self.debug.reset();
+        // blit doesn't store persistent data
     }
 
     /// Installs an instance of `WgpuResources` into the callback resources
@@ -67,15 +70,16 @@ impl WgpuResources {
 
     fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat) -> Self {
         let clear = clear::ClearResources::new(device, target_format);
-        let heightmap =
-            heightmap::HeightmapResources::new(device, target_format);
+        let heightmap = heightmap::HeightmapResources::new(device);
         let shaded = shaded::ShadedResources::new(device, target_format);
         let bitfield = bitfield::BitfieldResources::new(device, target_format);
         let sdf = sdf::SdfResources::new(device, target_format);
         let debug = debug::DebugResources::new(device, target_format);
+        let blit = blit::BlitResources::new(device, target_format);
 
         WgpuResources {
             clear,
+            blit,
             heightmap,
             shaded,
             bitfield,
