@@ -39,23 +39,32 @@ pub use shaded::WgpuShadedPainter;
 /// This is constructed *once* and used for every GPU rendering task in the
 /// GUI.
 pub struct WgpuResources {
+    /// Render pipeline which clears the screen, drawing a grey checkerboard
+    clear: clear::ClearResources,
+
+    /// Pipeline for render-from-texture operations
+    ///
+    /// Many of the other pipelines need a custom render pass (e.g. for depth
+    /// culling), so will render to a texture then use the `blit` pipeline to
+    /// draw it.  The depth + RGBA texture used in these operations is
+    /// abstracted by [`BlitData`](blit::BlitData).
+    blit: blit::BlitResources,
+
     bitfield: bitfield::BitfieldResources,
     heightmap: heightmap::HeightmapResources,
     shaded: shaded::ShadedResources,
     debug: debug::DebugResources,
-    clear: clear::ClearResources,
     sdf: sdf::SdfResources,
-    blit: blit::BlitResources,
 }
 
 impl WgpuResources {
     pub fn reset(&mut self) {
+        // blit and clear don't store persistent data
         self.bitfield.reset();
         self.heightmap.reset();
         self.shaded.reset();
         self.sdf.reset();
         self.debug.reset();
-        // blit doesn't store persistent data
     }
 
     /// Installs an instance of `WgpuResources` into the callback resources
@@ -70,12 +79,13 @@ impl WgpuResources {
 
     fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat) -> Self {
         let clear = clear::ClearResources::new(device, target_format);
-        let heightmap = heightmap::HeightmapResources::new(device);
-        let shaded = shaded::ShadedResources::new(device, target_format);
-        let bitfield = bitfield::BitfieldResources::new(device, target_format);
-        let sdf = sdf::SdfResources::new(device, target_format);
-        let debug = debug::DebugResources::new(device, target_format);
         let blit = blit::BlitResources::new(device, target_format);
+
+        let heightmap = heightmap::HeightmapResources::new(device);
+        let shaded = shaded::ShadedResources::new(device);
+        let sdf = sdf::SdfResources::new(device);
+        let bitfield = bitfield::BitfieldResources::new(device, target_format);
+        let debug = debug::DebugResources::new(device, target_format);
 
         WgpuResources {
             clear,
