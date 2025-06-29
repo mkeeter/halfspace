@@ -35,6 +35,3 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     output.tex_coords = uv[vertex_index];
     return output;
 }
-
-
-
