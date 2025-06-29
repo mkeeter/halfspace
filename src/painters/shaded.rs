@@ -77,12 +77,8 @@ impl egui_wgpu::CallbackTrait for WgpuShadedPainter {
             self.size,
         );
 
-        gr.shaded.prepare_deferred_textures(
-            device,
-            self.index,
-            texture_size,
-            gr.shaded.target_format,
-        );
+        gr.shaded
+            .prepare_deferred_textures(device, self.index, texture_size);
 
         // TODO compute this off-thread?
         let max_depth = self
@@ -240,8 +236,6 @@ pub(crate) struct ShadedResources {
     paint_pipeline: wgpu::RenderPipeline,
     paint_bind_group_layout: wgpu::BindGroupLayout,
 
-    target_format: wgpu::TextureFormat,
-
     bound_data: HashMap<BlockIndex, ShadedBundleData>,
 }
 
@@ -369,7 +363,7 @@ impl ShadedResources {
                     module: &deferred_shader,
                     entry_point: Some("fs_main"),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: target_format,
+                        format: wgpu::TextureFormat::Bgra8Unorm,
                         blend: Some(wgpu::BlendState {
                             color: wgpu::BlendComponent::OVER,
                             alpha: wgpu::BlendComponent::OVER,
@@ -500,7 +494,6 @@ impl ShadedResources {
             deferred_bind_group_layout,
             paint_pipeline,
             paint_bind_group_layout,
-            target_format,
             bound_data: HashMap::new(),
         }
     }
@@ -515,7 +508,6 @@ impl ShadedResources {
         device: &wgpu::Device,
         index: BlockIndex,
         size: wgpu::Extent3d,
-        render_format: wgpu::TextureFormat,
     ) {
         let desc = wgpu::TextureDescriptor {
             label: Some("shaded rendering depth texture"),
@@ -536,7 +528,7 @@ impl ShadedResources {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: render_format,
+            format: wgpu::TextureFormat::Bgra8Unorm,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                 | wgpu::TextureUsages::TEXTURE_BINDING,
             label: Some("shaded rendering rgba texture"),

@@ -60,7 +60,6 @@ pub(crate) struct SdfResources {
     paint_pipeline: wgpu::RenderPipeline,
     paint_bind_group_layout: wgpu::BindGroupLayout,
 
-    target_format: wgpu::TextureFormat,
     bound_data: HashMap<BlockIndex, SdfBundleData>,
 }
 
@@ -168,7 +167,7 @@ impl SdfResources {
                     module: &shader,
                     entry_point: Some("fs_main"),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: target_format,
+                        format: wgpu::TextureFormat::Bgra8Unorm,
                         blend: Some(wgpu::BlendState {
                             color: wgpu::BlendComponent::OVER,
                             alpha: wgpu::BlendComponent::OVER,
@@ -299,7 +298,6 @@ impl SdfResources {
             deferred_bind_group_layout,
             paint_pipeline,
             paint_bind_group_layout,
-            target_format,
             bound_data: HashMap::new(),
         }
     }
@@ -314,7 +312,6 @@ impl SdfResources {
         device: &wgpu::Device,
         index: BlockIndex,
         size: wgpu::Extent3d,
-        render_format: wgpu::TextureFormat,
     ) {
         let desc = wgpu::TextureDescriptor {
             label: Some("heightmap rendering depth texture"),
@@ -335,7 +332,7 @@ impl SdfResources {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: render_format,
+            format: wgpu::TextureFormat::Bgra8Unorm,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                 | wgpu::TextureUsages::TEXTURE_BINDING,
             label: Some("heightmap rendering rgba texture"),
@@ -578,12 +575,8 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
         }
         let any_color = self.image.data.iter().any(|i| i.color.is_some());
 
-        gr.sdf.prepare_deferred_textures(
-            device,
-            self.index,
-            texture_size,
-            gr.sdf.target_format,
-        );
+        gr.sdf
+            .prepare_deferred_textures(device, self.index, texture_size);
         for image in self.image.data.iter() {
             let data = gr.sdf.get_data(device, texture_size);
 

@@ -82,7 +82,6 @@ impl egui_wgpu::CallbackTrait for WgpuHeightmapPainter {
             device,
             self.index,
             texture_size,
-            gr.heightmap.target_format,
         );
 
         // TODO compute this off-thread?
@@ -231,8 +230,6 @@ pub(crate) struct HeightmapResources {
     paint_pipeline: wgpu::RenderPipeline,
     paint_bind_group_layout: wgpu::BindGroupLayout,
 
-    target_format: wgpu::TextureFormat,
-
     bound_data: HashMap<BlockIndex, HeightmapBundleData>,
 }
 
@@ -340,7 +337,7 @@ impl HeightmapResources {
                     module: &deferred_shader,
                     entry_point: Some("fs_main"),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: target_format,
+                        format: wgpu::TextureFormat::Bgra8Unorm,
                         blend: Some(wgpu::BlendState {
                             color: wgpu::BlendComponent::OVER,
                             alpha: wgpu::BlendComponent::OVER,
@@ -471,7 +468,6 @@ impl HeightmapResources {
             deferred_bind_group_layout,
             paint_pipeline,
             paint_bind_group_layout,
-            target_format,
             bound_data: HashMap::new(),
         }
     }
@@ -486,7 +482,6 @@ impl HeightmapResources {
         device: &wgpu::Device,
         index: BlockIndex,
         size: wgpu::Extent3d,
-        render_format: wgpu::TextureFormat,
     ) {
         let desc = wgpu::TextureDescriptor {
             label: Some("heightmap rendering depth texture"),
@@ -507,7 +502,7 @@ impl HeightmapResources {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: render_format,
+            format: wgpu::TextureFormat::Bgra8Unorm,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                 | wgpu::TextureUsages::TEXTURE_BINDING,
             label: Some("heightmap rendering rgba texture"),
