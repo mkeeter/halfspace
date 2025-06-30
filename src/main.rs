@@ -257,7 +257,7 @@ struct MessageQueue {
 
 impl MessageQueue {
     fn send(&self, m: Message) {
-        if let Ok(_) = self.queue.send(m) {
+        if self.queue.send(m).is_ok() {
             self.ctx.request_repaint();
         }
     }

@@ -80,8 +80,8 @@ impl<'a> WorldView<'a> {
         let block_view = block.get_view();
         let rect = ui.clip_rect();
         let size = fidget::render::ImageSize::new(
-            rect.width() as u32,
-            rect.height() as u32,
+            (rect.width() * ui.pixels_per_point()) as u32,
+            (rect.height() * ui.pixels_per_point()) as u32,
         );
         let entry = self.views.entry(index);
         // If the block does not define a view, and there is no previous view
@@ -128,7 +128,7 @@ impl<'a> WorldView<'a> {
             (None, None) => None,
         }
         .map(|(p, drag)| {
-            let p = p - rect.min;
+            let p = (p - rect.min) * ui.pixels_per_point();
             fidget::gui::CursorState {
                 screen_pos: nalgebra::Point2::new(
                     p.x.round() as i32,
@@ -449,7 +449,7 @@ fn draw_line_numbers(ui: &mut egui::Ui, index: BlockIndex, block: &Block) {
     }
     let max_indent = line_count.to_string().len();
     let mut line_text = (1..=line_count)
-        .map(|i| format!("{number:>width$}", number = i, width = max_indent))
+        .map(|i| format!("{i:>max_indent$}"))
         .collect::<Vec<String>>()
         .join("\n");
     let width = max_indent as f32
@@ -864,7 +864,7 @@ impl DraggableInputValue {
         match self {
             Self::Float(mut f) => {
                 f += drag_motion.x * scale;
-                format!("{f:.*}", d)
+                format!("{f:.d$}")
             }
             Self::Vec2(mut v) => {
                 let out = mat * offset;

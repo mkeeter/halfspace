@@ -413,7 +413,7 @@ impl BlockEvalData {
             .into())
         } else if !self.names.insert(name.to_owned()) {
             Err(rhai::EvalAltResult::ErrorVariableExists(
-                format!("io `{}` already exists", name),
+                format!("io `{name}` already exists"),
                 ctx.position(),
             )
             .into())
