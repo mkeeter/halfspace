@@ -11,7 +11,7 @@ use heck::ToSnakeCase;
 
 mod scene;
 mod shapes;
-pub use scene::Scene;
+pub use scene::{Color, Scene};
 pub use shapes::ShapeLibrary;
 
 pub struct Block {

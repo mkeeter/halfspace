@@ -1,10 +1,12 @@
+use fidget::rhai::FromDynamic;
+
 #[derive(Clone)]
 pub struct Drawable {
     /// Tree to draw, as a node in the parent [`Scene`]'s context
     pub tree: fidget::context::Tree,
 
     /// Optional RGB color associated with this shape
-    pub color: Option<[u8; 3]>,
+    pub color: Option<Color>,
 }
 
 impl rhai::CustomType for Drawable {
@@ -12,16 +14,51 @@ impl rhai::CustomType for Drawable {
         builder
             .with_name("Drawable")
             .on_print(|_t| "drawable(..)".to_owned())
+            .with_fn("draw", |tree: fidget::context::Tree, color: Color| {
+                Drawable {
+                    tree,
+                    color: Some(color),
+                }
+            });
+    }
+}
+
+#[derive(Clone, PartialEq)]
+pub enum Color {
+    Rgb([u8; 3]),
+}
+
+impl rhai::CustomType for Color {
+    fn build(mut builder: rhai::TypeBuilder<Self>) {
+        builder
+            .with_name("Color")
+            .on_print(|t| match t {
+                Color::Rgb([r, g, b]) => format!("rgb({r}, {g}, {b})"),
+            })
             .with_fn(
                 "rgb",
-                |tree: fidget::context::Tree, r: f64, g: f64, b: f64| {
-                    let r = (r.clamp(0.0, 1.0) * u8::MAX as f64) as u8;
-                    let g = (g.clamp(0.0, 1.0) * u8::MAX as f64) as u8;
-                    let b = (b.clamp(0.0, 1.0) * u8::MAX as f64) as u8;
-                    Drawable {
-                        tree,
-                        color: Some([r, g, b]),
+                |ctx: rhai::NativeCallContext,
+                 r: rhai::Dynamic,
+                 g: rhai::Dynamic,
+                 b: rhai::Dynamic|
+                 -> Result<Color, Box<rhai::EvalAltResult>> {
+                    let r = f64::from_dynamic(&ctx, r, None)?;
+                    let g = f64::from_dynamic(&ctx, g, None)?;
+                    let b = f64::from_dynamic(&ctx, b, None)?;
+                    let rgb = [r, g, b];
+                    if let Some(bad) =
+                        rgb.iter().find(|c| !(0.0..=1.0).contains(*c))
+                    {
+                        return Err(
+                            rhai::EvalAltResult::ErrorMismatchDataType(
+                                "float in the 0.0 - 1.0 range".to_owned(),
+                                format!("float with value {bad}"),
+                                ctx.position(),
+                            )
+                            .into(),
+                        );
                     }
+                    Ok(Color::Rgb(rgb.map(|x| (x * 255.0) as u8)))
                 },
             );
     }
@@ -84,7 +121,7 @@ fn build_scene(
             } else {
                 return Err(Box::new(
                     rhai::EvalAltResult::ErrorMismatchDataType(
-                        "tree or scene".to_owned(),
+                        "tree or drawable".to_owned(),
                         v.type_name().to_string(),
                         ctx.position(),
                     ),
@@ -107,4 +144,12 @@ scene_builder!(build_scene8, a, b, c, d, e, f, g, h);
 pub fn register_types(engine: &mut rhai::Engine) {
     engine.build_type::<Scene>();
     engine.build_type::<Drawable>();
+    engine.build_type::<Color>();
+
+    engine.register_fn("*", |tree: fidget::context::Tree, color: Color| {
+        Drawable {
+            tree,
+            color: Some(color),
+        }
+    });
 }

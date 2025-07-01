@@ -6,7 +6,7 @@ use crate::{
         ShadedImageData, ShadedViewImage, ViewCanvas, ViewImage, ViewMode2,
         ViewMode3,
     },
-    world::Scene,
+    world::{Color, Scene},
     BlockIndex, Message, MessageQueue,
 };
 
@@ -125,7 +125,7 @@ impl RenderTask {
                     .map(|shape| {
                         let rs = RenderShape::from(shape.tree.clone());
                         let data = cfg.run(rs)?;
-                        Some((data, shape.color))
+                        Some((data, shape.color.clone()))
                     })
                     .collect::<Option<_>>()?;
 
@@ -143,8 +143,13 @@ impl RenderTask {
                                     );
                                     BitfieldImageData {
                                         distance: image.take().0,
-                                        color: color.map(|[r, g, b]| {
-                                            vec![[r, g, b, 255]; pixel_count]
+                                        color: color.map(|c| match c {
+                                            Color::Rgb([r, g, b]) => {
+                                                vec![
+                                                    [r, g, b, 255];
+                                                    pixel_count
+                                                ]
+                                            }
                                         }),
                                     }
                                 })
@@ -171,8 +176,13 @@ impl RenderTask {
                                     });
                                     SdfImageData {
                                         distance: image.take().0,
-                                        color: color.map(|[r, g, b]| {
-                                            vec![[r, g, b, 255]; pixel_count]
+                                        color: color.map(|c| match c {
+                                            Color::Rgb([r, g, b]) => {
+                                                vec![
+                                                    [r, g, b, 255];
+                                                    pixel_count
+                                                ]
+                                            }
                                         }),
                                     }
                                 })
@@ -225,7 +235,7 @@ impl RenderTask {
                     .map(|shape| {
                         let rs = RenderShape::from(shape.tree.clone());
                         let data = cfg.run(rs)?;
-                        Some((data, shape.color))
+                        Some((data, shape.color.clone()))
                     })
                     .collect::<Option<_>>()?;
                 match mode {
@@ -240,8 +250,13 @@ impl RenderTask {
                                     let data = image.map(|v| v.depth as f32);
                                     HeightmapImageData {
                                         depth: data.take().0,
-                                        color: color.map(|[r, g, b]| {
-                                            vec![[r, g, b, 255]; pixel_count]
+                                        color: color.map(|c| match c {
+                                            Color::Rgb([r, g, b]) => {
+                                                vec![
+                                                    [r, g, b, 255];
+                                                    pixel_count
+                                                ]
+                                            }
                                         }),
                                     }
                                 })
@@ -271,8 +286,13 @@ impl RenderTask {
                                     ShadedImageData {
                                         pixels,
                                         ssao,
-                                        color: color.map(|[r, g, b]| {
-                                            vec![[r, g, b, 255]; pixel_count]
+                                        color: color.map(|c| match c {
+                                            Color::Rgb([r, g, b]) => {
+                                                vec![
+                                                    [r, g, b, 255];
+                                                    pixel_count
+                                                ]
+                                            }
                                         }),
                                     }
                                 })
