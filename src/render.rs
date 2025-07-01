@@ -334,8 +334,6 @@ impl RenderSettings {
 
 impl std::cmp::PartialEq for RenderSettings {
     fn eq(&self, other: &Self) -> bool {
-        // XXX this does expensive tree deduplication!
-        let mut ctx = fidget::Context::new();
         match (self, other) {
             (
                 Self::Render2 {
@@ -355,12 +353,11 @@ impl std::cmp::PartialEq for RenderSettings {
                     && view_a == view_b
                     && size_a == size_b
                     && scene_a.shapes.len() == scene_b.shapes.len()
-                    && scene_a.shapes.iter().zip(&scene_b.shapes).all(
-                        |(a, b)| {
-                            a.color == b.color
-                                && ctx.import(&a.tree) == ctx.import(&b.tree)
-                        },
-                    )
+                    && scene_a
+                        .shapes
+                        .iter()
+                        .zip(&scene_b.shapes)
+                        .all(|(a, b)| a.color == b.color && a.tree == b.tree)
             }
             (
                 Self::Render3 {
@@ -380,12 +377,11 @@ impl std::cmp::PartialEq for RenderSettings {
                     && view_a == view_b
                     && size_a == size_b
                     && scene_a.shapes.len() == scene_b.shapes.len()
-                    && scene_a.shapes.iter().zip(&scene_b.shapes).all(
-                        |(a, b)| {
-                            a.color == b.color
-                                && ctx.import(&a.tree) == ctx.import(&b.tree)
-                        },
-                    )
+                    && scene_a
+                        .shapes
+                        .iter()
+                        .zip(&scene_b.shapes)
+                        .all(|(a, b)| a.color == b.color && a.tree == b.tree)
             }
             _ => false,
         }
