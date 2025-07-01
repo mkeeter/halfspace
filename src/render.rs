@@ -10,13 +10,20 @@ use crate::{
     BlockIndex, Message, MessageQueue,
 };
 
-use fidget::render::effects;
+use fidget::{
+    eval::{BulkEvaluator, Function, MathFunction},
+    render::effects,
+};
+
+use rayon::prelude::*;
 
 #[cfg(feature = "jit")]
-type RenderShape = fidget::jit::JitShape;
+type RenderFunction = fidget::jit::JitFunction;
 
 #[cfg(not(feature = "jit"))]
-type RenderShape = fidget::vm::VmShape;
+type RenderFunction = fidget::vm::VmFunction;
+
+type RenderShape = fidget::shape::Shape<RenderFunction>;
 
 /// State representing an in-progress render
 pub struct RenderTask {
@@ -93,14 +100,6 @@ impl RenderTask {
     ) -> Option<ViewImage> {
         let scale = 1 << level;
         let threads = Some(&fidget::render::ThreadPool::Global);
-        let pixel_count = match settings {
-            RenderSettings::Render2 { size, .. } => {
-                size.width() as usize * size.height() as usize
-            }
-            RenderSettings::Render3 { size, .. } => {
-                size.width() as usize * size.height() as usize
-            }
-        };
         let data = match settings {
             RenderSettings::Render2 {
                 scene,
@@ -138,20 +137,7 @@ impl RenderTask {
                             data: images
                                 .into_iter()
                                 .map(|(image, color)| {
-                                    let image = BitfieldViewImage::denoise(
-                                        image, threads,
-                                    );
-                                    BitfieldImageData {
-                                        distance: image.take().0,
-                                        color: color.map(|c| match c {
-                                            Color::Rgb([r, g, b]) => {
-                                                vec![
-                                                    [r, g, b, 255];
-                                                    pixel_count
-                                                ]
-                                            }
-                                        }),
-                                    }
+                                    image_to_bitfield(image, *view, color)
                                 })
                                 .collect(),
                         };
@@ -166,25 +152,7 @@ impl RenderTask {
                             data: images
                                 .into_iter()
                                 .map(|(image, color)| {
-                                    let image = image.map(|d| {
-                                        let d = d.distance().unwrap();
-                                        if d.is_infinite() {
-                                            1e12f32.copysign(d)
-                                        } else {
-                                            d
-                                        }
-                                    });
-                                    SdfImageData {
-                                        distance: image.take().0,
-                                        color: color.map(|c| match c {
-                                            Color::Rgb([r, g, b]) => {
-                                                vec![
-                                                    [r, g, b, 255];
-                                                    pixel_count
-                                                ]
-                                            }
-                                        }),
-                                    }
+                                    image_to_sdf(image, *view, color)
                                 })
                                 .collect(),
                         };
@@ -247,18 +215,7 @@ impl RenderTask {
                             data: images
                                 .into_iter()
                                 .map(|(image, color)| {
-                                    let data = image.map(|v| v.depth as f32);
-                                    HeightmapImageData {
-                                        depth: data.take().0,
-                                        color: color.map(|c| match c {
-                                            Color::Rgb([r, g, b]) => {
-                                                vec![
-                                                    [r, g, b, 255];
-                                                    pixel_count
-                                                ]
-                                            }
-                                        }),
-                                    }
+                                    image_to_heightmap(image, *view, color)
                                 })
                                 .collect(),
                         };
@@ -272,29 +229,7 @@ impl RenderTask {
                             data: images
                                 .into_iter()
                                 .map(|(image, color)| {
-                                    // XXX this should all happen on the GPU,
-                                    // probably!
-                                    let image = effects::denoise_normals(
-                                        &image, threads,
-                                    );
-                                    let ssao = effects::blur_ssao(
-                                        &effects::compute_ssao(&image, threads),
-                                        threads,
-                                    );
-                                    let (pixels, _size) = image.take();
-                                    let (ssao, _size) = ssao.take();
-                                    ShadedImageData {
-                                        pixels,
-                                        ssao,
-                                        color: color.map(|c| match c {
-                                            Color::Rgb([r, g, b]) => {
-                                                vec![
-                                                    [r, g, b, 255];
-                                                    pixel_count
-                                                ]
-                                            }
-                                        }),
-                                    }
+                                    image_to_shaded(image, *view, color)
                                 })
                                 .collect(),
                         };
@@ -406,4 +341,332 @@ impl std::cmp::PartialEq for RenderSettings {
             _ => false,
         }
     }
+}
+
+fn image_to_sdf(
+    image: fidget::render::Image<fidget::render::DistancePixel>,
+    view: fidget::render::View2,
+    color: Option<Color>,
+) -> SdfImageData {
+    let pixel_count =
+        image.size().width() as usize * image.size().height() as usize;
+    let color = color.map(|c| match c {
+        Color::Rgb([r, g, b]) => {
+            vec![[r, g, b, 255]; pixel_count]
+        }
+        Color::RgbPixel(rgb) => render_rgb_2d(&image, view, rgb).take().0,
+    });
+    let distance = image
+        .map(|d| {
+            let d = d.distance().unwrap();
+            if d.is_infinite() {
+                1e12f32.copysign(d)
+            } else {
+                d
+            }
+        })
+        .take()
+        .0;
+
+    SdfImageData { distance, color }
+}
+
+fn image_to_bitfield(
+    image: fidget::render::Image<fidget::render::DistancePixel>,
+    view: fidget::render::View2,
+    color: Option<Color>,
+) -> BitfieldImageData {
+    let pixel_count =
+        image.size().width() as usize * image.size().height() as usize;
+    let threads = Some(&fidget::render::ThreadPool::Global);
+    let color = color.map(|c| match c {
+        Color::Rgb([r, g, b]) => {
+            vec![[r, g, b, 255]; pixel_count]
+        }
+        Color::RgbPixel(rgb) => render_rgb_2d(&image, view, rgb).take().0,
+    });
+    let distance = BitfieldViewImage::denoise(image, threads).take().0;
+    BitfieldImageData { distance, color }
+}
+
+fn image_to_heightmap(
+    image: fidget::render::Image<
+        fidget::render::GeometryPixel,
+        fidget::render::VoxelSize,
+    >,
+    view: fidget::render::View3,
+    color: Option<Color>,
+) -> HeightmapImageData {
+    let pixel_count =
+        image.size().width() as usize * image.size().height() as usize;
+    let color = color.map(|c| match c {
+        Color::Rgb([r, g, b]) => {
+            vec![[r, g, b, 255]; pixel_count]
+        }
+        Color::RgbPixel(rgb) => render_rgb_3d(&image, view, rgb).take().0,
+    });
+    let depth = image.map(|v| v.depth as f32).take().0;
+    HeightmapImageData { depth, color }
+}
+
+fn image_to_shaded(
+    image: fidget::render::Image<
+        fidget::render::GeometryPixel,
+        fidget::render::VoxelSize,
+    >,
+    view: fidget::render::View3,
+    color: Option<Color>,
+) -> ShadedImageData {
+    let pixel_count =
+        image.size().width() as usize * image.size().height() as usize;
+    let threads = Some(&fidget::render::ThreadPool::Global);
+
+    let color = color.map(|c| match c {
+        Color::Rgb([r, g, b]) => {
+            vec![[r, g, b, 255]; pixel_count]
+        }
+        Color::RgbPixel(rgb) => render_rgb_3d(&image, view, rgb).take().0,
+    });
+
+    // XXX this should all happen on the GPU, probably!
+    let image = effects::denoise_normals(&image, threads);
+    let ssao =
+        effects::blur_ssao(&effects::compute_ssao(&image, threads), threads);
+    let (pixels, _size) = image.take();
+    let (ssao, _size) = ssao.take();
+    ShadedImageData {
+        pixels,
+        ssao,
+        color,
+    }
+}
+
+fn render_rgb_2d(
+    image: &fidget::render::Image<fidget::render::DistancePixel>,
+    view: fidget::render::View2,
+    rgb: [fidget::context::Tree; 3],
+) -> fidget::render::Image<[u8; 4]> {
+    let mat = view.world_to_model() * image.size().screen_to_world();
+
+    let image_size = image.size();
+    let mut ctx = fidget::Context::new();
+    let rgb = rgb.map(|x| ctx.import(&x));
+
+    let f = RenderFunction::new(&ctx, &rgb).unwrap();
+    let vars = f.vars();
+
+    let mut tiles = vec![];
+    const TILE_SIZE: u32 = 8;
+    for y in 0..image_size.height().div_ceil(TILE_SIZE) {
+        let y = y * TILE_SIZE;
+        for x in 0..image_size.width().div_ceil(TILE_SIZE) {
+            let x = x * TILE_SIZE;
+            let mut any_inside = false;
+            'outer: for dx in 0..TILE_SIZE {
+                let x = x + dx;
+                if x >= image_size.width() {
+                    continue;
+                }
+                for dy in 0..TILE_SIZE {
+                    let y = y + dy;
+                    if y >= image_size.height() {
+                        continue;
+                    }
+                    if image[(y as usize, x as usize)].inside() {
+                        any_inside = true;
+                        break 'outer;
+                    }
+                }
+            }
+            if any_inside {
+                tiles.push((x, y));
+            }
+        }
+    }
+
+    let tape = f.float_slice_tape(Default::default());
+
+    let tiles = tiles
+        .into_par_iter()
+        .map_init(
+            || {
+                (
+                    RenderFunction::new_float_slice_eval(),
+                    vec![0f32; (TILE_SIZE * TILE_SIZE) as usize],
+                    vec![0f32; (TILE_SIZE * TILE_SIZE) as usize],
+                    vec![0f32; (TILE_SIZE * TILE_SIZE) as usize],
+                )
+            },
+            |(eval, xs, ys, zs), (px, py)| {
+                let mut i = 0;
+                for dy in 0..TILE_SIZE {
+                    for dx in 0..TILE_SIZE {
+                        let pos = mat.transform_point(&nalgebra::Point2::new(
+                            (px + dx) as f32,
+                            (py + dy) as f32,
+                        ));
+                        xs[i] = pos.x;
+                        ys[i] = pos.y;
+                        i += 1;
+                    }
+                }
+                // Dummy values, which we have to shuffle around
+                let mut vs = [xs.as_slice(), ys.as_slice(), zs.as_slice()];
+                if let Some(ix) = vars.get(&fidget::var::Var::X) {
+                    vs[ix] = xs;
+                }
+                if let Some(iy) = vars.get(&fidget::var::Var::Y) {
+                    vs[iy] = ys;
+                }
+                if let Some(iz) = vars.get(&fidget::var::Var::Z) {
+                    vs[iz] = zs;
+                }
+                let out = eval.eval(&tape, &vs).unwrap();
+                let r = &out[0];
+                let g = &out[1];
+                let b = &out[2];
+                let image = (0..(TILE_SIZE as usize).pow(2))
+                    .map(|i| [r[i], g[i], b[i], 1.0])
+                    .collect::<Vec<_>>();
+                (px, py, image)
+            },
+        )
+        .collect::<Vec<_>>();
+
+    let mut out = fidget::render::Image::new(image_size);
+    for (x, y, data) in tiles {
+        let mut iter = data.iter();
+        for dy in 0..TILE_SIZE {
+            for dx in 0..TILE_SIZE {
+                let p = iter.next().unwrap();
+                let x = x + dx;
+                let y = y + dy;
+                if x < image_size.width() && y < image_size.height() {
+                    out[(y as usize, x as usize)] =
+                        p.map(|p| (p.clamp(0.0, 1.0) * 255.0) as u8);
+                }
+            }
+        }
+    }
+    out
+}
+
+fn render_rgb_3d(
+    image: &fidget::render::Image<
+        fidget::render::GeometryPixel,
+        fidget::render::VoxelSize,
+    >,
+    view: fidget::render::View3,
+    rgb: [fidget::context::Tree; 3],
+) -> fidget::render::Image<[u8; 4], fidget::render::VoxelSize> {
+    let mat = view.world_to_model() * image.size().screen_to_world();
+
+    let image_size = image.size();
+    let mut ctx = fidget::Context::new();
+    let rgb = rgb.map(|x| ctx.import(&x));
+
+    let f = RenderFunction::new(&ctx, &rgb).unwrap();
+    let vars = f.vars();
+
+    let mut tiles = vec![];
+    const TILE_SIZE: u32 = 8;
+    for y in 0..image_size.height().div_ceil(TILE_SIZE) {
+        let y = y * TILE_SIZE;
+        for x in 0..image_size.width().div_ceil(TILE_SIZE) {
+            let x = x * TILE_SIZE;
+            let mut any_inside = false;
+            'outer: for dx in 0..TILE_SIZE {
+                let x = x + dx;
+                if x >= image_size.width() {
+                    continue;
+                }
+                for dy in 0..TILE_SIZE {
+                    let y = y + dy;
+                    if y >= image_size.height() {
+                        continue;
+                    }
+                    if image[(y as usize, x as usize)].depth != 0 {
+                        any_inside = true;
+                        break 'outer;
+                    }
+                }
+            }
+            if any_inside {
+                tiles.push((x, y));
+            }
+        }
+    }
+
+    let tape = f.float_slice_tape(Default::default());
+
+    let tiles = tiles
+        .into_par_iter()
+        .map_init(
+            || {
+                (
+                    RenderFunction::new_float_slice_eval(),
+                    vec![0f32; (TILE_SIZE * TILE_SIZE) as usize],
+                    vec![0f32; (TILE_SIZE * TILE_SIZE) as usize],
+                    vec![0f32; (TILE_SIZE * TILE_SIZE) as usize],
+                )
+            },
+            |(eval, xs, ys, zs), (px, py)| {
+                let mut i = 0;
+                for dy in 0..TILE_SIZE {
+                    for dx in 0..TILE_SIZE {
+                        let px = (px + dx) as usize;
+                        let py = (py + dy) as usize;
+                        let pz = if py < image.height() && px < image.width() {
+                            image[(py, px)].depth
+                        } else {
+                            0
+                        };
+                        let pos = mat.transform_point(&nalgebra::Point3::new(
+                            px as f32, py as f32, pz as f32,
+                        ));
+                        xs[i] = pos.x;
+                        ys[i] = pos.y;
+                        zs[i] = pos.z;
+                        i += 1;
+                    }
+                }
+                // Dummy values, which we have to shuffle around
+                let mut vs = [xs.as_slice(), ys.as_slice(), zs.as_slice()];
+                if let Some(ix) = vars.get(&fidget::var::Var::X) {
+                    vs[ix] = xs;
+                }
+                if let Some(iy) = vars.get(&fidget::var::Var::Y) {
+                    vs[iy] = ys;
+                }
+                if let Some(iz) = vars.get(&fidget::var::Var::Z) {
+                    vs[iz] = zs;
+                }
+                let out = eval.eval(&tape, &vs).unwrap();
+                let r = &out[0];
+                let g = &out[1];
+                let b = &out[2];
+                let image = (0..(TILE_SIZE as usize).pow(2))
+                    .map(|i| [r[i], g[i], b[i], 1.0])
+                    .collect::<Vec<_>>();
+                (px, py, image)
+            },
+        )
+        .collect::<Vec<_>>();
+
+    let mut out = fidget::render::Image::new(image_size);
+    for (x, y, data) in tiles {
+        let mut iter = data.iter();
+        for dy in 0..TILE_SIZE {
+            for dx in 0..TILE_SIZE {
+                let p = iter.next().unwrap();
+                let x = x + dx;
+                let y = y + dy;
+                if x < image_size.width() && y < image_size.height() {
+                    out[(y as usize, x as usize)] =
+                        p.map(|p| (p.clamp(0.0, 1.0) * 255.0) as u8);
+                }
+            }
+        }
+    }
+    out
 }
