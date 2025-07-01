@@ -119,7 +119,7 @@ struct RgbaDepth {
 // Fragment shader
 @fragment
 fn fs_main(@location(0) tex_coords: vec2<f32>) -> RgbaDepth {
-    var d = textureSample(t_distance, s_distance, tex_coords).r;
+    let d = textureSample(t_distance, s_distance, tex_coords).r;
 
     var depth: f32;
     if (d < 0.0) {
@@ -131,7 +131,7 @@ fn fs_main(@location(0) tex_coords: vec2<f32>) -> RgbaDepth {
     }
     var color: vec4<f32>;
     if (uniforms.any_color != 0) {
-        let stripes = color_stripe(d);
+        let stripes = color_stripe(d + 1.0 / 140.0);
         if (uniforms.has_color != 0) {
             var rgb = textureSample(t_color, s_color, tex_coords).rgb;
             color = vec4<f32>(rgb * stripes, 1.0);
