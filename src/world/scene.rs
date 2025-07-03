@@ -106,6 +106,12 @@ impl From<fidget::context::Tree> for Scene {
     }
 }
 
+impl From<Drawable> for Scene {
+    fn from(d: Drawable) -> Self {
+        Scene { shapes: vec![d] }
+    }
+}
+
 impl rhai::CustomType for Scene {
     fn build(mut builder: rhai::TypeBuilder<Self>) {
         builder

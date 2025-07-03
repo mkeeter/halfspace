@@ -11,7 +11,7 @@ use heck::ToSnakeCase;
 
 mod scene;
 mod shapes;
-pub use scene::{Color, Scene};
+pub use scene::{Color, Drawable, Scene};
 pub use shapes::ShapeLibrary;
 
 pub struct Block {
@@ -534,6 +534,16 @@ impl BlockEvalData {
                   -> Result<(), Box<rhai::EvalAltResult>> {
                 let mut eval_data = eval_data_.write().unwrap();
                 eval_data.view(ctx, scene)
+            },
+        );
+        let eval_data_ = eval_data.clone();
+        engine.register_fn(
+            "scene",
+            move |ctx: rhai::NativeCallContext,
+                  draw: Drawable|
+                  -> Result<(), Box<rhai::EvalAltResult>> {
+                let mut eval_data = eval_data_.write().unwrap();
+                eval_data.view(ctx, draw)
             },
         );
     }
