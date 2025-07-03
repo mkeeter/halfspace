@@ -538,7 +538,7 @@ impl BlockEvalData {
         );
         let eval_data_ = eval_data.clone();
         engine.register_fn(
-            "scene",
+            "view",
             move |ctx: rhai::NativeCallContext,
                   draw: Drawable|
                   -> Result<(), Box<rhai::EvalAltResult>> {

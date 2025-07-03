@@ -348,13 +348,8 @@ fn image_to_sdf(
     view: fidget::render::View2,
     color: Option<Color>,
 ) -> SdfImageData {
-    let pixel_count =
-        image.size().width() as usize * image.size().height() as usize;
     let color = color.map(|c| match c {
-        Color::Rgb([r, g, b]) => {
-            vec![[r, g, b, 255]; pixel_count]
-        }
-        Color::RgbPixel(rgb) => render_rgb_2d(&image, view, rgb).take().0,
+        Color::Rgb(rgb) => render_rgb_2d(&image, view, rgb).take().0,
     });
     let distance = image
         .map(|d| {
@@ -376,14 +371,9 @@ fn image_to_bitfield(
     view: fidget::render::View2,
     color: Option<Color>,
 ) -> BitfieldImageData {
-    let pixel_count =
-        image.size().width() as usize * image.size().height() as usize;
     let threads = Some(&fidget::render::ThreadPool::Global);
     let color = color.map(|c| match c {
-        Color::Rgb([r, g, b]) => {
-            vec![[r, g, b, 255]; pixel_count]
-        }
-        Color::RgbPixel(rgb) => render_rgb_2d(&image, view, rgb).take().0,
+        Color::Rgb(rgb) => render_rgb_2d(&image, view, rgb).take().0,
     });
     let distance = BitfieldViewImage::denoise(image, threads).take().0;
     BitfieldImageData { distance, color }
@@ -397,13 +387,8 @@ fn image_to_heightmap(
     view: fidget::render::View3,
     color: Option<Color>,
 ) -> HeightmapImageData {
-    let pixel_count =
-        image.size().width() as usize * image.size().height() as usize;
     let color = color.map(|c| match c {
-        Color::Rgb([r, g, b]) => {
-            vec![[r, g, b, 255]; pixel_count]
-        }
-        Color::RgbPixel(rgb) => render_rgb_3d(&image, view, rgb).take().0,
+        Color::Rgb(rgb) => render_rgb_3d(&image, view, rgb).take().0,
     });
     let depth = image.map(|v| v.depth as f32).take().0;
     HeightmapImageData { depth, color }
@@ -417,15 +402,10 @@ fn image_to_shaded(
     view: fidget::render::View3,
     color: Option<Color>,
 ) -> ShadedImageData {
-    let pixel_count =
-        image.size().width() as usize * image.size().height() as usize;
     let threads = Some(&fidget::render::ThreadPool::Global);
 
     let color = color.map(|c| match c {
-        Color::Rgb([r, g, b]) => {
-            vec![[r, g, b, 255]; pixel_count]
-        }
-        Color::RgbPixel(rgb) => render_rgb_3d(&image, view, rgb).take().0,
+        Color::Rgb(rgb) => render_rgb_3d(&image, view, rgb).take().0,
     });
 
     // XXX this should all happen on the GPU, probably!

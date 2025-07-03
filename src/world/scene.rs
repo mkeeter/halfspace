@@ -1,4 +1,5 @@
 use fidget::rhai::FromDynamic;
+use std::ops::Deref;
 
 #[derive(Clone)]
 pub struct Drawable {
@@ -25,11 +26,8 @@ impl rhai::CustomType for Drawable {
 
 #[derive(Clone, PartialEq)]
 pub enum Color {
-    /// Uniform color
-    Rgb([u8; 3]),
-
-    /// Per-pixel evaluation of RGB trees
-    RgbPixel([fidget::context::Tree; 3]),
+    /// RGB color, evaluated per-pixel
+    Rgb([fidget::context::Tree; 3]),
 }
 
 impl rhai::CustomType for Color {
@@ -37,8 +35,20 @@ impl rhai::CustomType for Color {
         builder
             .with_name("Color")
             .on_print(|t| match t {
-                Color::Rgb([r, g, b]) => format!("rgb({r}, {g}, {b})"),
-                Color::RgbPixel(_) => "rgb(..)".to_owned(),
+                Color::Rgb(rgb) => {
+                    let mut out = "rgb(".to_owned();
+                    for (i, c) in rgb.iter().enumerate() {
+                        if i != 0 {
+                            out += ", ";
+                        }
+                        out += match c.deref() {
+                            fidget::context::TreeOp::Const(c) => c.to_string(),
+                            _ => "tree(..)".to_owned(),
+                        }
+                        .as_str();
+                    }
+                    out
+                }
             })
             .with_fn(
                 "rgb",
@@ -47,47 +57,26 @@ impl rhai::CustomType for Color {
                  g: rhai::Dynamic,
                  b: rhai::Dynamic|
                  -> Result<Color, Box<rhai::EvalAltResult>> {
-                    let mut trees = [r.clone(), g.clone(), b.clone()]
-                        .map(|x| x.try_cast::<fidget::context::Tree>());
-                    if trees.iter().any(Option::is_some) {
-                        let r = match trees[0].take() {
-                            Some(t) => t,
-                            None => fidget::context::Tree::from_dynamic(
-                                &ctx, r, None,
-                            )?,
-                        };
-                        let g = match trees[1].take() {
-                            Some(t) => t,
-                            None => fidget::context::Tree::from_dynamic(
-                                &ctx, g, None,
-                            )?,
-                        };
-                        let b = match trees[2].take() {
-                            Some(t) => t,
-                            None => fidget::context::Tree::from_dynamic(
-                                &ctx, b, None,
-                            )?,
-                        };
-                        Ok(Color::RgbPixel([r, g, b]))
-                    } else {
-                        let r = f64::from_dynamic(&ctx, r, None)?;
-                        let g = f64::from_dynamic(&ctx, g, None)?;
-                        let b = f64::from_dynamic(&ctx, b, None)?;
-                        let rgb = [r, g, b];
-                        if let Some(bad) =
-                            rgb.iter().find(|c| !(0.0..=1.0).contains(*c))
-                        {
-                            return Err(
-                                rhai::EvalAltResult::ErrorMismatchDataType(
-                                    "float in the 0.0 - 1.0 range".to_owned(),
-                                    format!("float with value {bad}"),
-                                    ctx.position(),
-                                )
-                                .into(),
-                            );
+                    let r = fidget::context::Tree::from_dynamic(&ctx, r, None)?;
+                    let g = fidget::context::Tree::from_dynamic(&ctx, g, None)?;
+                    let b = fidget::context::Tree::from_dynamic(&ctx, b, None)?;
+                    let rgb = [r, g, b];
+                    for c in rgb.iter() {
+                        if let fidget::context::TreeOp::Const(c) = c.deref() {
+                            if !(0.0..=1.0).contains(c) {
+                                return Err(
+                                    rhai::EvalAltResult::ErrorMismatchDataType(
+                                        "float in the 0.0 - 1.0 range"
+                                            .to_owned(),
+                                        format!("float with value {c}"),
+                                        ctx.position(),
+                                    )
+                                    .into(),
+                                );
+                            }
                         }
-                        Ok(Color::Rgb(rgb.map(|x| (x * 255.0) as u8)))
                     }
+                    Ok(Color::Rgb(rgb))
                 },
             );
     }
