@@ -57,7 +57,8 @@ fn fs_main(@location(0) tex_coords: vec2<f32>) -> @location(0) vec4<f32> {
     var dist = textureSample(t_distance, s_distance, tex_coords).r;
     if (dist > 0.0) {
         discard;
-    } else if (uniforms.has_color != 0) {
+    }
+    if (uniforms.has_color != 0) {
         return textureSample(t_color, s_color, tex_coords);
     } else {
         return vec4<f32>(1.0);

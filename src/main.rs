@@ -195,6 +195,7 @@ fn theme_visuals() -> egui::Visuals {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn main() -> Result<(), eframe::Error> {
     let args = Args::parse();
     env_logger::Builder::from_env(
@@ -234,6 +235,39 @@ pub fn main() -> Result<(), eframe::Error> {
             Ok(Box::new(app))
         }),
     )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn main() {
+    use eframe::wasm_bindgen::JsCast as _;
+
+    // Redirect `log` message to `console.log` and friends:
+    eframe::WebLogger::init(log::LevelFilter::Debug).ok();
+    info!("starting...");
+
+    let web_options = eframe::WebOptions::default();
+
+    wasm_bindgen_futures::spawn_local(async {
+        let document = web_sys::window()
+            .expect("No window")
+            .document()
+            .expect("No document");
+
+        let canvas = document
+            .get_element_by_id("the_canvas_id")
+            .expect("Failed to find the_canvas_id")
+            .dyn_into::<web_sys::HtmlCanvasElement>()
+            .expect("the_canvas_id was not a HtmlCanvasElement");
+
+        eframe::WebRunner::new()
+            .start(
+                canvas,
+                web_options,
+                Box::new(|cc| Ok(Box::new(App::new(cc)))),
+            )
+            .await
+            .expect("failed to start eframe");
+    });
 }
 
 enum Message {
@@ -691,58 +725,14 @@ impl eframe::App for App {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
                 AppResponse::SAVE => {
-                    if let Some(f) = self.file.take() {
-                        self.write_to_file(&f).unwrap();
-                        self.file = Some(f);
-                    } else {
-                        let filename = rfd::FileDialog::new()
-                            .add_filter("halfspace", &["half"])
-                            .save_file();
-                        if let Some(filename) = filename {
-                            if self.write_to_file(&filename).is_ok() {
-                                self.file = Some(filename);
-                            } else {
-                                panic!("could not create file");
-                            }
-                        } else {
-                            warn!("file save cancelled due to empty selection");
-                        }
-                    }
+                    self.save();
                 }
                 AppResponse::SAVE_AS => {
-                    let filename = rfd::FileDialog::new()
-                        .add_filter("halfspace", &["half"])
-                        .save_file();
-                    if let Some(filename) = filename {
-                        if self.write_to_file(&filename).is_ok() {
-                            self.file = Some(filename);
-                        } else {
-                            panic!("could not create file");
-                        }
-                    } else {
-                        warn!("file save cancelled due to empty selection");
-                    }
+                    self.save_as();
                 }
                 AppResponse::OPEN => {
-                    if self.undo.is_saved()
-                        || matches!(
-                            self.on_unsaved(),
-                            UnsavedChoice::DiscardChanges
-                        )
-                    {
-                        let filename = rfd::FileDialog::new()
-                            .add_filter("halfspace", &["half"])
-                            .pick_file();
-                        if let Some(filename) = filename {
-                            if let Ok(state) = Self::load_from_file(&filename) {
-                                self.file = Some(filename);
-                                self.load_from_state(state);
-                                ctx.request_repaint();
-                            } else {
-                                panic!("could not load file");
-                            }
-                        }
-                    }
+                    self.open();
+                    ctx.request_repaint();
                 }
                 AppResponse::UNDO => {
                     if let Some(prev) = self.undo.undo(&self.data) {
@@ -790,7 +780,97 @@ impl eframe::App for App {
         } else {
             format!("[untitled]{marker}")
         };
-        ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+        if !cfg!(target_arch = "wasm32") {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl App {
+    fn on_unsaved(&self) -> UnsavedChoice {
+        let out = rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Warning)
+            .set_title("Unsaved changes")
+            .set_description("Unsaved changes will be lost")
+            .set_buttons(rfd::MessageButtons::OkCancel)
+            .show();
+        match out {
+            rfd::MessageDialogResult::Ok => UnsavedChoice::DiscardChanges,
+            rfd::MessageDialogResult::Cancel => UnsavedChoice::Cancel,
+            _ => panic!("invalid dialog result {out:?}"),
+        }
+    }
+
+    fn save(&mut self) {
+        if let Some(f) = self.file.take() {
+            self.write_to_file(&f).unwrap();
+            self.file = Some(f);
+        } else {
+            let filename = rfd::FileDialog::new()
+                .add_filter("halfspace", &["half"])
+                .save_file();
+            if let Some(filename) = filename {
+                if self.write_to_file(&filename).is_ok() {
+                    self.file = Some(filename);
+                } else {
+                    panic!("could not create file");
+                }
+            } else {
+                warn!("file save cancelled due to empty selection");
+            }
+        }
+    }
+
+    fn save_as(&mut self) {
+        let filename = rfd::FileDialog::new()
+            .add_filter("halfspace", &["half"])
+            .save_file();
+        if let Some(filename) = filename {
+            if self.write_to_file(&filename).is_ok() {
+                self.file = Some(filename);
+            } else {
+                panic!("could not create file");
+            }
+        } else {
+            warn!("file save cancelled due to empty selection");
+        }
+    }
+
+    fn open(&mut self) {
+        if self.undo.is_saved()
+            || matches!(self.on_unsaved(), UnsavedChoice::DiscardChanges)
+        {
+            let filename = rfd::FileDialog::new()
+                .add_filter("halfspace", &["half"])
+                .pick_file();
+            if let Some(filename) = filename {
+                if let Ok(state) = Self::load_from_file(&filename) {
+                    self.file = Some(filename);
+                    self.load_from_state(state);
+                } else {
+                    panic!("could not load file");
+                }
+            }
+        }
+    }
+}
+
+// TODO: `rfd` theoretically supports WebAssembly, although it's async-only
+#[cfg(target_arch = "wasm32")]
+impl App {
+    fn on_unsaved(&self) -> UnsavedChoice {
+        warn!("cannot do unsaved check in webassembly");
+        UnsavedChoice::DiscardChanges
+    }
+    fn save(&mut self) {
+        warn!("cannot save in webassembly");
+    }
+    fn save_as(&mut self) {
+        warn!("cannot save in webassembly");
+    }
+    fn open(&mut self) {
+        warn!("cannot open in webassembly");
     }
 }
 
@@ -919,20 +999,6 @@ impl App {
         self.views.retain(|i, _| self.data.blocks.contains_key(i));
         self.start_world_rebuild();
         ctx.request_repaint();
-    }
-
-    fn on_unsaved(&self) -> UnsavedChoice {
-        let out = rfd::MessageDialog::new()
-            .set_level(rfd::MessageLevel::Warning)
-            .set_title("Unsaved changes")
-            .set_description("Unsaved changes will be lost")
-            .set_buttons(rfd::MessageButtons::OkCancel)
-            .show();
-        match out {
-            rfd::MessageDialogResult::Ok => UnsavedChoice::DiscardChanges,
-            rfd::MessageDialogResult::Cancel => UnsavedChoice::Cancel,
-            _ => panic!("invalid dialog result {out:?}"),
-        }
     }
 }
 

@@ -2,3 +2,4 @@
 *.half
 !/examples/*.half
 /local
+/dist

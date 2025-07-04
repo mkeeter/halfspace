@@ -17,10 +17,10 @@ use fidget::{
 
 use rayon::prelude::*;
 
-#[cfg(feature = "jit")]
+#[cfg(all(feature = "jit", not(target_arch = "wasm32")))]
 type RenderFunction = fidget::jit::JitFunction;
 
-#[cfg(not(feature = "jit"))]
+#[cfg(any(target_arch = "wasm32", not(feature = "jit")))]
 type RenderFunction = fidget::vm::VmFunction;
 
 type RenderShape = fidget::shape::Shape<RenderFunction>;

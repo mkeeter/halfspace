@@ -4,6 +4,7 @@
 //! specialized to our use case.
 use crate::{state::WorldState, world::World};
 use log::debug;
+use web_time::{Duration, Instant};
 
 #[derive(Clone)]
 struct UndoState {
@@ -12,7 +13,7 @@ struct UndoState {
 }
 
 struct ChangedState {
-    time: std::time::Instant,
+    time: Instant,
     state: WorldState,
 }
 
@@ -23,7 +24,7 @@ pub struct Undo {
     last_changed: Option<ChangedState>,
 }
 
-const CHANGE_TIME: std::time::Duration = std::time::Duration::from_millis(500);
+const CHANGE_TIME: Duration = Duration::from_millis(500);
 
 impl Undo {
     /// Builds a new undo state
@@ -96,7 +97,7 @@ impl Undo {
                 None => {
                     debug!("creating last_changed");
                     self.last_changed = Some(ChangedState {
-                        time: std::time::Instant::now(),
+                        time: Instant::now(),
                         state: world.into(),
                     })
                 }
@@ -104,7 +105,7 @@ impl Undo {
                     if world != &t.state {
                         // If the value is in flux, then reset the timer
                         t.state = world.into();
-                        t.time = std::time::Instant::now();
+                        t.time = Instant::now();
                     } else if t.time.elapsed() > CHANGE_TIME {
                         // If the value is stable, then create an undo point
                         debug!("creating undo point due to changes");

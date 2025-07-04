@@ -8,6 +8,7 @@ use crate::{
 };
 
 pub use state::{ViewMode2, ViewMode3};
+use web_time::Duration;
 
 /// State associated with a given view in the GUI
 ///
@@ -357,10 +358,9 @@ impl ViewData {
         &mut self,
         generation: u64,
         data: ViewImage,
-        render_time: std::time::Duration,
+        render_time: Duration,
     ) {
-        const TARGET_RENDER_TIME: std::time::Duration =
-            std::time::Duration::from_millis(33);
+        const TARGET_RENDER_TIME: Duration = Duration::from_millis(33);
         const MAX_LEVEL: usize = 10;
 
         // Adjust self.start_level to hit a render time target
