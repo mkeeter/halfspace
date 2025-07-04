@@ -16,6 +16,7 @@ use fidget::{
 };
 
 use rayon::prelude::*;
+use web_time::Instant;
 
 #[cfg(all(feature = "jit", not(target_arch = "wasm32")))]
 type RenderFunction = fidget::jit::JitFunction;
@@ -73,7 +74,7 @@ impl RenderTask {
         let cancel = fidget::render::CancelToken::new();
         let cancel_ = cancel.clone();
         let settings_ = settings.clone();
-        let start_time = std::time::Instant::now();
+        let start_time = Instant::now();
         rayon::spawn(move || {
             if let Some(data) = Self::run(&settings_, level, cancel_) {
                 tx.send(Message::RenderView {

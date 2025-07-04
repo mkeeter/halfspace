@@ -4,6 +4,7 @@ use egui_dnd::dnd;
 use log::{debug, info, warn};
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
+use web_time::Instant;
 
 mod gui;
 mod painters;
@@ -28,17 +29,17 @@ struct Args {
 }
 
 /// Manually open a WebGPU session with `float32-filterable`
-pub fn wgpu_setup() -> egui_wgpu::WgpuSetupExisting {
+pub async fn wgpu_setup() -> egui_wgpu::WgpuSetupExisting {
     let instance = wgpu::Instance::default();
 
-    let adapter = pollster::block_on(instance.request_adapter(
-        &wgpu::RequestAdapterOptions {
+    let adapter = instance
+        .request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: None,
             force_fallback_adapter: false,
-        },
-    ))
-    .expect("Failed to find an appropriate adapter");
+        })
+        .await
+        .expect("Failed to find an appropriate adapter");
 
     let adapter_features = adapter.features();
     assert!(
@@ -48,16 +49,18 @@ pub fn wgpu_setup() -> egui_wgpu::WgpuSetupExisting {
 
     let required_features = wgpu::Features::FLOAT32_FILTERABLE;
 
-    let (device, queue) = pollster::block_on(adapter.request_device(
-        &wgpu::DeviceDescriptor {
-            label: Some("Device with float32-filterable"),
-            required_features,
-            required_limits: wgpu::Limits::default(),
-            memory_hints: wgpu::MemoryHints::default(),
-        },
-        None,
-    ))
-    .expect("Failed to create device");
+    let (device, queue) = adapter
+        .request_device(
+            &wgpu::DeviceDescriptor {
+                label: Some("Device with float32-filterable"),
+                required_features,
+                required_limits: wgpu::Limits::default(),
+                memory_hints: wgpu::MemoryHints::default(),
+            },
+            None,
+        )
+        .await
+        .expect("Failed to create device");
 
     egui_wgpu::WgpuSetupExisting {
         instance,
@@ -208,7 +211,8 @@ pub fn main() -> Result<(), eframe::Error> {
     .init();
 
     let mut native_options = eframe::NativeOptions::default();
-    native_options.wgpu_options.wgpu_setup = wgpu_setup().into();
+    native_options.wgpu_options.wgpu_setup =
+        pollster::block_on(wgpu_setup()).into();
     eframe::run_native(
         "halfspace",
         native_options,
@@ -237,6 +241,10 @@ pub fn main() -> Result<(), eframe::Error> {
     )
 }
 
+// Re-export init_thread_pool to be called on the web
+#[cfg(target_arch = "wasm32")]
+pub use wasm_bindgen_rayon::init_thread_pool;
+
 #[cfg(target_arch = "wasm32")]
 fn main() {
     use eframe::wasm_bindgen::JsCast as _;
@@ -245,7 +253,7 @@ fn main() {
     eframe::WebLogger::init(log::LevelFilter::Debug).ok();
     info!("starting...");
 
-    let web_options = eframe::WebOptions::default();
+    let mut web_options = eframe::WebOptions::default();
 
     wasm_bindgen_futures::spawn_local(async {
         let document = web_sys::window()
@@ -258,6 +266,10 @@ fn main() {
             .expect("Failed to find the_canvas_id")
             .dyn_into::<web_sys::HtmlCanvasElement>()
             .expect("the_canvas_id was not a HtmlCanvasElement");
+
+        info!("getting webgpu setup");
+        web_options.wgpu_options.wgpu_setup = wgpu_setup().await.into();
+        info!("done with webgpu setup");
 
         eframe::WebRunner::new()
             .start(
@@ -278,7 +290,7 @@ enum Message {
     RenderView {
         block: BlockIndex,
         generation: u64,
-        start_time: std::time::Instant,
+        start_time: Instant,
         data: view::ViewImage,
     },
 }
@@ -292,7 +304,7 @@ struct MessageQueue {
 impl MessageQueue {
     fn send(&self, m: Message) {
         if self.queue.send(m).is_ok() {
-            self.ctx.request_repaint();
+            //self.ctx.request_repaint();
         }
     }
 }
