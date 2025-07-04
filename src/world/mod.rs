@@ -353,10 +353,15 @@ impl World {
         if output_values.len() == 1 {
             let (_name, value) = output_values.pop().unwrap();
             input_scope.push(&block.name, value.clone());
-            // Automatically add a View if there's a single tree output
-            if let Some(tree) = value.try_cast::<Tree>() {
-                if data.view.is_none() {
+            // If there's no view but there's a single view-compatible output,
+            // then treat it as the view.
+            if data.view.is_none() {
+                if let Some(tree) = value.clone().try_cast::<Tree>() {
                     data.view = Some(BlockView { scene: tree.into() })
+                } else if let Some(d) = value.clone().try_cast::<Drawable>() {
+                    data.view = Some(BlockView { scene: d.into() })
+                } else if let Some(scene) = value.try_cast::<Scene>() {
+                    data.view = Some(BlockView { scene })
                 }
             }
         } else {
