@@ -1,0 +1,277 @@
+{
+  "tag": "halfspace",
+  "major": 1,
+  "minor": 2,
+  "world": {
+    "next_index": 2,
+    "order": [
+      0,
+      1
+    ],
+    "blocks": {
+      "1": {
+        "name": "gen",
+        "script": "let shape = input(\"shape\");\nlet s = input(\"scale\");\nlet w = input(\"weight\");\noutput(\"out\", shape + shape.scale([s, s]) * w);",
+        "inputs": {
+          "scale": "0.4",
+          "weight": "0.8",
+          "shape": "noise"
+        }
+      },
+      "0": {
+        "name": "noise",
+        "script": "let fx = floor(x);\nlet fy = floor(y);\n\n/// Pseudo-random seeded value between 0 and 1\nfn rand(a, b) {\n    (sin(a * 12.9898 + b * 78.233) * 43758.5453) % 1.0\n}\n\nfn weight(ix, iy) {\n\tlet fx = floor(x) + ix;\n\tlet fy = floor(y) + iy;\n    let dx = x - fx;\n    let dy = y - fy;\n\tlet angle = rand(fx, fy) * 2.0 * 3.14159265;\n\tlet dir_x = cos(angle);\n\tlet dir_y = sin(angle);\n\tdx * dir_x + dy * dir_y\n}\n\nfn smoothstep(edge0, edge1, x) {\n    let t = min(max((x - edge0) / (edge1 - edge0), 0.0), 1.0);\n    return t * t * (3.0 - 2.0 * t);\n}\n\nlet wa = weight(0, 0);\nlet wb = weight(1, 0);\nlet wc = weight(0, 1);\nlet wd = weight(1, 1);\n\nlet wab = wa + smoothstep(floor(x), floor(x) + 1, x) * (wb - wa);\nlet wcd = wc + smoothstep(floor(x), floor(x) + 1, x) * (wd - wc);\nlet w = wab + smoothstep(floor(y), floor(y) + 1, y) * (wcd - wab);\n\noutput(\"out\", w)",
+        "inputs": {}
+      }
+    }
+  },
+  "views": {
+    "0": {
+      "View2": {
+        "mode": "Sdf",
+        "center": [
+          -0.6750675,
+          0.06082505
+        ],
+        "scale": 4.438289,
+        "width": 1173,
+        "height": 867
+      }
+    },
+    "1": {
+      "View2": {
+        "mode": "Bitfield",
+        "center": [
+          11.156812,
+          2.917944
+        ],
+        "scale": 3.732134,
+        "width": 1175,
+        "height": 867
+      }
+    }
+  },
+  "dock": {
+    "surfaces": [
+      {
+        "Main": {
+          "nodes": [
+            {
+              "Vertical": {
+                "rect": {
+                  "min": {
+                    "x": 250.0,
+                    "y": 0.0
+                  },
+                  "max": {
+                    "x": 1512.0,
+                    "y": 916.0
+                  }
+                },
+                "fraction": 0.5,
+                "fully_collapsed": false,
+                "collapsed_leaf_count": 0
+              }
+            },
+            {
+              "Horizontal": {
+                "rect": {
+                  "min": {
+                    "x": 250.0,
+                    "y": 0.0
+                  },
+                  "max": {
+                    "x": 1512.0,
+                    "y": 457.5
+                  }
+                },
+                "fraction": 0.5350599,
+                "fully_collapsed": false,
+                "collapsed_leaf_count": 0
+              }
+            },
+            {
+              "Horizontal": {
+                "rect": {
+                  "min": {
+                    "x": 250.0,
+                    "y": 458.5
+                  },
+                  "max": {
+                    "x": 1512.0,
+                    "y": 916.0
+                  }
+                },
+                "fraction": 0.53425264,
+                "fully_collapsed": false,
+                "collapsed_leaf_count": 0
+              }
+            },
+            {
+              "Leaf": {
+                "rect": {
+                  "min": {
+                    "x": 250.0,
+                    "y": 0.0
+                  },
+                  "max": {
+                    "x": 924.5,
+                    "y": 457.5
+                  }
+                },
+                "viewport": {
+                  "min": {
+                    "x": 250.0,
+                    "y": 24.0
+                  },
+                  "max": {
+                    "x": 924.5,
+                    "y": 457.5
+                  }
+                },
+                "tabs": [
+                  {
+                    "index": 0,
+                    "mode": "Script"
+                  }
+                ],
+                "active": 0,
+                "scroll": 0.0,
+                "collapsed": false
+              }
+            },
+            {
+              "Leaf": {
+                "rect": {
+                  "min": {
+                    "x": 925.5,
+                    "y": 0.0
+                  },
+                  "max": {
+                    "x": 1512.0,
+                    "y": 457.5
+                  }
+                },
+                "viewport": {
+                  "min": {
+                    "x": 925.5,
+                    "y": 24.0
+                  },
+                  "max": {
+                    "x": 1512.0,
+                    "y": 457.5
+                  }
+                },
+                "tabs": [
+                  {
+                    "index": 0,
+                    "mode": "View"
+                  }
+                ],
+                "active": 0,
+                "scroll": 0.0,
+                "collapsed": false
+              }
+            },
+            {
+              "Leaf": {
+                "rect": {
+                  "min": {
+                    "x": 250.0,
+                    "y": 458.5
+                  },
+                  "max": {
+                    "x": 923.5,
+                    "y": 916.0
+                  }
+                },
+                "viewport": {
+                  "min": {
+                    "x": 250.0,
+                    "y": 482.5
+                  },
+                  "max": {
+                    "x": 923.5,
+                    "y": 916.0
+                  }
+                },
+                "tabs": [
+                  {
+                    "index": 1,
+                    "mode": "Script"
+                  }
+                ],
+                "active": 0,
+                "scroll": 0.0,
+                "collapsed": false
+              }
+            },
+            {
+              "Leaf": {
+                "rect": {
+                  "min": {
+                    "x": 924.5,
+                    "y": 458.5
+                  },
+                  "max": {
+                    "x": 1512.0,
+                    "y": 916.0
+                  }
+                },
+                "viewport": {
+                  "min": {
+                    "x": 924.5,
+                    "y": 482.5
+                  },
+                  "max": {
+                    "x": 1512.0,
+                    "y": 916.0
+                  }
+                },
+                "tabs": [
+                  {
+                    "index": 1,
+                    "mode": "View"
+                  }
+                ],
+                "active": 0,
+                "scroll": 0.0,
+                "collapsed": false
+              }
+            },
+            "Empty",
+            "Empty",
+            "Empty",
+            "Empty",
+            "Empty",
+            "Empty",
+            "Empty",
+            "Empty"
+          ],
+          "focused_node": 5,
+          "collapsed": false,
+          "collapsed_leaf_count": 0
+        }
+      }
+    ],
+    "focused_surface": 0,
+    "translations": {
+      "tab_context_menu": {
+        "close_button": "Close",
+        "eject_button": "Eject"
+      },
+      "leaf": {
+        "close_button_disabled_tooltip": "This leaf contains non-closable tabs.",
+        "close_all_button": "Close window",
+        "close_all_button_menu_hint": "Right click to close this window.",
+        "close_all_button_modifier_hint": "Press modifier keys (Shift by default) to close this window.",
+        "close_all_button_modifier_menu_hint": "Press modifier keys (Shift by default) or right click to close this window.",
+        "close_all_button_disabled_tooltip": "This window contains non-closable tabs.",
+        "minimize_button": "Minimize window",
+        "minimize_button_menu_hint": "Right click to minimize this window.",
+        "minimize_button_modifier_hint": "Press modifier keys (Shift by default) to minimize this window.",
+        "minimize_button_modifier_menu_hint": "Press modifier keys (Shift by default) or right click to minimize this window."
+      }
+    }
+  }
+}
