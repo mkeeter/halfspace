@@ -28,27 +28,31 @@ impl rhai::CustomType for Drawable {
 pub enum Color {
     /// RGB color, evaluated per-pixel
     Rgb([fidget::context::Tree; 3]),
+    /// HSL color, evaluated per-pixel
+    Hsl([fidget::context::Tree; 3]),
 }
 
 impl rhai::CustomType for Color {
     fn build(mut builder: rhai::TypeBuilder<Self>) {
         builder
             .with_name("Color")
-            .on_print(|t| match t {
-                Color::Rgb(rgb) => {
-                    let mut out = "rgb(".to_owned();
-                    for (i, c) in rgb.iter().enumerate() {
-                        if i != 0 {
-                            out += ", ";
-                        }
-                        out += match c.deref() {
-                            fidget::context::TreeOp::Const(c) => c.to_string(),
-                            _ => "tree(..)".to_owned(),
-                        }
-                        .as_str();
+            .on_print(|t| {
+                let (prefix, trees) = match t {
+                    Color::Rgb(rgb) => ("rgb(", rgb),
+                    Color::Hsl(rgb) => ("hsl(", rgb),
+                };
+                let mut out = prefix.to_owned();
+                for (i, c) in trees.iter().enumerate() {
+                    if i != 0 {
+                        out += ", ";
                     }
-                    out
+                    out += match c.deref() {
+                        fidget::context::TreeOp::Const(c) => c.to_string(),
+                        _ => "tree(..)".to_owned(),
+                    }
+                    .as_str();
                 }
+                out
             })
             .with_fn(
                 "rgb",
@@ -77,6 +81,39 @@ impl rhai::CustomType for Color {
                         }
                     }
                     Ok(Color::Rgb(rgb))
+                },
+            )
+            .with_fn(
+                "hsl",
+                |ctx: rhai::NativeCallContext,
+                 r: rhai::Dynamic,
+                 g: rhai::Dynamic,
+                 b: rhai::Dynamic|
+                 -> Result<Color, Box<rhai::EvalAltResult>> {
+                    const TWO_PI: f64 = std::f64::consts::PI * 2.0;
+                    // Wrap into the 0-2π range, then scale to 0-1.0
+                    let h = fidget::context::Tree::from_dynamic(&ctx, r, None)?
+                        .modulo(TWO_PI)
+                        / TWO_PI;
+                    let s = fidget::context::Tree::from_dynamic(&ctx, g, None)?;
+                    let l = fidget::context::Tree::from_dynamic(&ctx, b, None)?;
+                    let hsl = [h, s, l];
+                    for c in &hsl[1..] {
+                        if let fidget::context::TreeOp::Const(c) = c.deref() {
+                            if !(0.0..=1.0).contains(c) {
+                                return Err(
+                                    rhai::EvalAltResult::ErrorMismatchDataType(
+                                        "float in the 0.0 - 1.0 range"
+                                            .to_owned(),
+                                        format!("float with value {c}"),
+                                        ctx.position(),
+                                    )
+                                    .into(),
+                                );
+                            }
+                        }
+                    }
+                    Ok(Color::Hsl(hsl))
                 },
             );
     }

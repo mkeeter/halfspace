@@ -1,0 +1,150 @@
+{
+  "tag": "halfspace",
+  "major": 1,
+  "minor": 2,
+  "world": {
+    "next_index": 1,
+    "order": [
+      0
+    ],
+    "blocks": {
+      "0": {
+        "name": "circle",
+        "script": "//  Center of the circle (in XY)\nlet center = input(\"center\");\n\n//  Circle radius\nlet radius = input(\"radius\");\n\nlet r = sqrt(x*x + y*y);\nview((r - radius) * hsl(atan2(y, x), r, 0.5));",
+        "inputs": {
+          "radius": "1",
+          "center": "[0, 0]"
+        }
+      }
+    }
+  },
+  "views": {
+    "0": {
+      "View2": {
+        "mode": "Bitfield",
+        "center": [
+          -0.1375996,
+          -0.00943777
+        ],
+        "scale": 1.231145,
+        "width": 1100,
+        "height": 551
+      }
+    }
+  },
+  "dock": {
+    "surfaces": [
+      {
+        "Main": {
+          "nodes": [
+            {
+              "Vertical": {
+                "rect": {
+                  "min": {
+                    "x": 250.0,
+                    "y": 0.0
+                  },
+                  "max": {
+                    "x": 800.0,
+                    "y": 600.0
+                  }
+                },
+                "fraction": 0.5,
+                "fully_collapsed": false,
+                "collapsed_leaf_count": 0
+              }
+            },
+            {
+              "Leaf": {
+                "rect": {
+                  "min": {
+                    "x": 250.0,
+                    "y": 0.0
+                  },
+                  "max": {
+                    "x": 800.0,
+                    "y": 299.5
+                  }
+                },
+                "viewport": {
+                  "min": {
+                    "x": 250.0,
+                    "y": 24.0
+                  },
+                  "max": {
+                    "x": 800.0,
+                    "y": 299.5
+                  }
+                },
+                "tabs": [
+                  {
+                    "index": 0,
+                    "mode": "Script"
+                  }
+                ],
+                "active": 0,
+                "scroll": 0.0,
+                "collapsed": false
+              }
+            },
+            {
+              "Leaf": {
+                "rect": {
+                  "min": {
+                    "x": 250.0,
+                    "y": 300.5
+                  },
+                  "max": {
+                    "x": 800.0,
+                    "y": 600.0
+                  }
+                },
+                "viewport": {
+                  "min": {
+                    "x": 250.0,
+                    "y": 324.5
+                  },
+                  "max": {
+                    "x": 800.0,
+                    "y": 600.0
+                  }
+                },
+                "tabs": [
+                  {
+                    "index": 0,
+                    "mode": "View"
+                  }
+                ],
+                "active": 0,
+                "scroll": 0.0,
+                "collapsed": false
+              }
+            }
+          ],
+          "focused_node": 1,
+          "collapsed": false,
+          "collapsed_leaf_count": 0
+        }
+      }
+    ],
+    "focused_surface": 0,
+    "translations": {
+      "tab_context_menu": {
+        "close_button": "Close",
+        "eject_button": "Eject"
+      },
+      "leaf": {
+        "close_button_disabled_tooltip": "This leaf contains non-closable tabs.",
+        "close_all_button": "Close window",
+        "close_all_button_menu_hint": "Right click to close this window.",
+        "close_all_button_modifier_hint": "Press modifier keys (Shift by default) to close this window.",
+        "close_all_button_modifier_menu_hint": "Press modifier keys (Shift by default) or right click to close this window.",
+        "close_all_button_disabled_tooltip": "This window contains non-closable tabs.",
+        "minimize_button": "Minimize window",
+        "minimize_button_menu_hint": "Right click to minimize this window.",
+        "minimize_button_modifier_hint": "Press modifier keys (Shift by default) to minimize this window.",
+        "minimize_button_modifier_menu_hint": "Press modifier keys (Shift by default) or right click to minimize this window."
+      }
+    }
+  }
+}

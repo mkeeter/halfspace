@@ -348,8 +348,13 @@ fn image_to_sdf(
     view: fidget::render::View2,
     color: Option<Color>,
 ) -> SdfImageData {
-    let color = color.map(|c| match c {
-        Color::Rgb(rgb) => render_rgb_2d(&image, view, rgb).take().0,
+    let color = color.map(|c| {
+        match c {
+            Color::Rgb(rgb) => render_rgb_2d(&image, view, rgb),
+            Color::Hsl(hsl) => render_hsl_2d(&image, view, hsl),
+        }
+        .take()
+        .0
     });
     let distance = image
         .map(|d| {
@@ -372,8 +377,13 @@ fn image_to_bitfield(
     color: Option<Color>,
 ) -> BitfieldImageData {
     let threads = Some(&fidget::render::ThreadPool::Global);
-    let color = color.map(|c| match c {
-        Color::Rgb(rgb) => render_rgb_2d(&image, view, rgb).take().0,
+    let color = color.map(|c| {
+        match c {
+            Color::Rgb(rgb) => render_rgb_2d(&image, view, rgb),
+            Color::Hsl(hsl) => render_hsl_2d(&image, view, hsl),
+        }
+        .take()
+        .0
     });
     let distance = BitfieldViewImage::denoise(image, threads).take().0;
     BitfieldImageData { distance, color }
@@ -387,8 +397,13 @@ fn image_to_heightmap(
     view: fidget::render::View3,
     color: Option<Color>,
 ) -> HeightmapImageData {
-    let color = color.map(|c| match c {
-        Color::Rgb(rgb) => render_rgb_3d(&image, view, rgb).take().0,
+    let color = color.map(|c| {
+        match c {
+            Color::Rgb(rgb) => render_rgb_3d(&image, view, rgb),
+            Color::Hsl(hsl) => render_hsl_3d(&image, view, hsl),
+        }
+        .take()
+        .0
     });
     let depth = image.map(|v| v.depth as f32).take().0;
     HeightmapImageData { depth, color }
@@ -404,8 +419,13 @@ fn image_to_shaded(
 ) -> ShadedImageData {
     let threads = Some(&fidget::render::ThreadPool::Global);
 
-    let color = color.map(|c| match c {
-        Color::Rgb(rgb) => render_rgb_3d(&image, view, rgb).take().0,
+    let color = color.map(|c| {
+        match c {
+            Color::Rgb(rgb) => render_rgb_3d(&image, view, rgb),
+            Color::Hsl(hsl) => render_hsl_3d(&image, view, hsl),
+        }
+        .take()
+        .0
     });
 
     // XXX this should all happen on the GPU, probably!
@@ -419,6 +439,41 @@ fn image_to_shaded(
         ssao,
         color,
     }
+}
+
+fn hsl_to_rgb(hsl: [u8; 4]) -> [u8; 4] {
+    use palette::{FromColor, Hsl, Srgb};
+
+    let hue_deg = (hsl[0] as f32 / 255.0) * 360.0;
+    let saturation = hsl[1] as f32 / 255.0;
+    let lightness = hsl[2] as f32 / 255.0;
+
+    let hsl_color = Hsl::new(hue_deg, saturation, lightness);
+    let rgb_color: Srgb<f32> = Srgb::from_color(hsl_color);
+
+    [
+        (rgb_color.red * 255.0).round() as u8,
+        (rgb_color.green * 255.0).round() as u8,
+        (rgb_color.blue * 255.0).round() as u8,
+        hsl[3],
+    ]
+}
+
+fn render_hsl_2d(
+    image: &fidget::render::Image<fidget::render::DistancePixel>,
+    view: fidget::render::View2,
+    hsl: [fidget::context::Tree; 3],
+) -> fidget::render::Image<[u8; 4]> {
+    let image = render_rgb_2d(image, view, hsl);
+    let mut out = fidget::render::Image::new(image.size());
+    out.apply_effect(
+        |x, y| {
+            let hsl = image[(y, x)];
+            hsl_to_rgb(hsl)
+        },
+        Some(&fidget::render::ThreadPool::Global),
+    );
+    out
 }
 
 fn render_rgb_2d(
@@ -528,6 +583,26 @@ fn render_rgb_2d(
             }
         }
     }
+    out
+}
+
+fn render_hsl_3d(
+    image: &fidget::render::Image<
+        fidget::render::GeometryPixel,
+        fidget::render::VoxelSize,
+    >,
+    view: fidget::render::View3,
+    hsl: [fidget::context::Tree; 3],
+) -> fidget::render::Image<[u8; 4], fidget::render::VoxelSize> {
+    let image = render_rgb_3d(image, view, hsl);
+    let mut out = fidget::render::Image::new(image.size());
+    out.apply_effect(
+        |x, y| {
+            let hsl = image[(y, x)];
+            hsl_to_rgb(hsl)
+        },
+        Some(&fidget::render::ThreadPool::Global),
+    );
     out
 }
 
