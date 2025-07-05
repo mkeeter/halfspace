@@ -5,11 +5,21 @@ pub fn run(target: Option<std::path::PathBuf>) -> Result<(), eframe::Error> {
     let mut native_options = eframe::NativeOptions::default();
     native_options.wgpu_options.wgpu_setup =
         pollster::block_on(wgpu_setup()).into();
+
     eframe::run_native(
         "halfspace",
         native_options,
         Box::new(|cc| {
-            let mut app = App::new(cc);
+            let (mut app, mut notify_rx) = App::new(cc);
+            let ctx = cc.egui_ctx.clone();
+
+            // Worker thread to request repaints based on notifications
+            std::thread::spawn(move || {
+                while let Some(()) = notify_rx.blocking_recv() {
+                    ctx.request_repaint();
+                }
+                info!("repaint notification thread is stopping");
+            });
             if let Some(filename) = target {
                 match App::load_from_file(&filename) {
                     Ok(state) => {

@@ -207,13 +207,17 @@ enum Message {
 #[derive(Clone)]
 struct MessageQueue {
     queue: std::sync::mpsc::Sender<Message>,
-    ctx: egui::Context,
+    notify: tokio::sync::mpsc::UnboundedSender<()>,
 }
 
 impl MessageQueue {
     fn send(&self, m: Message) {
         if self.queue.send(m).is_ok() {
-            //self.ctx.request_repaint();
+            if self.notify.send(()).is_err() {
+                warn!("notify returned an error");
+            }
+        } else {
+            warn!("sending returned an error");
         }
     }
 }
@@ -235,7 +239,13 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    /// Builds a new `App`
+    ///
+    /// Returns a tuple of the `App` and a channel which should trigger a
+    /// repaint when it receives a message.
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+    ) -> (Self, tokio::sync::mpsc::UnboundedReceiver<()>) {
         // Install custom render pipelines
         let wgpu_state = cc.wgpu_render_state.as_ref().unwrap();
         painters::WgpuResources::install(wgpu_state);
@@ -290,9 +300,10 @@ impl App {
         });
 
         let (tx, rx) = std::sync::mpsc::channel();
+        let (notify_tx, notify_rx) = tokio::sync::mpsc::unbounded_channel();
         let data = World::new();
         let undo = state::Undo::new(&data);
-        Self {
+        let app = Self {
             data,
             library: world::ShapeLibrary::build(),
             tree: egui_dock::DockState::new(vec![]),
@@ -303,10 +314,11 @@ impl App {
             generation: std::sync::Arc::new(0.into()),
             tx: MessageQueue {
                 queue: tx,
-                ctx: cc.egui_ctx.clone(),
+                notify: notify_tx,
             },
             rx,
-        }
+        };
+        (app, notify_rx)
     }
 
     /// Writes to the given file and marks the current state as saved

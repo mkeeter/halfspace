@@ -27,15 +27,27 @@ pub fn run() {
             .dyn_into::<web_sys::HtmlCanvasElement>()
             .expect("the_canvas_id was not a HtmlCanvasElement");
 
-        info!("getting webgpu setup");
         web_options.wgpu_options.wgpu_setup = wgpu_setup().await.into();
-        info!("done with webgpu setup");
 
         eframe::WebRunner::new()
             .start(
                 canvas,
                 web_options,
-                Box::new(|cc| Ok(Box::new(App::new(cc)))),
+                Box::new(|cc| {
+                    let (app, mut notify_rx) = App::new(cc);
+
+                    // Spawn a worker task to trigger repaints, per egui#4368
+                    // and egui#4405
+                    let ctx = cc.egui_ctx.clone();
+                    wasm_bindgen_futures::spawn_local(async move {
+                        while let Some(()) = notify_rx.recv().await {
+                            ctx.request_repaint();
+                        }
+                        info!("repaint notification task is stopping");
+                    });
+
+                    Ok(Box::new(app))
+                }),
             )
             .await
             .expect("failed to start eframe");

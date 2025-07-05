@@ -37,6 +37,7 @@ serde_json = "1.0.140"
 strum = { version = "0.27.1", features = ["derive"] }
 syntect = { version = "5.2.0", default-features = false, features = ["default-fancy"] }
 thiserror = "2.0.12"
+tokio = { version = "1.46.1", features = ["sync"] }
 web-time = "1.1.0"
 zerocopy = { version = "0.8.25", features = ["derive"] }
 
