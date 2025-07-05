@@ -17,10 +17,9 @@ panic = 'abort'
 [dependencies]
 bincode = { version = "2", features = ["serde"] }
 bitflags = "2.9.1"
-clap = "4.5.39"
 eframe = { version = "0.31.1", default-features = false, features = ["wgpu", "accesskit", "wayland", "web_screen_reader", "x11"] }
 egui = "0.31.1"
-egui-wgpu = { version = "0.31.1", features = ["fragile-send-sync-non-atomic-wasm"] }
+egui-wgpu = { version = "0.31.1" }
 egui_dnd = "0.12.0"
 egui_dock = { git = "https://github.com/mkeeter/egui_dock", features = ["serde"], branch = "next" }
 egui_extras = { git = "https://github.com/mkeeter/egui", features = ["syntect"], branch = "custom-syntect-settings-0.31.1-backport" }
@@ -45,13 +44,17 @@ zerocopy = { version = "0.8.25", features = ["derive"] }
 bincode = { version = "2", features = ["serde"] }
 syntect = "5.2.0"
 
+# Desktop dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+clap = "4.5.39"
 env_logger = "0.11.8"
 rfd = "0.15.3"
 rhai = { version = "1.21", features = ["sync", "internals"] }
 
+# Web-only dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 rhai = { version = "1.21", features = ["sync", "internals", "wasm-bindgen"] }
+wasm-bindgen = "0.2.100"
 wasm-bindgen-futures = "0.4.50"
 wasm-bindgen-rayon = { version = "1.3", features = ["no-bundler"] }
 web-sys = { version = "0.3.70", features = ["WorkerGlobalScope", "Performance"] }
@@ -69,5 +72,9 @@ default = ["jit"]
 egui = { git = "https://github.com/mkeeter/egui", branch = "custom-syntect-settings-0.31.1-backport" }
 epaint = { git = "https://github.com/mkeeter/egui", branch = "custom-syntect-settings-0.31.1-backport" }
 
+# Optimize dependencies (mostly Fidget) even in debug builds
 [profile.dev.package."*"]
 opt-level = 1
+
+[lib]
+crate-type = ["cdylib", "rlib"]

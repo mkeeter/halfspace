@@ -8,8 +8,13 @@
 <head>
     <title>Halfspace</title>
 
-    <link data-trunk rel="rust" data-wasm-opt="2" />
-    <base data-trunk-public-url />
+    <script type="module">
+        import init, { run, initThreadPool} from '/halfspace.js';
+        await init('/halfspace_bg.wasm');
+        await initThreadPool(navigator.hardwareConcurrency);
+        run();
+    </script>
+    <base href="/" />
 
     <style>
         html {
@@ -36,10 +41,8 @@
             height: 100%;
         }
     </style>
-</head>
 
-<body>
-    <canvas id="the_canvas_id"></canvas>
-</body>
-
+    <body>
+        <canvas id="the_canvas_id"></canvas>
+    </body>
 </html>

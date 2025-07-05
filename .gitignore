@@ -3,3 +3,4 @@
 !/examples/*.half
 /local
 /dist
+/pkg

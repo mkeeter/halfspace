@@ -1969,6 +1969,7 @@ dependencies = [
  "strum 0.27.1",
  "syntect",
  "thiserror 2.0.12",
+ "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-bindgen-rayon",
  "web-sys",

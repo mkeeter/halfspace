@@ -64,7 +64,7 @@ impl RenderTask {
     }
 
     /// Begins a new image rendering task in the global thread pool
-    pub fn spawn(
+    pub(crate) fn spawn(
         block: BlockIndex,
         generation: u64,
         settings: RenderSettings,

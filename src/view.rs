@@ -392,7 +392,7 @@ impl ViewData {
     ///
     /// This should be called in the main GUI loop, or whenever `notify` has
     /// pinged the main loop.
-    pub fn image(
+    pub(crate) fn image(
         &mut self,
         block: BlockIndex,
         scene: Scene,
