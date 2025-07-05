@@ -236,6 +236,15 @@ pub struct App {
 
     rx: std::sync::mpsc::Receiver<Message>,
     tx: MessageQueue,
+
+    modal: Option<Modal>,
+}
+
+#[derive(Copy, Clone, Debug)]
+enum Modal {
+    Quit,
+    New,
+    Open,
 }
 
 impl App {
@@ -317,6 +326,7 @@ impl App {
                 notify: notify_tx,
             },
             rx,
+            modal: None,
         };
         (app, notify_rx)
     }
@@ -395,6 +405,251 @@ impl App {
                 }
             }
         })
+    }
+
+    fn draw_menu(&self, ui: &mut egui::Ui) -> AppResponse {
+        let mut out = AppResponse::empty();
+
+        egui::menu::bar(ui, |ui| {
+            ui.menu_button("File", |ui| {
+                if ui.button("New").clicked() {
+                    out |= AppResponse::NEW;
+                }
+                ui.separator();
+                if ui.button("Save").clicked() {
+                    out |= AppResponse::SAVE;
+                }
+                if ui.button("Save as").clicked() {
+                    out |= AppResponse::SAVE_AS;
+                }
+                ui.separator();
+                if ui.button("Open").clicked() {
+                    out |= AppResponse::OPEN;
+                }
+                ui.separator();
+                if ui.button("Quit").clicked() {
+                    out |= AppResponse::QUIT;
+                }
+            });
+            ui.menu_button("Edit", |ui| {
+                ui.add_enabled_ui(self.undo.has_undo(&self.data), |ui| {
+                    if ui.button("Undo").clicked() {
+                        out |= AppResponse::UNDO;
+                    }
+                });
+                ui.add_enabled_ui(self.undo.has_redo(&self.data), |ui| {
+                    if ui.button("Redo").clicked() {
+                        out |= AppResponse::REDO;
+                    }
+                });
+            });
+        });
+        ui.separator();
+        out
+    }
+
+    /// Draws a list of blocks into a caller-provided left panel
+    fn draw_block_list(&mut self, ui: &mut egui::Ui) -> AppResponse {
+        let mut out = AppResponse::empty();
+        ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
+            // Draw the "new block" button at the bottom
+            ui.add_space(5.0);
+            egui::ComboBox::from_id_salt("new_script_block")
+                .selected_text(gui::NEW_BLOCK)
+                .width(0.0)
+                .show_ui(ui, |ui| {
+                    let mut index = usize::MAX;
+                    let mut prev_category = None;
+                    for (i, s) in self.library.shapes.iter().enumerate() {
+                        if prev_category.is_some_and(|c| c != s.category) {
+                            ui.separator();
+                        }
+                        ui.selectable_value(&mut index, i, &s.name);
+                        prev_category = Some(s.category);
+                    }
+                    if index != usize::MAX {
+                        let b = &self.library.shapes[index];
+                        if self.data.new_block_from(b) {
+                            out |= AppResponse::WORLD_CHANGED;
+                        }
+                    }
+                });
+            ui.separator();
+            ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    if self.block_list(ui) {
+                        out |= AppResponse::WORLD_CHANGED;
+                    }
+                });
+            });
+        });
+        out
+    }
+
+    /// Draws a blocking modal (if present in `self.modal`)
+    fn draw_modal(&mut self, ctx: &egui::Context) {
+        let Some(modal) = self.modal else {
+            return;
+        };
+
+        // Cancel modal if escape is pressed
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.modal = None;
+            return;
+        }
+
+        // Block all interaction behind the modal
+        let screen_rect = ctx.screen_rect();
+        let layer_id = egui::LayerId::new(
+            egui::Order::Middle,
+            egui::Id::new("modal_layer"),
+        );
+        ctx.layer_painter(layer_id).rect_filled(
+            screen_rect,
+            0.0,
+            egui::Color32::from_black_alpha(192),
+        );
+        egui::Area::new("modal_blocker_input".into())
+            .order(egui::Order::Middle)
+            .interactable(true)
+            .fixed_pos(screen_rect.min)
+            .show(ctx, |ui| {
+                ui.allocate_rect(screen_rect, egui::Sense::all());
+            });
+
+        let s = match modal {
+            Modal::New => "New",
+            Modal::Open => "Open",
+            Modal::Quit => "Quit",
+        };
+        let r = egui::Window::new(s)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .collapsible(false)
+            .resizable(false)
+            .order(egui::Order::Foreground)
+            .frame(egui::Frame::popup(&ctx.style()))
+            .show(ctx, |ui| {
+                ui.label("You have unsaved changes. Continue?");
+                ui.horizontal(|ui| {
+                    if ui.button("Ok").clicked() {
+                        true
+                    } else if ui.button("Cancel").clicked() {
+                        self.modal = None;
+                        false
+                    } else {
+                        false
+                    }
+                })
+                .inner
+            })
+            .unwrap()
+            .inner
+            .unwrap();
+        if r {
+            match modal {
+                Modal::New => {
+                    self.on_new(ctx);
+                }
+                Modal::Quit => {
+                    // This happens after the interceptor
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+                Modal::Open => {
+                    self.on_open(ctx);
+                }
+            }
+            self.modal = None;
+        }
+    }
+
+    fn draw_tab_region(
+        &mut self,
+        ctx: &egui::Context,
+        ui: &mut egui::Ui,
+    ) -> AppResponse {
+        let mut out = AppResponse::empty();
+        // Manually draw a backdrop; this will be covered by the
+        // DockArea if there's anything being drawn
+        let style = ui.style();
+        let painter = ui.painter();
+        let layout = painter.layout(
+            "nothing selected".to_owned(),
+            style.text_styles[&egui::TextStyle::Heading].clone(),
+            style.visuals.widgets.noninteractive.text_color(),
+            f32::INFINITY,
+        );
+        let rect = painter.clip_rect();
+        let text_corner = rect.center() - layout.size() / 2.0;
+        painter.rect_filled(rect, 0.0, style.visuals.panel_fill);
+        painter.galley(text_corner, layout, egui::Color32::BLACK);
+
+        let mut io_out = vec![];
+        let mut bw = gui::WorldView {
+            world: &mut self.data,
+            syntax: &self.syntax,
+            views: &mut self.views,
+            tx: &self.tx,
+            out: &mut io_out,
+        };
+        egui_dock::DockArea::new(&mut self.tree)
+            .style(egui_dock::Style::from_egui(ctx.style().as_ref()))
+            .show_leaf_collapse_buttons(false)
+            .show_leaf_close_all_buttons(false)
+            .show_inside(ui, &mut bw);
+        for (block, flags) in io_out {
+            for f in flags.iter() {
+                match f {
+                    ViewResponse::FOCUS_ERR => {
+                        let tab = gui::Tab::script(block);
+                        let tab_location = self.tree.find_tab(&tab);
+                        if let Some(tab_location) = tab_location {
+                            self.tree.set_active_tab(tab_location)
+                        } else {
+                            self.tree.push_to_focused_leaf(tab);
+                        }
+                    }
+                    ViewResponse::CHANGED => {
+                        out |= AppResponse::WORLD_CHANGED;
+                    }
+                    ViewResponse::REDRAW => {
+                        ui.ctx().request_repaint();
+                    }
+                    _ => panic!("invalid flag"),
+                }
+            }
+        }
+        out
+    }
+
+    fn draw_ui(&mut self, ctx: &egui::Context) -> AppResponse {
+        let mut out = AppResponse::empty();
+        out |= egui::SidePanel::left("left_panel")
+            .min_width(250.0)
+            .show(ctx, |ui| {
+                let mut out = self.draw_menu(ui);
+                out |= self.draw_block_list(ui);
+                out
+            })
+            .inner;
+
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::central_panel(&ctx.style())
+                    .inner_margin(0.0)
+                    .fill(egui::Color32::TRANSPARENT),
+            )
+            .show(ctx, |ui| out |= self.draw_tab_region(ctx, ui));
+
+        // Draw optional modals
+        self.draw_modal(ctx);
+
+        out
+    }
+
+    fn on_new(&mut self, ctx: &egui::Context) {
+        self.file = None;
+        self.load_from_state(AppState::default());
+        ctx.request_repaint();
     }
 }
 
@@ -488,174 +743,40 @@ impl eframe::App for App {
             }
         });
 
-        egui::SidePanel::left("left_panel")
-            .min_width(250.0)
-            .show(ctx, |ui| {
-                egui::menu::bar(ui, |ui| {
-                    ui.menu_button("File", |ui| {
-                        if ui.button("New").clicked() {
-                            out |= AppResponse::NEW;
-                        }
-                        ui.separator();
-                        if ui.button("Save").clicked() {
-                            out |= AppResponse::SAVE;
-                        }
-                        if ui.button("Save as").clicked() {
-                            out |= AppResponse::SAVE_AS;
-                        }
-                        ui.separator();
-                        if ui.button("Open").clicked() {
-                            out |= AppResponse::OPEN;
-                        }
-                        ui.separator();
-                        if ui.button("Quit").clicked() {
-                            out |= AppResponse::QUIT;
-                        }
-                    });
-                    ui.menu_button("Edit", |ui| {
-                        ui.add_enabled_ui(
-                            self.undo.has_undo(&self.data),
-                            |ui| {
-                                if ui.button("Undo").clicked() {
-                                    out |= AppResponse::UNDO;
-                                }
-                            },
-                        );
-                        ui.add_enabled_ui(
-                            self.undo.has_redo(&self.data),
-                            |ui| {
-                                if ui.button("Redo").clicked() {
-                                    out |= AppResponse::REDO;
-                                }
-                            },
-                        );
-                    });
-                });
-                ui.separator();
+        // Attempt to intercept window-level quit commands.
+        // Note that this doesn't actually work on macOS right now, see
+        // https://github.com/emilk/egui/issues/7115
+        if ctx.input(|i| i.viewport().close_requested()) {
+            if self.undo.is_saved() {
+                // do nothing - we will close
+            } else {
+                // Open a quit modal and cancel the close request
+                self.modal = Some(Modal::Quit);
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            }
+        }
 
-                ui.with_layout(
-                    egui::Layout::bottom_up(egui::Align::LEFT),
-                    |ui| {
-                        // Draw the "new block" button at the bottom
-                        ui.add_space(5.0);
-                        egui::ComboBox::from_id_salt("new_script_block")
-                            .selected_text(gui::NEW_BLOCK)
-                            .width(0.0)
-                            .show_ui(ui, |ui| {
-                                let mut index = usize::MAX;
-                                let mut prev_category = None;
-                                for (i, s) in
-                                    self.library.shapes.iter().enumerate()
-                                {
-                                    if prev_category
-                                        .is_some_and(|c| c != s.category)
-                                    {
-                                        ui.separator();
-                                    }
-                                    ui.selectable_value(&mut index, i, &s.name);
-                                    prev_category = Some(s.category);
-                                }
-                                if index != usize::MAX {
-                                    let b = &self.library.shapes[index];
-                                    if self.data.new_block_from(b) {
-                                        out |= AppResponse::WORLD_CHANGED;
-                                    }
-                                }
-                            });
-                        ui.separator();
-                        ui.with_layout(
-                            egui::Layout::top_down(egui::Align::LEFT),
-                            |ui| {
-                                egui::ScrollArea::vertical().show(ui, |ui| {
-                                    if self.block_list(ui) {
-                                        out |= AppResponse::WORLD_CHANGED;
-                                    }
-                                });
-                            },
-                        );
-                    },
-                );
-            });
-
-        egui::CentralPanel::default()
-            .frame(
-                egui::Frame::central_panel(&ctx.style())
-                    .inner_margin(0.)
-                    .fill(egui::Color32::TRANSPARENT),
-            )
-            .show(ctx, |ui| {
-                // Manually draw a backdrop; this will be covered by the
-                // DockArea if there's anything being drawn
-                let style = ui.style();
-                let painter = ui.painter();
-                let layout = painter.layout(
-                    "nothing selected".to_owned(),
-                    style.text_styles[&egui::TextStyle::Heading].clone(),
-                    style.visuals.widgets.noninteractive.text_color(),
-                    f32::INFINITY,
-                );
-                let rect = painter.clip_rect();
-                let text_corner = rect.center() - layout.size() / 2.0;
-                painter.rect_filled(rect, 0.0, style.visuals.panel_fill);
-                painter.galley(text_corner, layout, egui::Color32::BLACK);
-
-                let mut io_out = vec![];
-                let mut bw = gui::WorldView {
-                    world: &mut self.data,
-                    syntax: &self.syntax,
-                    views: &mut self.views,
-                    tx: &self.tx,
-                    out: &mut io_out,
-                };
-                egui_dock::DockArea::new(&mut self.tree)
-                    .style(egui_dock::Style::from_egui(ctx.style().as_ref()))
-                    .show_leaf_collapse_buttons(false)
-                    .show_leaf_close_all_buttons(false)
-                    .show_inside(ui, &mut bw);
-                for (block, flags) in io_out {
-                    for f in flags.iter() {
-                        match f {
-                            ViewResponse::FOCUS_ERR => {
-                                let tab = gui::Tab::script(block);
-                                let tab_location = self.tree.find_tab(&tab);
-                                if let Some(tab_location) = tab_location {
-                                    self.tree.set_active_tab(tab_location)
-                                } else {
-                                    self.tree.push_to_focused_leaf(tab);
-                                }
-                            }
-                            ViewResponse::CHANGED => {
-                                out |= AppResponse::WORLD_CHANGED;
-                            }
-                            ViewResponse::REDRAW => {
-                                ui.ctx().request_repaint();
-                            }
-                            _ => panic!("invalid flag"),
-                        }
-                    }
-                }
-            });
+        out |= self.draw_ui(ctx);
 
         // Handle app-level actions
         for f in out.iter() {
             match f {
                 AppResponse::NEW => {
-                    if self.undo.is_saved()
-                        || matches!(
-                            self.on_unsaved(),
-                            UnsavedChoice::DiscardChanges
-                        )
-                    {
-                        self.file = None;
-                        self.load_from_state(AppState::default());
-                        ctx.request_repaint();
+                    if self.undo.is_saved() {
+                        self.on_new(ctx)
+                    } else {
+                        self.modal = Some(Modal::New)
                     }
                 }
                 AppResponse::WORLD_CHANGED => {
                     self.start_world_rebuild();
                 }
                 AppResponse::QUIT => {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    if self.undo.is_saved() {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    } else {
+                        self.modal = Some(Modal::Quit);
+                    }
                 }
                 AppResponse::SAVE => {
                     self.save();
@@ -664,8 +785,11 @@ impl eframe::App for App {
                     self.save_as();
                 }
                 AppResponse::OPEN => {
-                    self.open();
-                    ctx.request_repaint();
+                    if self.undo.is_saved() {
+                        self.on_open(ctx)
+                    } else {
+                        self.modal = Some(Modal::Open);
+                    }
                 }
                 AppResponse::UNDO => {
                     if let Some(prev) = self.undo.undo(&self.data) {
@@ -691,18 +815,6 @@ impl eframe::App for App {
             }
         }
 
-        // Note that this doesn't actually work on macOS right now, see
-        // https://github.com/emilk/egui/issues/7115
-        if ctx.input(|i| i.viewport().close_requested()) {
-            if self.undo.is_saved()
-                || matches!(self.on_unsaved(), UnsavedChoice::DiscardChanges)
-            {
-                // do nothing - we will close
-            } else {
-                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            }
-        }
-
         let marker = if self.undo.is_saved() { "" } else { "*" };
         let title = if let Some(f) = &self.file {
             let f = f
@@ -717,100 +829,6 @@ impl eframe::App for App {
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
         }
     }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl App {
-    fn on_unsaved(&self) -> UnsavedChoice {
-        let out = rfd::MessageDialog::new()
-            .set_level(rfd::MessageLevel::Warning)
-            .set_title("Unsaved changes")
-            .set_description("Unsaved changes will be lost")
-            .set_buttons(rfd::MessageButtons::OkCancel)
-            .show();
-        match out {
-            rfd::MessageDialogResult::Ok => UnsavedChoice::DiscardChanges,
-            rfd::MessageDialogResult::Cancel => UnsavedChoice::Cancel,
-            _ => panic!("invalid dialog result {out:?}"),
-        }
-    }
-
-    fn save(&mut self) {
-        if let Some(f) = self.file.take() {
-            self.write_to_file(&f).unwrap();
-            self.file = Some(f);
-        } else {
-            let filename = rfd::FileDialog::new()
-                .add_filter("halfspace", &["half"])
-                .save_file();
-            if let Some(filename) = filename {
-                if self.write_to_file(&filename).is_ok() {
-                    self.file = Some(filename);
-                } else {
-                    panic!("could not create file");
-                }
-            } else {
-                warn!("file save cancelled due to empty selection");
-            }
-        }
-    }
-
-    fn save_as(&mut self) {
-        let filename = rfd::FileDialog::new()
-            .add_filter("halfspace", &["half"])
-            .save_file();
-        if let Some(filename) = filename {
-            if self.write_to_file(&filename).is_ok() {
-                self.file = Some(filename);
-            } else {
-                panic!("could not create file");
-            }
-        } else {
-            warn!("file save cancelled due to empty selection");
-        }
-    }
-
-    fn open(&mut self) {
-        if self.undo.is_saved()
-            || matches!(self.on_unsaved(), UnsavedChoice::DiscardChanges)
-        {
-            let filename = rfd::FileDialog::new()
-                .add_filter("halfspace", &["half"])
-                .pick_file();
-            if let Some(filename) = filename {
-                if let Ok(state) = Self::load_from_file(&filename) {
-                    self.file = Some(filename);
-                    self.load_from_state(state);
-                } else {
-                    panic!("could not load file");
-                }
-            }
-        }
-    }
-}
-
-// TODO: `rfd` theoretically supports WebAssembly, although it's async-only
-#[cfg(target_arch = "wasm32")]
-impl App {
-    fn on_unsaved(&self) -> UnsavedChoice {
-        warn!("cannot do unsaved check in webassembly");
-        UnsavedChoice::DiscardChanges
-    }
-    fn save(&mut self) {
-        warn!("cannot save in webassembly");
-    }
-    fn save_as(&mut self) {
-        warn!("cannot save in webassembly");
-    }
-    fn open(&mut self) {
-        warn!("cannot open in webassembly");
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
-enum UnsavedChoice {
-    Cancel,
-    DiscardChanges,
 }
 
 impl App {
