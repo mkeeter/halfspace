@@ -1,10 +1,10 @@
-rustup := "RUSTFLAGS='-C target-feature=+atomics,+bulk-memory --cfg getrandom_backend=\"wasm_js\"' \
-        rustup run nightly-2025-06-30"
-flags := "-Z build-std=std,panic_abort"
+cargo-web := "RUSTFLAGS='-C target-feature=+atomics,+bulk-memory --cfg getrandom_backend=\"wasm_js\"' \
+rustup run nightly-2025-06-30 \
+cargo -Z build-std=std,panic_abort"
 
 # Build a web application in `pkg/`
 dist:
-    {{rustup}} cargo build --lib --release --target wasm32-unknown-unknown {{flags}}
+    {{cargo-web}} build --lib --release --target wasm32-unknown-unknown 
     wasm-bindgen target/wasm32-unknown-unknown/release/halfspace.wasm --out-dir pkg --target web
     wasm-opt -O pkg/halfspace_bg.wasm -o pkg/halfspace_bg.opt.wasm
     mv pkg/halfspace_bg.opt.wasm pkg/halfspace_bg.wasm
@@ -18,12 +18,12 @@ serve:
 # Run `cargo check` for both native and web builds
 check:
     cargo check
-    {{rustup}} cargo check --lib --target=wasm32-unknown-unknown {{flags}}
+    {{cargo-web}} check --lib --target=wasm32-unknown-unknown
 
 # Run `cargo clippy` for both native and web builds
 clippy:
     cargo clippy
-    {{rustup}} cargo clippy --lib --target=wasm32-unknown-unknown {{flags}}
+    {{cargo-web}} clippy --lib --target=wasm32-unknown-unknown
 
 # Checks all of the shaders with `naga`
 naga:
