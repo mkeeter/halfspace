@@ -348,11 +348,16 @@ impl MessageSender {
     }
 }
 
+struct Example {
+    file_name: String,
+    data: AppState,
+}
+
 pub struct App {
     data: World,
     generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
     library: world::ShapeLibrary,
-    examples: Vec<(String, AppState)>,
+    examples: Vec<Example>,
     undo: state::Undo,
 
     pub file: Option<std::path::PathBuf>,
@@ -436,15 +441,11 @@ impl App {
         let mut examples = vec![];
         for (file_name, data) in examples::EXAMPLES {
             match AppState::deserialize(data) {
-                Ok(s) => {
-                    let description = match &s.description {
-                        Some(d) => d.to_owned(),
-                        None => {
-                            warn!("example {file_name} has no description");
-                            file_name.to_string()
-                        }
-                    };
-                    examples.push((description, s));
+                Ok(data) => {
+                    examples.push(Example {
+                        file_name: file_name.to_string(),
+                        data,
+                    });
                 }
                 Err(e) => error!("example {file_name} is invalid: {e:?}"),
             }
@@ -527,6 +528,17 @@ impl App {
         f.flush()?;
         self.undo.mark_saved(state.world);
         Ok(())
+    }
+
+    /// Loads an example by name, returning `false` if not found
+    #[must_use]
+    pub fn load_example(&mut self, target: &str) -> bool {
+        let Some(e) = self.examples.iter().find(|e| e.file_name == target)
+        else {
+            return false;
+        };
+        self.load_from_state(e.data.clone());
+        true
     }
 
     pub fn load_from_state(&mut self, state: AppState) {
@@ -622,9 +634,11 @@ impl App {
             });
             ui.menu_button("Examples", |ui| {
                 let mut load_state = None;
-                for (name, state) in &self.examples {
+                for e in &self.examples {
+                    let name =
+                        e.data.description.as_ref().unwrap_or(&e.file_name);
                     if ui.button(name).clicked() {
-                        load_state = Some(state.clone())
+                        load_state = Some(e.data.clone())
                     }
                 }
                 if let Some(state) = load_state {

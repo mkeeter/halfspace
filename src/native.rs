@@ -2,7 +2,35 @@ use crate::{dialog_worker, state, wgpu_setup, App, AppState};
 use log::{info, warn};
 use std::io::Read;
 
-pub fn run(target: Option<std::path::PathBuf>) -> Result<(), eframe::Error> {
+use clap::Parser;
+
+/// An experimental CAD tool
+#[derive(clap::Parser, Debug)]
+#[clap(author, version, about, long_about = None)]
+struct Args {
+    /// Show verbose logging
+    #[clap(short, long)]
+    verbose: bool,
+
+    /// Example to load
+    #[clap(long, conflicts_with = "target")]
+    example: Option<String>,
+
+    /// File to edit (created if not present)
+    target: Option<std::path::PathBuf>,
+}
+
+pub fn run() -> Result<(), eframe::Error> {
+    let args = Args::parse();
+    env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or(if args.verbose {
+            "halfspace=trace"
+        } else {
+            "halfspace=info"
+        }),
+    )
+    .init();
+
     let mut native_options = eframe::NativeOptions::default();
     native_options.wgpu_options.wgpu_setup =
         pollster::block_on(wgpu_setup()).into();
@@ -13,6 +41,12 @@ pub fn run(target: Option<std::path::PathBuf>) -> Result<(), eframe::Error> {
         Box::new(|cc| {
             let (dialog_tx, dialog_rx) = tokio::sync::mpsc::unbounded_channel();
             let (mut app, mut notify_rx) = App::new(cc, dialog_tx);
+            if let Some(example) = args.example {
+                if !app.load_example(&format!("{example}.half")) {
+                    warn!("could not find example '{example}'");
+                }
+            }
+
             let ctx = cc.egui_ctx.clone();
 
             let queue = app.rx.sender();
@@ -27,7 +61,7 @@ pub fn run(target: Option<std::path::PathBuf>) -> Result<(), eframe::Error> {
                 }
                 info!("repaint notification thread is stopping");
             });
-            if let Some(filename) = target {
+            if let Some(filename) = args.target {
                 match App::load_from_file(&filename) {
                     Ok(state) => {
                         info!("restoring state from file");
@@ -39,7 +73,7 @@ pub fn run(target: Option<std::path::PathBuf>) -> Result<(), eframe::Error> {
                         if e.kind() == std::io::ErrorKind::NotFound =>
                     {
                         // We can specify a filename to create
-                        warn!("file {filename:?} is not yet present");
+                        info!("file {filename:?} is not yet present; treating it as empty");
                         app.file = Some(filename);
                     }
                     Err(e) => return Err(e.into()),

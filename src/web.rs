@@ -1,5 +1,5 @@
-use crate::{dialog_worker, examples, wgpu_setup, App, AppState};
-use log::{error, info, warn};
+use crate::{dialog_worker, wgpu_setup, App};
+use log::{info, warn};
 use wasm_bindgen::prelude::*;
 
 /// Re-export init_thread_pool to be called on the web
@@ -46,30 +46,7 @@ pub fn run() {
         );
     }
 
-    let mut web_options = eframe::WebOptions::default();
-
-    let example = if let Some(e) = params.and_then(|p| p.get("example")) {
-        let out = examples::EXAMPLES
-            .iter()
-            .find(|(name, _data)| **name == e)
-            .map(|(_name, data)| data);
-        if out.is_none() {
-            warn!("could not find example '{e}'");
-        }
-        out.and_then(|s| {
-            let state = AppState::deserialize(s);
-            match state {
-                Ok(s) => Some(s),
-                Err(e) => {
-                    error!("could not deserialize example: {e:?}");
-                    None
-                }
-            }
-        })
-    } else {
-        None
-    };
-
+    let example = params.and_then(|p| p.get("example"));
     wasm_bindgen_futures::spawn_local(async move {
         let canvas = document
             .get_element_by_id("the_canvas_id")
@@ -77,6 +54,7 @@ pub fn run() {
             .dyn_into::<web_sys::HtmlCanvasElement>()
             .expect("the_canvas_id was not a HtmlCanvasElement");
 
+        let mut web_options = eframe::WebOptions::default();
         web_options.wgpu_options.wgpu_setup = wgpu_setup().await.into();
 
         eframe::WebRunner::new()
@@ -88,7 +66,9 @@ pub fn run() {
                         tokio::sync::mpsc::unbounded_channel();
                     let (mut app, mut notify_rx) = App::new(cc, dialog_tx);
                     if let Some(example) = example {
-                        app.load_from_state(example);
+                        if !app.load_example(&example) {
+                            warn!("failed to load example '{example}'");
+                        }
                     }
 
                     // Spawn a worker task to trigger repaints,
