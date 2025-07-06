@@ -549,6 +549,9 @@ impl App {
                 if ui.button("Quit").clicked() {
                     out |= AppResponse::QUIT;
                 }
+                if !out.is_empty() {
+                    ui.close_menu();
+                }
             });
             ui.menu_button("Edit", |ui| {
                 ui.add_enabled_ui(self.undo.has_undo(&self.data), |ui| {
@@ -561,9 +564,11 @@ impl App {
                         out |= AppResponse::REDO;
                     }
                 });
+                if !out.is_empty() {
+                    ui.close_menu();
+                }
             });
         });
-        ui.separator();
         out
     }
 
@@ -760,6 +765,7 @@ impl App {
             .min_width(250.0)
             .show(ctx, |ui| {
                 let mut out = self.draw_menu(ui);
+                ui.separator();
                 out |= self.draw_block_list(ui);
                 out
             })
