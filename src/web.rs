@@ -29,6 +29,19 @@ pub fn run() {
 
         web_options.wgpu_options.wgpu_setup = wgpu_setup().await.into();
 
+        wasm_bindgen_futures::spawn_local(async move {
+            use rfd::AsyncFileDialog;
+
+            let file = AsyncFileDialog::new()
+                .add_filter("halfspace", &["half"])
+                .set_directory("/")
+                .pick_file()
+                .await;
+
+            let data = file.unwrap().read().await;
+            info!("got data {data:?}");
+        });
+
         eframe::WebRunner::new()
             .start(
                 canvas,
