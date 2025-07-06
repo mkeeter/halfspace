@@ -77,11 +77,12 @@ pub enum ReadError {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct AppState {
     tag: String,
     major: usize,
     minor: usize,
+    pub description: Option<String>,
     pub world: WorldState,
     pub views: HashMap<BlockIndex, ViewState>,
     pub dock: egui_dock::DockState<Tab>,
@@ -95,6 +96,7 @@ impl Default for AppState {
             tag: TAG.to_owned(),
             major: MAJOR_VERSION,
             minor: MINOR_VERSION,
+            description: None,
             world: WorldState::default(),
             views: HashMap::new(),
             dock: egui_dock::DockState::new(vec![]),
@@ -118,6 +120,7 @@ impl AppState {
             tag: TAG.to_owned(),
             major: MAJOR_VERSION,
             minor: MINOR_VERSION,
+            description: None,
             world,
             views,
             dock,
@@ -170,6 +173,7 @@ impl AppState {
             tag: raw.tag,
             major: raw.major,
             minor: raw.minor,
+            description: raw.description,
             views,
             world,
             dock,
@@ -182,6 +186,7 @@ struct RawAppState {
     tag: String,
     major: usize,
     minor: usize,
+    description: Option<String>,
     world: serde_json::Value,
     views: serde_json::Value,
     dock: serde_json::Value,

@@ -2,6 +2,7 @@
   "tag": "halfspace",
   "major": 1,
   "minor": 2,
+  "description": "Closed-form Perlin noise",
   "world": {
     "next_index": 2,
     "order": [

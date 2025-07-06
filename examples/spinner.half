@@ -2,6 +2,7 @@
   "tag": "halfspace",
   "major": 1,
   "minor": 1,
+  "description": "Fidget spinner",
   "world": {
     "next_index": 10,
     "order": [
