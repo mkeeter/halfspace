@@ -180,13 +180,11 @@ fn build_scene(
             } else if let Some(d) = v.clone().try_cast::<Drawable>() {
                 Ok(d)
             } else {
-                return Err(Box::new(
-                    rhai::EvalAltResult::ErrorMismatchDataType(
-                        "tree or drawable".to_owned(),
-                        v.type_name().to_string(),
-                        ctx.position(),
-                    ),
-                ));
+                Err(Box::new(rhai::EvalAltResult::ErrorMismatchDataType(
+                    "tree or drawable".to_owned(),
+                    v.type_name().to_string(),
+                    ctx.position(),
+                )))
             }
         })
         .collect::<Result<Vec<_>, _>>()?;

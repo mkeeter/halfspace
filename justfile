@@ -20,3 +20,8 @@ check:
     cargo check
     {{rustup}} cargo check --lib --target=wasm32-unknown-unknown {{flags}}
 
+# Run `cargo clippy` for both native and web builds
+clippy:
+    cargo clippy
+    {{rustup}} cargo clippy --lib --target=wasm32-unknown-unknown {{flags}}
+

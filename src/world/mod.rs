@@ -62,6 +62,7 @@ impl Block {
     }
 }
 
+#[derive(Default)]
 pub struct World {
     next_index: u64,
     pub order: Vec<BlockIndex>,
@@ -176,11 +177,7 @@ impl PartialEq<WorldState> for World {
 impl World {
     /// Builds a new (empty) world
     pub fn new() -> Self {
-        World {
-            blocks: HashMap::new(),
-            order: vec![],
-            next_index: 0,
-        }
+        Self::default()
     }
 
     /// Filters blocks based on a function

@@ -108,6 +108,10 @@ pub(crate) async fn dialog_worker(
                     // TODO error handling?
                     let json_str = serde_json::to_string_pretty(&state)
                         .expect("serialization failed");
+
+                    // Note that in the WebAssembly build, this always returns
+                    // immediately, even if the user cancelled the download.
+                    // It's also not possible to set the extension :/
                     f.write(json_str.as_bytes()).await.expect("write failed");
                     let path = get_path(f);
 
@@ -535,11 +539,18 @@ impl App {
                     out |= AppResponse::NEW;
                 }
                 ui.separator();
-                if ui.button("Save").clicked() {
-                    out |= AppResponse::SAVE;
-                }
-                if ui.button("Save as").clicked() {
-                    out |= AppResponse::SAVE_AS;
+                if !cfg!(target_arch = "wasm32") {
+                    if ui.button("Save").clicked() {
+                        out |= AppResponse::SAVE;
+                    }
+                    if ui.button("Save as").clicked() {
+                        out |= AppResponse::SAVE_AS;
+                    }
+                } else {
+                    // Use 'Download' instead of Save / Save As for wasm
+                    if ui.button("Download").clicked() {
+                        out |= AppResponse::SAVE_AS;
+                    }
                 }
                 ui.separator();
                 if ui.button("Open").clicked() {
@@ -812,7 +823,8 @@ impl eframe::App for App {
             self.undo.feed_state(&self.data);
         }
 
-        // Receive new data from the worker pool
+        // Receive new data from the worker pool, which includes evaluation,
+        // rendering, and dialogs.
         while let Some(m) = self.rx.try_recv() {
             match m {
                 Message::RebuildWorld { generation, world } => {
@@ -849,6 +861,7 @@ impl eframe::App for App {
                     Some(Modal::Dialog(Dialog::SaveAs)) => {
                         self.undo.mark_saved(state.world);
                         self.file = path;
+                        self.modal = None;
                     }
                     _ => warn!(
                         "received dialog save as with unexpected modal {:?}",
@@ -865,50 +878,52 @@ impl eframe::App for App {
             }
         }
         let mut out = AppResponse::empty();
-        ctx.input_mut(|i| {
-            if i.consume_shortcut(&egui::KeyboardShortcut::new(
-                egui::Modifiers::MAC_CMD,
-                egui::Key::N,
-            )) {
-                out |= AppResponse::NEW;
-            }
-            if i.consume_shortcut(&egui::KeyboardShortcut::new(
-                egui::Modifiers::MAC_CMD,
-                egui::Key::Q,
-            )) {
-                out |= AppResponse::QUIT;
-            }
-            if i.consume_shortcut(&egui::KeyboardShortcut::new(
-                egui::Modifiers::MAC_CMD | egui::Modifiers::SHIFT,
-                egui::Key::S,
-            )) {
-                out |= AppResponse::SAVE_AS;
-            }
-            if i.consume_shortcut(&egui::KeyboardShortcut::new(
-                egui::Modifiers::MAC_CMD,
-                egui::Key::S,
-            )) {
-                out |= AppResponse::SAVE;
-            }
-            if i.consume_shortcut(&egui::KeyboardShortcut::new(
-                egui::Modifiers::MAC_CMD,
-                egui::Key::O,
-            )) {
-                out |= AppResponse::OPEN;
-            }
-            if i.consume_shortcut(&egui::KeyboardShortcut::new(
-                egui::Modifiers::MAC_CMD | egui::Modifiers::SHIFT,
-                egui::Key::Z,
-            )) {
-                out |= AppResponse::REDO;
-            }
-            if i.consume_shortcut(&egui::KeyboardShortcut::new(
-                egui::Modifiers::MAC_CMD,
-                egui::Key::Z,
-            )) {
-                out |= AppResponse::UNDO;
-            }
-        });
+        if self.modal.is_none() {
+            ctx.input_mut(|i| {
+                if i.consume_shortcut(&egui::KeyboardShortcut::new(
+                    egui::Modifiers::MAC_CMD,
+                    egui::Key::N,
+                )) {
+                    out |= AppResponse::NEW;
+                }
+                if i.consume_shortcut(&egui::KeyboardShortcut::new(
+                    egui::Modifiers::MAC_CMD,
+                    egui::Key::Q,
+                )) {
+                    out |= AppResponse::QUIT;
+                }
+                if i.consume_shortcut(&egui::KeyboardShortcut::new(
+                    egui::Modifiers::MAC_CMD | egui::Modifiers::SHIFT,
+                    egui::Key::S,
+                )) {
+                    out |= AppResponse::SAVE_AS;
+                }
+                if i.consume_shortcut(&egui::KeyboardShortcut::new(
+                    egui::Modifiers::MAC_CMD,
+                    egui::Key::S,
+                )) {
+                    out |= AppResponse::SAVE;
+                }
+                if i.consume_shortcut(&egui::KeyboardShortcut::new(
+                    egui::Modifiers::MAC_CMD,
+                    egui::Key::O,
+                )) {
+                    out |= AppResponse::OPEN;
+                }
+                if i.consume_shortcut(&egui::KeyboardShortcut::new(
+                    egui::Modifiers::MAC_CMD | egui::Modifiers::SHIFT,
+                    egui::Key::Z,
+                )) {
+                    out |= AppResponse::REDO;
+                }
+                if i.consume_shortcut(&egui::KeyboardShortcut::new(
+                    egui::Modifiers::MAC_CMD,
+                    egui::Key::Z,
+                )) {
+                    out |= AppResponse::UNDO;
+                }
+            });
+        }
 
         // Attempt to intercept window-level quit commands.
         // Note that this doesn't actually work on macOS right now, see
