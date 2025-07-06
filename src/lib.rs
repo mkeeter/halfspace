@@ -238,6 +238,7 @@ pub struct App {
     tx: MessageQueue,
 
     modal: Option<Modal>,
+    quit_confirmed: bool,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -327,6 +328,7 @@ impl App {
             },
             rx,
             modal: None,
+            quit_confirmed: false,
         };
         (app, notify_rx)
     }
@@ -551,8 +553,8 @@ impl App {
                     self.on_new(ctx);
                 }
                 Modal::Quit => {
-                    // This happens after the interceptor
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    self.quit_confirmed = true;
                 }
                 Modal::Open => {
                     self.on_open(ctx);
@@ -747,7 +749,7 @@ impl eframe::App for App {
         // Note that this doesn't actually work on macOS right now, see
         // https://github.com/emilk/egui/issues/7115
         if ctx.input(|i| i.viewport().close_requested()) {
-            if self.undo.is_saved() {
+            if self.undo.is_saved() || self.quit_confirmed {
                 // do nothing - we will close
             } else {
                 // Open a quit modal and cancel the close request
