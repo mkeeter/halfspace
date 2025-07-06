@@ -20,7 +20,7 @@ struct Args {
     target: Option<std::path::PathBuf>,
 }
 
-pub fn run() -> Result<(), eframe::Error> {
+pub fn run() -> anyhow::Result<()> {
     let args = Args::parse();
     env_logger::Builder::from_env(
         env_logger::Env::default().default_filter_or(if args.verbose {
@@ -33,7 +33,7 @@ pub fn run() -> Result<(), eframe::Error> {
 
     let mut native_options = eframe::NativeOptions::default();
     native_options.wgpu_options.wgpu_setup =
-        pollster::block_on(wgpu_setup()).into();
+        pollster::block_on(wgpu_setup())?.into();
 
     eframe::run_native(
         "halfspace",
@@ -81,7 +81,9 @@ pub fn run() -> Result<(), eframe::Error> {
             }
             Ok(Box::new(app))
         }),
-    )
+    )?;
+
+    Ok(())
 }
 
 impl App {

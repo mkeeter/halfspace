@@ -21,9 +21,22 @@ pub mod web;
 use state::{AppState, WorldState};
 use world::{BlockIndex, World};
 
+#[derive(thiserror::Error, Debug)]
+pub enum WgpuError {
+    #[error("could not get WebGPU adapter")]
+    NoAdapter,
+
+    #[error("missing feature `{0}`")]
+    MissingFeature(&'static str),
+
+    #[error("could not request device")]
+    RequestDeviceError(#[from] wgpu::RequestDeviceError),
+}
+
 /// Manually open a WebGPU session with `float32-filterable`
-pub async fn wgpu_setup() -> egui_wgpu::WgpuSetupExisting {
+pub async fn wgpu_setup() -> Result<egui_wgpu::WgpuSetupExisting, WgpuError> {
     let instance = wgpu::Instance::default();
+    info!("wgpu_setup");
 
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
@@ -32,13 +45,12 @@ pub async fn wgpu_setup() -> egui_wgpu::WgpuSetupExisting {
             force_fallback_adapter: false,
         })
         .await
-        .expect("Failed to find an appropriate adapter");
+        .ok_or(WgpuError::NoAdapter)?;
 
     let adapter_features = adapter.features();
-    assert!(
-        adapter_features.contains(wgpu::Features::FLOAT32_FILTERABLE),
-        "Adapter does not support float32-filterable"
-    );
+    if !adapter_features.contains(wgpu::Features::FLOAT32_FILTERABLE) {
+        return Err(WgpuError::MissingFeature("float32-filterable"));
+    }
 
     let required_features = wgpu::Features::FLOAT32_FILTERABLE;
 
@@ -52,15 +64,14 @@ pub async fn wgpu_setup() -> egui_wgpu::WgpuSetupExisting {
             },
             None,
         )
-        .await
-        .expect("Failed to create device");
+        .await?;
 
-    egui_wgpu::WgpuSetupExisting {
+    Ok(egui_wgpu::WgpuSetupExisting {
         instance,
         adapter,
         device,
         queue,
-    }
+    })
 }
 
 #[allow(clippy::large_enum_variant)]

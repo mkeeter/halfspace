@@ -57,12 +57,6 @@ pub struct WgpuResources {
     sdf: sdf::SdfResources,
 }
 
-// YOLO
-#[cfg(target_arch = "wasm32")]
-unsafe impl Sync for WgpuResources {}
-#[cfg(target_arch = "wasm32")]
-unsafe impl Send for WgpuResources {}
-
 impl WgpuResources {
     pub fn reset(&mut self) {
         // blit and clear don't store persistent data
