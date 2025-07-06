@@ -25,3 +25,6 @@ clippy:
     cargo clippy
     {{rustup}} cargo clippy --lib --target=wasm32-unknown-unknown {{flags}}
 
+# Checks all of the shaders with `naga`
+naga:
+    naga --bulk-validate shaders/*.wgsl
