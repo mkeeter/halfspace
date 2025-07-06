@@ -1,5 +1,5 @@
-use crate::{dialog_worker, wgpu_setup, App};
-use log::info;
+use crate::{dialog_worker, examples, wgpu_setup, App, AppState};
+use log::{error, info, warn};
 use wasm_bindgen::prelude::*;
 
 /// Re-export init_thread_pool to be called on the web
@@ -9,18 +9,68 @@ pub use wasm_bindgen_rayon::init_thread_pool;
 pub fn run() {
     use eframe::wasm_bindgen::JsCast as _;
 
+    let window = web_sys::window().expect("No window");
+    let document = window.document().expect("No document");
+    let location = window.location();
+
+    let params = location
+        .search()
+        .and_then(|s| web_sys::UrlSearchParams::new_with_str(&s))
+        .ok();
+
+    // Get an optional `verbose` parameter from the URL string
+    let verbose =
+        if let Some(v) = params.as_ref().and_then(|p| p.get("verbose")) {
+            match v.as_str() {
+                "true" => Ok(true),
+                "false" => Ok(false),
+                _ => Err(v),
+            }
+        } else {
+            Ok(false)
+        };
+
     // Redirect `log` message to `console.log` and friends:
-    eframe::WebLogger::init(log::LevelFilter::Debug).ok();
+    eframe::WebLogger::init(if *verbose.as_ref().unwrap_or(&false) {
+        // TODO this doesn't seem to work?
+        log::LevelFilter::Debug
+    } else {
+        log::LevelFilter::Info
+    })
+    .ok();
+
     info!("starting...");
+    if let Err(e) = verbose {
+        warn!(
+            "invalid value for 'verbose': {e:?} (expected 'true' or 'false')"
+        );
+    }
 
     let mut web_options = eframe::WebOptions::default();
 
-    wasm_bindgen_futures::spawn_local(async {
-        let document = web_sys::window()
-            .expect("No window")
-            .document()
-            .expect("No document");
+    let example = if let Some(e) = params.and_then(|p| p.get("example")) {
+        let out = examples::EXAMPLES
+            .iter()
+            .find(|(name, _data)| **name == e)
+            .map(|(_name, data)| data);
+        if out.is_none() {
+            warn!("could not find example '{e}'");
+        }
+        out.and_then(|s| {
+            let state = AppState::deserialize(s);
+            match state {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    error!("could not deserialize example: {e:?}");
+                    None
+                }
+            }
+        })
+    } else {
+        None
+    };
 
+    wasm_bindgen_futures::spawn_local(async move {
         let canvas = document
             .get_element_by_id("the_canvas_id")
             .expect("Failed to find the_canvas_id")
@@ -36,7 +86,10 @@ pub fn run() {
                 Box::new(|cc| {
                     let (dialog_tx, dialog_rx) =
                         tokio::sync::mpsc::unbounded_channel();
-                    let (app, mut notify_rx) = App::new(cc, dialog_tx);
+                    let (mut app, mut notify_rx) = App::new(cc, dialog_tx);
+                    if let Some(example) = example {
+                        app.load_from_state(example);
+                    }
 
                     // Spawn a worker task to trigger repaints,
                     // per egui#4368 and egui#4405

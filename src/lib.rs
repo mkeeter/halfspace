@@ -595,12 +595,14 @@ impl App {
                 if ui.button("Open").clicked() {
                     out |= AppResponse::OPEN;
                 }
-                ui.separator();
-                if ui.button("Quit").clicked() {
-                    out |= AppResponse::QUIT;
-                }
-                if !out.is_empty() {
-                    ui.close_menu();
+                if !cfg!(target_arch = "wasm32") {
+                    ui.separator();
+                    if ui.button("Quit").clicked() {
+                        out |= AppResponse::QUIT;
+                    }
+                    if !out.is_empty() {
+                        ui.close_menu();
+                    }
                 }
             });
             ui.menu_button("Edit", |ui| {
