@@ -7,7 +7,7 @@ use crate::{
         ViewMode3,
     },
     world::{Color, Scene},
-    BlockIndex, Message, MessageQueue,
+    BlockIndex, Message, MessageSender,
 };
 
 use fidget::{
@@ -69,7 +69,7 @@ impl RenderTask {
         generation: u64,
         settings: RenderSettings,
         level: usize,
-        tx: MessageQueue,
+        tx: MessageSender,
     ) -> Self {
         let cancel = fidget::render::CancelToken::new();
         let cancel_ = cancel.clone();

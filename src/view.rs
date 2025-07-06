@@ -4,7 +4,7 @@ use crate::{
     state,
     state::ViewState,
     world::Scene,
-    BlockIndex, MessageQueue, ViewResponse,
+    BlockIndex, MessageSender, ViewResponse,
 };
 
 pub use state::{ViewMode2, ViewMode3};
@@ -396,7 +396,7 @@ impl ViewData {
         &mut self,
         block: BlockIndex,
         scene: Scene,
-        tx: &MessageQueue,
+        tx: &MessageSender,
     ) -> Option<&ViewImage> {
         // If the image settings have changed, then clear `task` (which causes
         // us to reinitialize it below).  Skip clearing the task if it's a

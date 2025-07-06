@@ -1,8 +1,8 @@
 use eframe::egui_wgpu::wgpu;
 use egui_dnd::dnd;
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use std::collections::{HashMap, HashSet};
-use std::io::{Read, Write};
+use std::io::Write;
 use web_time::Instant;
 
 mod gui;
@@ -61,6 +61,65 @@ pub async fn wgpu_setup() -> egui_wgpu::WgpuSetupExisting {
         device,
         queue,
     }
+}
+
+#[allow(clippy::large_enum_variant)]
+pub enum DialogRequest {
+    Open,
+    SaveAs { state: AppState },
+}
+
+pub(crate) async fn dialog_worker(
+    mut rx: tokio::sync::mpsc::UnboundedReceiver<DialogRequest>,
+    tx: MessageSender,
+) {
+    // Helper function to get a path (if running natively)
+    #[cfg(target_arch = "wasm32")]
+    let get_path = |_| None;
+    #[cfg(not(target_arch = "wasm32"))]
+    let get_path = |f: rfd::FileHandle| Some(f.path().to_owned());
+
+    while let Some(m) = rx.recv().await {
+        let r = match m {
+            DialogRequest::Open => {
+                if let Some(f) = rfd::AsyncFileDialog::new()
+                    .add_filter("halfspace", &["half"])
+                    .pick_file()
+                    .await
+                {
+                    let data = f.read().await;
+                    let path = get_path(f);
+
+                    let s =
+                        std::str::from_utf8(&data).expect("file must be utf-8");
+                    let state = AppState::deserialize(s)
+                        .expect("deserialization failed");
+                    Message::DialogOpen { state, path }
+                } else {
+                    Message::DialogCancel
+                }
+            }
+            DialogRequest::SaveAs { state } => {
+                if let Some(f) = rfd::AsyncFileDialog::new()
+                    .add_filter("halfspace", &["half"])
+                    .save_file()
+                    .await
+                {
+                    // TODO error handling?
+                    let json_str = serde_json::to_string_pretty(&state)
+                        .expect("serialization failed");
+                    f.write(json_str.as_bytes()).await.expect("write failed");
+                    let path = get_path(f);
+
+                    Message::DialogSaveAs { state, path }
+                } else {
+                    Message::DialogCancel
+                }
+            }
+        };
+        tx.send(r);
+    }
+    info!("dialog thread is exiting");
 }
 
 // Base-16 Eighties, approximately
@@ -202,22 +261,85 @@ enum Message {
         start_time: Instant,
         data: view::ViewImage,
     },
+
+    /// A file has been opened; here is its data
+    DialogOpen {
+        state: AppState,
+        path: Option<std::path::PathBuf>,
+    },
+    /// We have saved a file, returns the `AppState`
+    DialogSaveAs {
+        state: AppState,
+        path: Option<std::path::PathBuf>,
+    },
+    /// The dialog action has been cancelled
+    DialogCancel, // TODO make this dialog-specific?
 }
 
 #[derive(Clone)]
-struct MessageQueue {
-    queue: std::sync::mpsc::Sender<Message>,
+struct MessageSender {
+    /// Main (blocking) queue for messages
+    queue: std::sync::mpsc::Sender<(Message, Option<u64>)>,
+    generation: Option<u64>,
+
+    /// Optionally async queue, for `ctx` notifications
     notify: tokio::sync::mpsc::UnboundedSender<()>,
 }
 
-impl MessageQueue {
+struct MessageReceiver {
+    receiver: std::sync::mpsc::Receiver<(Message, Option<u64>)>,
+    generation: u64,
+
+    sender: std::sync::mpsc::Sender<(Message, Option<u64>)>,
+    notify: tokio::sync::mpsc::UnboundedSender<()>,
+}
+
+impl MessageReceiver {
+    fn new(notify: tokio::sync::mpsc::UnboundedSender<()>) -> Self {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        Self {
+            sender,
+            receiver,
+            notify,
+            generation: 0,
+        }
+    }
+    fn try_recv(&self) -> Option<Message> {
+        while let Ok((m, gen)) = self.receiver.try_recv() {
+            if gen.is_none() || gen == Some(self.generation) {
+                return Some(m);
+            }
+        }
+        None
+    }
+    fn sender(&self) -> MessageSender {
+        MessageSender {
+            queue: self.sender.clone(),
+            generation: None,
+            notify: self.notify.clone(),
+        }
+    }
+    fn sender_with_gen(&self) -> MessageSender {
+        MessageSender {
+            queue: self.sender.clone(),
+            generation: Some(self.generation),
+            notify: self.notify.clone(),
+        }
+    }
+    /// Increment the generation, orphaning senders from older generations
+    fn increment_gen(&mut self) {
+        self.generation += 1;
+    }
+}
+
+impl MessageSender {
     fn send(&self, m: Message) {
-        if self.queue.send(m).is_ok() {
+        if self.queue.send((m, self.generation)).is_ok() {
             if self.notify.send(()).is_err() {
-                warn!("notify returned an error");
+                error!("notify returned an error");
             }
         } else {
-            warn!("sending returned an error");
+            error!("sending returned an error");
         }
     }
 }
@@ -234,18 +356,32 @@ pub struct App {
     syntax: egui_extras::syntax_highlighting::SyntectSettings,
     views: HashMap<BlockIndex, view::ViewData>,
 
-    rx: std::sync::mpsc::Receiver<Message>,
-    tx: MessageQueue,
+    rx: MessageReceiver,
+
+    /// Dialogs are handled in a separate task
+    dialogs: tokio::sync::mpsc::UnboundedSender<DialogRequest>,
 
     modal: Option<Modal>,
     quit_confirmed: bool,
 }
 
 #[derive(Copy, Clone, Debug)]
-enum Modal {
+enum Unsaved {
     Quit,
     New,
     Open,
+}
+
+#[derive(Copy, Clone, Debug)]
+enum Dialog {
+    Open,
+    SaveAs,
+}
+
+#[derive(Copy, Clone, Debug)]
+enum Modal {
+    Unsaved(Unsaved),
+    Dialog(Dialog),
 }
 
 impl App {
@@ -255,6 +391,7 @@ impl App {
     /// repaint when it receives a message.
     pub fn new(
         cc: &eframe::CreationContext<'_>,
+        dialogs: tokio::sync::mpsc::UnboundedSender<DialogRequest>,
     ) -> (Self, tokio::sync::mpsc::UnboundedReceiver<()>) {
         // Install custom render pipelines
         let wgpu_state = cc.wgpu_render_state.as_ref().unwrap();
@@ -309,8 +446,8 @@ impl App {
             style.visuals = theme_visuals();
         });
 
-        let (tx, rx) = std::sync::mpsc::channel();
         let (notify_tx, notify_rx) = tokio::sync::mpsc::unbounded_channel();
+        let rx = MessageReceiver::new(notify_tx);
         let data = World::new();
         let undo = state::Undo::new(&data);
         let app = Self {
@@ -322,11 +459,8 @@ impl App {
             syntax,
             views: HashMap::new(),
             generation: std::sync::Arc::new(0.into()),
-            tx: MessageQueue {
-                queue: tx,
-                notify: notify_tx,
-            },
             rx,
+            dialogs,
             modal: None,
             quit_confirmed: false,
         };
@@ -352,21 +486,6 @@ impl App {
         Ok(())
     }
 
-    /// Loads from the file in `self.file`
-    ///
-    /// # Panics
-    /// If `self.file` is `None`
-    pub fn load_from_file(
-        filename: &std::path::Path,
-    ) -> Result<AppState, state::ReadError> {
-        info!("loading {filename:?}");
-        let mut f = std::fs::File::options().read(true).open(filename)?;
-        let mut data = vec![];
-        f.read_to_end(&mut data)?;
-        let s = std::str::from_utf8(&data)?;
-        AppState::deserialize(s)
-    }
-
     pub fn load_from_state(&mut self, state: AppState) {
         self.data = state.world.into();
         self.tree = state.dock;
@@ -378,9 +497,7 @@ impl App {
         self.generation
             .store(0, std::sync::atomic::Ordering::Relaxed);
         self.undo = state::Undo::new(&self.data);
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx.queue = tx; // use a new channel to orphan previous tasks
-        self.rx = rx;
+        self.rx.increment_gen(); // orphan previous tasks
     }
 
     pub fn start_world_rebuild(&self) {
@@ -391,7 +508,7 @@ impl App {
             .fetch_add(1u64, std::sync::atomic::Ordering::Release)
             + 1;
         let gen_handle = self.generation.clone();
-        let tx = self.tx.clone();
+        let tx = self.rx.sender_with_gen();
         rayon::spawn(move || {
             // The world may have moved on before this script
             // evaluation started; if so, then skip it entirely.
@@ -494,8 +611,10 @@ impl App {
             return;
         };
 
-        // Cancel modal if escape is pressed
-        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        // Cancel dialog modal if escape is pressed
+        if matches!(modal, Modal::Dialog(..))
+            && ctx.input(|i| i.key_pressed(egui::Key::Escape))
+        {
             self.modal = None;
             return;
         }
@@ -519,45 +638,57 @@ impl App {
                 ui.allocate_rect(screen_rect, egui::Sense::all());
             });
 
-        let s = match modal {
-            Modal::New => "New",
-            Modal::Open => "Open",
-            Modal::Quit => "Quit",
+        let r = match modal {
+            Modal::Unsaved(m) => {
+                let s = match m {
+                    Unsaved::New => "New",
+                    Unsaved::Open => "Open",
+                    Unsaved::Quit => "Quit",
+                };
+                egui::Window::new(s)
+                    .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                    .collapsible(false)
+                    .resizable(false)
+                    .order(egui::Order::Foreground)
+                    .frame(egui::Frame::popup(&ctx.style()))
+                    .show(ctx, |ui| {
+                        ui.label("You have unsaved changes. Continue?");
+                        ui.horizontal(|ui| {
+                            if ui.button("Ok").clicked() {
+                                true
+                            } else if ui.button("Cancel").clicked() {
+                                self.modal = None;
+                                false
+                            } else {
+                                false
+                            }
+                        })
+                        .inner
+                    })
+                    .unwrap()
+                    .inner
+                    .unwrap()
+            }
+            Modal::Dialog(..) => false,
         };
-        let r = egui::Window::new(s)
-            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-            .collapsible(false)
-            .resizable(false)
-            .order(egui::Order::Foreground)
-            .frame(egui::Frame::popup(&ctx.style()))
-            .show(ctx, |ui| {
-                ui.label("You have unsaved changes. Continue?");
-                ui.horizontal(|ui| {
-                    if ui.button("Ok").clicked() {
-                        true
-                    } else if ui.button("Cancel").clicked() {
-                        self.modal = None;
-                        false
-                    } else {
-                        false
-                    }
-                })
-                .inner
-            })
-            .unwrap()
-            .inner
-            .unwrap();
         if r {
-            match modal {
-                Modal::New => {
+            let Modal::Unsaved(d) = modal else {
+                unreachable!()
+            };
+            match d {
+                Unsaved::New => {
                     self.on_new(ctx);
                 }
-                Modal::Quit => {
+                Unsaved::Quit => {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     self.quit_confirmed = true;
                 }
-                Modal::Open => {
-                    self.on_open(ctx);
+                Unsaved::Open => {
+                    if self.dialogs.send(DialogRequest::Open).is_ok() {
+                        self.modal = Some(Modal::Dialog(Dialog::Open));
+                    } else {
+                        error!("could not send to dialog thread");
+                    }
                 }
             }
             self.modal = None;
@@ -590,7 +721,7 @@ impl App {
             world: &mut self.data,
             syntax: &self.syntax,
             views: &mut self.views,
-            tx: &self.tx,
+            tx: &self.rx.sender_with_gen(),
             out: &mut io_out,
         };
         egui_dock::DockArea::new(&mut self.tree)
@@ -676,7 +807,7 @@ impl eframe::App for App {
         }
 
         // Receive new data from the worker pool
-        while let Ok(m) = self.rx.try_recv() {
+        while let Some(m) = self.rx.try_recv() {
             match m {
                 Message::RebuildWorld { generation, world } => {
                     if generation
@@ -697,6 +828,34 @@ impl eframe::App for App {
                         e.update(generation, data, start_time.elapsed())
                     }
                 }
+                Message::DialogOpen { state, path } => match self.modal {
+                    Some(Modal::Dialog(Dialog::Open)) => {
+                        self.load_from_state(state);
+                        self.modal = None;
+                        self.file = path;
+                    }
+                    _ => warn!(
+                        "received dialog open with unexpected modal {:?}",
+                        self.modal
+                    ),
+                },
+                Message::DialogSaveAs { state, path } => match self.modal {
+                    Some(Modal::Dialog(Dialog::SaveAs)) => {
+                        self.undo.mark_saved(state.world);
+                        self.file = path;
+                    }
+                    _ => warn!(
+                        "received dialog save as with unexpected modal {:?}",
+                        self.modal
+                    ),
+                },
+                Message::DialogCancel => match self.modal {
+                    Some(Modal::Dialog(..)) => self.modal = None,
+                    _ => warn!(
+                        "received dialog cancel with unexpected modal {:?}",
+                        self.modal
+                    ),
+                },
             }
         }
         let mut out = AppResponse::empty();
@@ -753,7 +912,7 @@ impl eframe::App for App {
                 // do nothing - we will close
             } else {
                 // Open a quit modal and cancel the close request
-                self.modal = Some(Modal::Quit);
+                self.modal = Some(Modal::Unsaved(Unsaved::Quit));
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             }
         }
@@ -767,7 +926,7 @@ impl eframe::App for App {
                     if self.undo.is_saved() {
                         self.on_new(ctx)
                     } else {
-                        self.modal = Some(Modal::New)
+                        self.modal = Some(Modal::Unsaved(Unsaved::New))
                     }
                 }
                 AppResponse::WORLD_CHANGED => {
@@ -777,21 +936,36 @@ impl eframe::App for App {
                     if self.undo.is_saved() {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     } else {
-                        self.modal = Some(Modal::Quit);
+                        self.modal = Some(Modal::Unsaved(Unsaved::Quit));
                     }
                 }
-                AppResponse::SAVE => {
-                    self.save();
+                AppResponse::SAVE if self.file.is_some() => {
+                    let f = self.file.take().unwrap();
+                    self.write_to_file(&f).unwrap();
+                    self.file = Some(f);
                 }
-                AppResponse::SAVE_AS => {
-                    self.save_as();
+                AppResponse::SAVE | AppResponse::SAVE_AS => {
+                    let state =
+                        AppState::new(&self.data, &self.views, &self.tree);
+                    if self
+                        .dialogs
+                        .send(DialogRequest::SaveAs { state })
+                        .is_ok()
+                    {
+                        self.modal = Some(Modal::Dialog(Dialog::SaveAs));
+                    } else {
+                        error!("could not send SaveAs to dialog thread");
+                    }
+                }
+                AppResponse::OPEN if self.undo.is_saved() => {
+                    if self.dialogs.send(DialogRequest::Open).is_ok() {
+                        self.modal = Some(Modal::Dialog(Dialog::Open));
+                    } else {
+                        error!("could not send Open to dialog thread");
+                    }
                 }
                 AppResponse::OPEN => {
-                    if self.undo.is_saved() {
-                        self.on_open(ctx)
-                    } else {
-                        self.modal = Some(Modal::Open);
-                    }
+                    self.modal = Some(Modal::Unsaved(Unsaved::Open));
                 }
                 AppResponse::UNDO => {
                     if let Some(prev) = self.undo.undo(&self.data) {

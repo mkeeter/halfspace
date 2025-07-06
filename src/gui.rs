@@ -5,7 +5,7 @@ pub use crate::state::{Tab, TabMode};
 use crate::{
     view::{self, ViewCanvas, ViewData, ViewImage, ViewMode2, ViewMode3},
     world::{Block, BlockError, BlockIndex, IoValue, NameError, World},
-    BlockResponse, MessageQueue, ViewResponse,
+    BlockResponse, MessageSender, ViewResponse,
 };
 use fidget::shapes::types::{Vec2, Vec3};
 
@@ -14,7 +14,7 @@ pub struct WorldView<'a> {
     pub syntax: &'a egui_extras::syntax_highlighting::SyntectSettings,
     pub views: &'a mut HashMap<BlockIndex, ViewData>,
     pub out: &'a mut Vec<(BlockIndex, ViewResponse)>,
-    pub tx: &'a MessageQueue,
+    pub tx: &'a MessageSender,
 }
 
 impl Tab {

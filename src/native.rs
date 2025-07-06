@@ -1,5 +1,6 @@
-use crate::{state, wgpu_setup, App};
+use crate::{dialog_worker, state, wgpu_setup, App, AppState};
 use log::{info, warn};
+use std::io::Read;
 
 pub fn run(target: Option<std::path::PathBuf>) -> Result<(), eframe::Error> {
     let mut native_options = eframe::NativeOptions::default();
@@ -10,8 +11,14 @@ pub fn run(target: Option<std::path::PathBuf>) -> Result<(), eframe::Error> {
         "halfspace",
         native_options,
         Box::new(|cc| {
-            let (mut app, mut notify_rx) = App::new(cc);
+            let (dialog_tx, dialog_rx) = tokio::sync::mpsc::unbounded_channel();
+            let (mut app, mut notify_rx) = App::new(cc, dialog_tx);
             let ctx = cc.egui_ctx.clone();
+
+            let queue = app.rx.sender();
+            std::thread::spawn(move || {
+                pollster::block_on(dialog_worker(dialog_rx, queue))
+            });
 
             // Worker thread to request repaints based on notifications
             std::thread::spawn(move || {
@@ -44,53 +51,14 @@ pub fn run(target: Option<std::path::PathBuf>) -> Result<(), eframe::Error> {
 }
 
 impl App {
-    pub(crate) fn save(&mut self) {
-        if let Some(f) = self.file.take() {
-            self.write_to_file(&f).unwrap();
-            self.file = Some(f);
-        } else {
-            let filename = rfd::FileDialog::new()
-                .add_filter("halfspace", &["half"])
-                .save_file();
-            if let Some(filename) = filename {
-                if self.write_to_file(&filename).is_ok() {
-                    self.file = Some(filename);
-                } else {
-                    panic!("could not create file");
-                }
-            } else {
-                warn!("file save cancelled due to empty selection");
-            }
-        }
-    }
-
-    pub(crate) fn save_as(&mut self) {
-        let filename = rfd::FileDialog::new()
-            .add_filter("halfspace", &["half"])
-            .save_file();
-        if let Some(filename) = filename {
-            if self.write_to_file(&filename).is_ok() {
-                self.file = Some(filename);
-            } else {
-                panic!("could not create file");
-            }
-        } else {
-            warn!("file save cancelled due to empty selection");
-        }
-    }
-
-    pub(crate) fn on_open(&mut self, ctx: &egui::Context) {
-        let filename = rfd::FileDialog::new()
-            .add_filter("halfspace", &["half"])
-            .pick_file();
-        if let Some(filename) = filename {
-            if let Ok(state) = Self::load_from_file(&filename) {
-                self.file = Some(filename);
-                self.load_from_state(state);
-                ctx.request_repaint();
-            } else {
-                panic!("could not load file");
-            }
-        }
+    fn load_from_file(
+        filename: &std::path::Path,
+    ) -> Result<AppState, state::ReadError> {
+        info!("loading {filename:?}");
+        let mut f = std::fs::File::options().read(true).open(filename)?;
+        let mut data = vec![];
+        f.read_to_end(&mut data)?;
+        let s = std::str::from_utf8(&data)?;
+        AppState::deserialize(s)
     }
 }

@@ -1,5 +1,5 @@
-use crate::{wgpu_setup, App};
-use log::{info, warn};
+use crate::{dialog_worker, wgpu_setup, App};
+use log::info;
 use wasm_bindgen::prelude::*;
 
 /// Re-export init_thread_pool to be called on the web
@@ -29,25 +29,14 @@ pub fn run() {
 
         web_options.wgpu_options.wgpu_setup = wgpu_setup().await.into();
 
-        wasm_bindgen_futures::spawn_local(async move {
-            use rfd::AsyncFileDialog;
-
-            let file = AsyncFileDialog::new()
-                .add_filter("halfspace", &["half"])
-                .set_directory("/")
-                .pick_file()
-                .await;
-
-            let data = file.unwrap().read().await;
-            info!("got data {data:?}");
-        });
-
         eframe::WebRunner::new()
             .start(
                 canvas,
                 web_options,
                 Box::new(|cc| {
-                    let (app, mut notify_rx) = App::new(cc);
+                    let (dialog_tx, dialog_rx) =
+                        tokio::sync::mpsc::unbounded_channel();
+                    let (app, mut notify_rx) = App::new(cc, dialog_tx);
 
                     // Spawn a worker task to trigger repaints,
                     // per egui#4368 and egui#4405
@@ -59,23 +48,15 @@ pub fn run() {
                         info!("repaint notification task is stopping");
                     });
 
+                    let queue = app.rx.sender();
+                    wasm_bindgen_futures::spawn_local(dialog_worker(
+                        dialog_rx, queue,
+                    ));
+
                     Ok(Box::new(app))
                 }),
             )
             .await
             .expect("failed to start eframe");
     });
-}
-
-// TODO: `rfd` theoretically supports WebAssembly, although it's async-only
-impl App {
-    pub(crate) fn save(&mut self) {
-        warn!("cannot save in webassembly");
-    }
-    pub(crate) fn save_as(&mut self) {
-        warn!("cannot save in webassembly");
-    }
-    pub(crate) fn on_open(&mut self, _ctx: &egui::Context) {
-        warn!("cannot open in webassembly");
-    }
 }
