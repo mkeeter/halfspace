@@ -9,6 +9,7 @@ dist:
     wasm-opt -O pkg/halfspace_bg.wasm -o pkg/halfspace_bg.opt.wasm
     mv pkg/halfspace_bg.opt.wasm pkg/halfspace_bg.wasm
     cp -r web/index.html pkg
+    cp -r web/htaccess pkg/.htaccess
 
 # Build and serve the web application
 serve:
@@ -28,3 +29,7 @@ clippy:
 # Checks all of the shaders with `naga`
 naga:
     naga --bulk-validate shaders/*.wgsl
+
+deploy:
+    just dist
+    rsync -avz --delete -e ssh ./pkg/ mkeeter@mattkeeter.com:mattkeeter.com/projects/halfspace/demo

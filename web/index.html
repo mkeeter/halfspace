@@ -9,12 +9,12 @@
     <title>Halfspace</title>
 
     <script type="module">
-        import init, { run, initThreadPool} from '/halfspace.js';
-        await init('/halfspace_bg.wasm');
+        import init, { run, initThreadPool} from './halfspace.js';
+        await init('./halfspace_bg.wasm');
         await initThreadPool(navigator.hardwareConcurrency);
         run();
     </script>
-    <base href="/" />
+    <base href="./" />
 
     <style>
         html {

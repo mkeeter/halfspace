@@ -101,11 +101,19 @@ pub(crate) async fn dialog_worker(
                     let data = f.read().await;
                     let path = get_path(f);
 
-                    let s =
-                        std::str::from_utf8(&data).expect("file must be utf-8");
-                    let state = AppState::deserialize(s)
-                        .expect("deserialization failed");
-                    Message::DialogOpen { state, path }
+                    match std::str::from_utf8(&data)
+                        .map_err(state::ReadError::NotUtf8)
+                        .and_then(AppState::deserialize)
+                    {
+                        Ok(state) => Message::DialogOpen { state, path },
+                        Err(e) => Message::DialogError {
+                            title: "Open error".to_owned(),
+                            message: format!(
+                                "Could not deserialize:\n{:?}",
+                                anyhow::Error::from(e)
+                            ),
+                        },
+                    }
                 } else {
                     Message::DialogCancel
                 }
@@ -123,10 +131,19 @@ pub(crate) async fn dialog_worker(
                     // Note that in the WebAssembly build, this always returns
                     // immediately, even if the user cancelled the download.
                     // It's also not possible to set the extension :/
-                    f.write(json_str.as_bytes()).await.expect("write failed");
-                    let path = get_path(f);
-
-                    Message::DialogSaveAs { state, path }
+                    match f.write(json_str.as_bytes()).await {
+                        Ok(()) => {
+                            let path = get_path(f);
+                            Message::DialogSaveAs { state, path }
+                        }
+                        Err(e) => Message::DialogError {
+                            title: "Save error".to_owned(),
+                            message: format!(
+                                "Save filed: {:#?}",
+                                anyhow::Error::from(e)
+                            ),
+                        },
+                    }
                 } else {
                     Message::DialogCancel
                 }
@@ -289,6 +306,12 @@ enum Message {
     },
     /// The dialog action has been cancelled
     DialogCancel, // TODO make this dialog-specific?
+
+    /// The dialog action has returned an error
+    DialogError {
+        title: String,
+        message: String,
+    },
 }
 
 #[derive(Clone)]
@@ -423,6 +446,7 @@ enum Dialog {
 enum Modal {
     Unsaved(Unsaved),
     Dialog(Dialog),
+    Error { title: String, message: String },
 }
 
 impl App {
@@ -623,9 +647,9 @@ impl App {
                     if ui.button("Quit").clicked() {
                         out |= AppResponse::QUIT;
                     }
-                    if !out.is_empty() {
-                        ui.close_menu();
-                    }
+                }
+                if !out.is_empty() {
+                    ui.close_menu();
                 }
             });
             ui.menu_button("Edit", |ui| {
@@ -712,7 +736,7 @@ impl App {
         };
 
         // Cancel dialog modal if escape is pressed
-        if matches!(modal, Modal::Dialog(..))
+        if matches!(modal, Modal::Dialog(..) | Modal::Error { .. })
             && ctx.input(|i| i.key_pressed(egui::Key::Escape))
         {
             self.modal = None;
@@ -738,7 +762,7 @@ impl App {
                 ui.allocate_rect(screen_rect, egui::Sense::all());
             });
 
-        let r = match modal {
+        match modal {
             Modal::Unsaved(m) => {
                 let s = match m {
                     Unsaved::New => "New",
@@ -746,7 +770,7 @@ impl App {
                     Unsaved::Quit => "Quit",
                     Unsaved::LoadExample(..) => "Load example",
                 };
-                egui::Window::new(s)
+                let r = egui::Window::new(s)
                     .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                     .collapsible(false)
                     .resizable(false)
@@ -768,32 +792,57 @@ impl App {
                     })
                     .unwrap()
                     .inner
-                    .unwrap()
-            }
-            Modal::Dialog(..) => false,
-        };
-        if r {
-            let Some(Modal::Unsaved(d)) = self.modal.take() else {
-                unreachable!()
-            };
-            match d {
-                Unsaved::New => {
-                    self.on_new(ctx);
-                }
-                Unsaved::Quit => {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                    self.quit_confirmed = true;
-                }
-                Unsaved::Open => {
-                    if self.dialogs.send(DialogRequest::Open).is_ok() {
-                        self.modal = Some(Modal::Dialog(Dialog::Open));
-                    } else {
-                        error!("could not send to dialog thread");
+                    .unwrap();
+                if r {
+                    let Some(Modal::Unsaved(d)) = self.modal.take() else {
+                        unreachable!()
+                    };
+                    match d {
+                        Unsaved::New => {
+                            self.on_new(ctx);
+                        }
+                        Unsaved::Quit => {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                            self.quit_confirmed = true;
+                        }
+                        Unsaved::Open => {
+                            if self.dialogs.send(DialogRequest::Open).is_ok() {
+                                self.modal = Some(Modal::Dialog(Dialog::Open));
+                            } else {
+                                error!("could not send to dialog thread");
+                            }
+                        }
+                        Unsaved::LoadExample(s) => self.load_from_state(s),
                     }
                 }
-                Unsaved::LoadExample(s) => self.load_from_state(s),
             }
-        }
+            Modal::Error { title, message } => {
+                let reset_modal = egui::Window::new(title)
+                    .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                    .collapsible(false)
+                    .resizable(false)
+                    .order(egui::Order::Foreground)
+                    .frame(egui::Frame::popup(&ctx.style()))
+                    .show(ctx, |ui| {
+                        ui.add(
+                            egui::Label::new(message)
+                                .wrap_mode(egui::TextWrapMode::Extend),
+                        );
+                        ui.add_space(5.0);
+                        ui.horizontal(|ui| {
+                            ui.button("oopsie whoopsie").clicked()
+                        })
+                        .inner
+                    })
+                    .unwrap()
+                    .inner
+                    .unwrap();
+                if reset_modal {
+                    self.modal = None;
+                }
+            }
+            Modal::Dialog(..) => (),
+        };
     }
 
     fn draw_tab_region(
@@ -957,6 +1006,15 @@ impl eframe::App for App {
                     Some(Modal::Dialog(..)) => self.modal = None,
                     _ => warn!(
                         "received dialog cancel with unexpected modal {:?}",
+                        self.modal
+                    ),
+                },
+                Message::DialogError { title, message } => match self.modal {
+                    Some(Modal::Dialog(..)) => {
+                        self.modal = Some(Modal::Error { title, message })
+                    }
+                    _ => warn!(
+                        "received dialog error with unexpected modal {:?}",
                         self.modal
                     ),
                 },

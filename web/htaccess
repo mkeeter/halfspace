@@ -1,0 +1,2 @@
+Header add Cross-Origin-Embedder-Policy: "require-corp"
+Header add Cross-Origin-Opener-Policy: "same-origin"
