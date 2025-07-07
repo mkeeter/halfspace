@@ -30,13 +30,15 @@ fn main() {
             .unwrap();
     for d in paths {
         let path = d.unwrap().path();
-        let f = std::fs::read_to_string(&path).unwrap();
-        writeln!(
-            &mut dest_file,
-            "    (\"{}\", {f:?}),",
-            path.file_name().unwrap().to_str().unwrap(),
-        )
-        .unwrap();
+        if path.extension().is_some_and(|o| o == "half") {
+            let f = std::fs::read_to_string(&path).unwrap();
+            writeln!(
+                &mut dest_file,
+                "    (\"{}\", {f:?}),",
+                path.file_name().unwrap().to_str().unwrap(),
+            )
+            .unwrap();
+        }
     }
     writeln!(&mut dest_file, "];").unwrap();
 }
