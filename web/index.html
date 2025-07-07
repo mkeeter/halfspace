@@ -48,5 +48,14 @@
 
     <body>
         <canvas id="the_canvas_id"></canvas>
+        <div id="wgpu-fail" hidden>
+            <p>WebGPU initialization failed: <b id="wgpu-error"></b></p>
+        <p>Try
+            <a href="https://www.google.com/chrome">Google Chrome</a>,
+            <a href="https://developer.apple.com/documentation/safari-release-notes/safari-26-release-notes">Safari 26 (beta)</a>,
+            or <a href="https://www.mozilla.org/en-US/firefox/channel/desktop/">Firefox Nightly</a>.
+        </p>
+        <p>When using Chrome on Linux, WebGPU must be enabled with <code>chrome://flags/#unsafe-webgpu-support</code> and <code>chrome://flags/#enable-vulkan</code>.
+        </div>
     </body>
 </html>

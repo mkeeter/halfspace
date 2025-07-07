@@ -64,53 +64,13 @@ pub fn run() {
         web_options.wgpu_options.wgpu_setup = match wgpu_setup().await {
             Ok(w) => w.into(),
             Err(e) => {
-                let p = document.create_element("p").unwrap();
+                let p = document.get_element_by_id("wgpu-error").unwrap();
                 p.set_text_content(Some(&format!(
-                    "WebGPU is not supported on this browser: {}",
+                    "{}",
                     anyhow::Error::from(e),
                 )));
-                let body =
-                    document.body().expect("document should have a body");
-                body.append_child(&p).unwrap();
-
-                let p = document.create_element("p").unwrap();
-                let text = document.create_text_node("Try ");
-                p.append_child(&text).unwrap();
-                let a = document
-                    .create_element("a")
-                    .unwrap()
-                    .dyn_into::<web_sys::HtmlAnchorElement>()
-                    .unwrap();
-                a.set_href("https://www.google.com/chrome");
-                a.set_text_content(Some("Google Chrome"));
-                p.append_child(&a).unwrap();
-
-                let comma = document.create_text_node(", ");
-                p.append_child(&comma).unwrap();
-                let a = document
-                    .create_element("a")
-                    .unwrap()
-                    .dyn_into::<web_sys::HtmlAnchorElement>()
-                    .unwrap();
-                a.set_href("https://developer.apple.com/documentation/safari-release-notes/safari-26-release-notes");
-                a.set_text_content(Some("Safari 26 (beta)"));
-                p.append_child(&a).unwrap();
-                let comma = document.create_text_node(", or ");
-                p.append_child(&comma).unwrap();
-                let a = document
-                    .create_element("a")
-                    .unwrap()
-                    .dyn_into::<web_sys::HtmlAnchorElement>()
-                    .unwrap();
-                a.set_href(
-                    "https://www.mozilla.org/en-US/firefox/channel/desktop/",
-                );
-                a.set_text_content(Some("Firefox Nightly"));
-                p.append_child(&a).unwrap();
-                let comma = document.create_text_node(".");
-                p.append_child(&comma).unwrap();
-
-                body.append_child(&p).unwrap();
+                let div = document.get_element_by_id("wgpu-fail").unwrap();
+                div.remove_attribute("hidden").unwrap();
                 canvas.remove();
                 panic!();
             }
