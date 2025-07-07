@@ -19,6 +19,9 @@ pub fn run() {
     let document = window.document().expect("No document");
     let location = window.location();
 
+    let loading = document.get_element_by_id("loading").unwrap();
+    loading.remove();
+
     let params = location
         .search()
         .and_then(|s| web_sys::UrlSearchParams::new_with_str(&s))
