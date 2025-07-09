@@ -618,9 +618,7 @@ impl App {
         })
     }
 
-    fn draw_menu(&mut self, ui: &mut egui::Ui) -> AppResponse {
-        let mut out = AppResponse::empty();
-
+    fn draw_menu(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         egui::menu::bar(ui, |ui| {
             ui.menu_button("File", |ui| {
                 let mut clicked = false;
@@ -631,43 +629,51 @@ impl App {
                 ui.separator();
                 if !cfg!(target_arch = "wasm32") {
                     if ui.button("Save").clicked() {
-                        out |= AppResponse::SAVE;
+                        self.on_save();
+                        clicked = true;
                     }
                     if ui.button("Save as").clicked() {
-                        out |= AppResponse::SAVE_AS;
+                        self.on_save_as();
+                        clicked = true;
                     }
                 } else {
                     // Use 'Download' instead of Save / Save As for wasm
                     if ui.button("Download").clicked() {
-                        out |= AppResponse::SAVE_AS;
+                        self.on_save_as();
+                        clicked = true;
                     }
                 }
                 ui.separator();
                 if ui.button("Open").clicked() {
-                    out |= AppResponse::OPEN;
+                    self.on_open();
+                    clicked = true;
                 }
                 if !cfg!(target_arch = "wasm32") {
                     ui.separator();
                     if ui.button("Quit").clicked() {
-                        out |= AppResponse::QUIT;
+                        self.on_quit(ctx);
+                        clicked = true;
                     }
                 }
-                if !out.is_empty() || clicked {
+                if clicked {
                     ui.close_menu();
                 }
             });
             ui.menu_button("Edit", |ui| {
+                let mut clicked = false;
                 ui.add_enabled_ui(self.undo.has_undo(&self.data), |ui| {
                     if ui.button("Undo").clicked() {
-                        out |= AppResponse::UNDO;
+                        self.on_undo();
+                        clicked = true;
                     }
                 });
                 ui.add_enabled_ui(self.undo.has_redo(&self.data), |ui| {
                     if ui.button("Redo").clicked() {
-                        out |= AppResponse::REDO;
+                        self.on_redo();
+                        clicked = true;
                     }
                 });
-                if !out.is_empty() {
+                if clicked {
                     ui.close_menu();
                 }
             });
@@ -691,12 +697,14 @@ impl App {
                 }
             });
         });
-        out
     }
 
     /// Draws a list of blocks into a caller-provided left panel
-    fn draw_block_list(&mut self, ui: &mut egui::Ui) -> AppResponse {
-        let mut out = AppResponse::empty();
+    ///
+    /// Returns `true` if anything in the world has changed
+    #[must_use]
+    fn draw_block_list(&mut self, ui: &mut egui::Ui) -> bool {
+        let mut changed = false;
         ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
             // Draw the "new block" button at the bottom
             ui.add_space(5.0);
@@ -716,7 +724,7 @@ impl App {
                     if index != usize::MAX {
                         let b = &self.library.shapes[index];
                         if self.data.new_block_from(b) {
-                            out |= AppResponse::WORLD_CHANGED;
+                            changed = true;
                         }
                     }
                 });
@@ -724,12 +732,12 @@ impl App {
             ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     if self.block_list(ui) {
-                        out |= AppResponse::WORLD_CHANGED;
+                        changed = true;
                     }
                 });
             });
         });
-        out
+        changed
     }
 
     /// Draws a blocking modal (if present in `self.modal`)
@@ -848,12 +856,12 @@ impl App {
         };
     }
 
+    #[must_use]
     fn draw_tab_region(
         &mut self,
         ctx: &egui::Context,
         ui: &mut egui::Ui,
-    ) -> AppResponse {
-        let mut out = AppResponse::empty();
+    ) -> bool {
         // Manually draw a backdrop; this will be covered by the
         // DockArea if there's anything being drawn
         let style = ui.style();
@@ -882,6 +890,7 @@ impl App {
             .show_leaf_collapse_buttons(false)
             .show_leaf_close_all_buttons(false)
             .show_inside(ui, &mut bw);
+        let mut changed = false;
         for (block, flags) in io_out {
             for f in flags.iter() {
                 match f {
@@ -895,27 +904,27 @@ impl App {
                         }
                     }
                     ViewResponse::CHANGED => {
-                        out |= AppResponse::WORLD_CHANGED;
+                        changed = true;
                     }
                     ViewResponse::REDRAW => {
-                        ui.ctx().request_repaint();
+                        self.request_repaint = true;
                     }
                     _ => panic!("invalid flag"),
                 }
             }
         }
-        out
+        changed
     }
 
-    fn draw_ui(&mut self, ctx: &egui::Context) -> AppResponse {
-        let mut out = AppResponse::empty();
-        out |= egui::SidePanel::left("left_panel")
+    #[must_use]
+    fn draw_ui(&mut self, ctx: &egui::Context) -> bool {
+        let mut changed = false;
+        changed |= egui::SidePanel::left("left_panel")
             .min_width(250.0)
             .show(ctx, |ui| {
-                let mut out = self.draw_menu(ui);
+                self.draw_menu(ctx, ui);
                 ui.separator();
-                out |= self.draw_block_list(ui);
-                out
+                self.draw_block_list(ui)
             })
             .inner;
 
@@ -925,17 +934,90 @@ impl App {
                     .inner_margin(0.0)
                     .fill(egui::Color32::TRANSPARENT),
             )
-            .show(ctx, |ui| out |= self.draw_tab_region(ctx, ui));
+            .show(ctx, |ui| changed |= self.draw_tab_region(ctx, ui));
 
         // Draw optional modals
         self.draw_modal(ctx);
 
-        out
+        changed
+    }
+
+    fn on_quit(&mut self, ctx: &egui::Context) {
+        if self.undo.is_saved() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        } else {
+            self.modal = Some(Modal::Unsaved(Unsaved::Quit));
+        }
+    }
+
+    fn on_redo(&mut self) {
+        if self.modal.is_some() {
+            warn!("ignoring redo while modal is active");
+        } else if let Some(prev) = self.undo.redo(&self.data) {
+            debug!("got redo state");
+            let prev = prev.clone();
+            self.restore_world_state(prev);
+        } else {
+            // XXX show a dialog or something?
+            warn!("no redo available");
+        }
+    }
+
+    fn on_save(&mut self) {
+        if self.modal.is_some() {
+            warn!("ignoring save while modal is active");
+        } else if self.file.is_some() {
+            let f = self.file.take().unwrap();
+            self.write_to_file(&f).unwrap();
+            self.file = Some(f);
+        } else {
+            self.on_save_as();
+        }
+    }
+
+    fn on_save_as(&mut self) {
+        if self.modal.is_some() {
+            warn!("ignoring save as while modal is active");
+        } else {
+            let state = AppState::new(&self.data, &self.views, &self.tree);
+            if self.dialogs.send(DialogRequest::SaveAs { state }).is_ok() {
+                self.modal = Some(Modal::Dialog(Dialog::SaveAs));
+            } else {
+                error!("could not send SaveAs to dialog thread");
+            }
+        }
+    }
+
+    fn on_undo(&mut self) {
+        if self.modal.is_some() {
+            warn!("ignoring undo while modal is active");
+        } else if let Some(prev) = self.undo.undo(&self.data) {
+            debug!("got undo state");
+            let prev = prev.clone();
+            self.restore_world_state(prev);
+        } else {
+            // XXX show a dialog or something?
+            warn!("no undo available");
+        }
+    }
+
+    fn on_open(&mut self) {
+        if self.modal.is_some() {
+            warn!("cannot execute open with active modal");
+        } else if self.undo.is_saved() {
+            if self.dialogs.send(DialogRequest::Open).is_ok() {
+                self.modal = Some(Modal::Dialog(Dialog::Open));
+            } else {
+                error!("could not send Open to dialog thread");
+            }
+        } else {
+            self.modal = Some(Modal::Unsaved(Unsaved::Open));
+        }
     }
 
     fn on_new(&mut self) {
         if self.modal.is_some() {
-            warn!("cannot execute on_new with open modal");
+            warn!("cannot execute on_new with active modal");
         } else if self.undo.is_saved() {
             info!("new file");
             self.new_file()
@@ -945,7 +1027,7 @@ impl App {
         }
     }
 
-    /// Resets our file to an empty state
+    /// Resets our file to an empty state, setting `self.request_repaint`
     fn new_file(&mut self) {
         self.file = None;
         self.load_from_state(AppState::default());
@@ -1036,53 +1118,56 @@ impl eframe::App for App {
                 },
             }
         }
-        let mut out = AppResponse::empty();
+        let mut quit_requested = false;
         if self.modal.is_none() {
             ctx.input_mut(|i| {
                 if i.consume_shortcut(&egui::KeyboardShortcut::new(
                     egui::Modifiers::MAC_CMD,
                     egui::Key::N,
                 )) {
-                    info!("making new file");
                     self.on_new();
                 }
                 if i.consume_shortcut(&egui::KeyboardShortcut::new(
                     egui::Modifiers::MAC_CMD,
                     egui::Key::Q,
                 )) {
-                    out |= AppResponse::QUIT;
+                    // We can't call on_quit directly because ctx is locked
+                    quit_requested = true;
                 }
                 if i.consume_shortcut(&egui::KeyboardShortcut::new(
                     egui::Modifiers::MAC_CMD | egui::Modifiers::SHIFT,
                     egui::Key::S,
                 )) {
-                    out |= AppResponse::SAVE_AS;
+                    self.on_save_as();
                 }
                 if i.consume_shortcut(&egui::KeyboardShortcut::new(
                     egui::Modifiers::MAC_CMD,
                     egui::Key::S,
                 )) {
-                    out |= AppResponse::SAVE;
+                    self.on_save();
                 }
                 if i.consume_shortcut(&egui::KeyboardShortcut::new(
                     egui::Modifiers::MAC_CMD,
                     egui::Key::O,
                 )) {
-                    out |= AppResponse::OPEN;
+                    self.on_open();
                 }
                 if i.consume_shortcut(&egui::KeyboardShortcut::new(
                     egui::Modifiers::MAC_CMD | egui::Modifiers::SHIFT,
                     egui::Key::Z,
                 )) {
-                    out |= AppResponse::REDO;
+                    self.on_redo();
                 }
                 if i.consume_shortcut(&egui::KeyboardShortcut::new(
                     egui::Modifiers::MAC_CMD,
                     egui::Key::Z,
                 )) {
-                    out |= AppResponse::UNDO;
+                    self.on_undo();
                 }
             });
+        }
+        if quit_requested {
+            self.on_quit(ctx);
         }
 
         // Attempt to intercept window-level quit commands.
@@ -1098,71 +1183,8 @@ impl eframe::App for App {
             }
         }
 
-        out |= self.draw_ui(ctx);
-
-        // Handle app-level actions
-        for f in out.iter() {
-            match f {
-                AppResponse::WORLD_CHANGED => {
-                    self.start_world_rebuild();
-                }
-                AppResponse::QUIT => {
-                    if self.undo.is_saved() {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                    } else {
-                        self.modal = Some(Modal::Unsaved(Unsaved::Quit));
-                    }
-                }
-                AppResponse::SAVE if self.file.is_some() => {
-                    let f = self.file.take().unwrap();
-                    self.write_to_file(&f).unwrap();
-                    self.file = Some(f);
-                }
-                AppResponse::SAVE | AppResponse::SAVE_AS => {
-                    let state =
-                        AppState::new(&self.data, &self.views, &self.tree);
-                    if self
-                        .dialogs
-                        .send(DialogRequest::SaveAs { state })
-                        .is_ok()
-                    {
-                        self.modal = Some(Modal::Dialog(Dialog::SaveAs));
-                    } else {
-                        error!("could not send SaveAs to dialog thread");
-                    }
-                }
-                AppResponse::OPEN if self.undo.is_saved() => {
-                    if self.dialogs.send(DialogRequest::Open).is_ok() {
-                        self.modal = Some(Modal::Dialog(Dialog::Open));
-                    } else {
-                        error!("could not send Open to dialog thread");
-                    }
-                }
-                AppResponse::OPEN => {
-                    self.modal = Some(Modal::Unsaved(Unsaved::Open));
-                }
-                AppResponse::UNDO => {
-                    if let Some(prev) = self.undo.undo(&self.data) {
-                        debug!("got undo state");
-                        let prev = prev.clone();
-                        self.restore_world_state(ctx, prev);
-                    } else {
-                        // XXX show a dialog or something?
-                        warn!("no undo available");
-                    }
-                }
-                AppResponse::REDO => {
-                    if let Some(prev) = self.undo.redo(&self.data) {
-                        debug!("got redo state");
-                        let prev = prev.clone();
-                        self.restore_world_state(ctx, prev);
-                    } else {
-                        // XXX show a dialog or something?
-                        warn!("no redo available");
-                    }
-                }
-                _ => panic!("invalid flag"),
-            }
+        if self.draw_ui(ctx) {
+            self.start_world_rebuild();
         }
 
         let marker = if self.undo.is_saved() { "" } else { "*" };
@@ -1293,17 +1315,13 @@ impl App {
         changed
     }
 
-    pub fn restore_world_state(
-        &mut self,
-        ctx: &egui::Context,
-        state: WorldState,
-    ) {
+    pub fn restore_world_state(&mut self, state: WorldState) {
         self.data = state.into();
         self.tree
             .retain_tabs(|t| self.data.blocks.contains_key(&t.index));
         self.views.retain(|i, _| self.data.blocks.contains_key(i));
         self.start_world_rebuild();
-        ctx.request_repaint();
+        self.request_repaint = true;
     }
 }
 
@@ -1336,28 +1354,6 @@ bitflags::bitflags! {
         const CHANGED       = (1 << 1);
         /// The UI should be repainted
         const REDRAW        = (1 << 2);
-    }
-}
-
-bitflags::bitflags! {
-    /// Flags representing changes in the `App`
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    #[must_use]
-    struct AppResponse: u32 {
-        /// Request to save the model
-        const SAVE          = (1 << 0);
-        /// Request to save the model under a new name
-        const SAVE_AS       = (1 << 1);
-        /// Request to quit the application
-        const QUIT          = (1 << 2);
-        /// The world should be re-evaluate
-        const WORLD_CHANGED = (1 << 3);
-        /// Request to open a file
-        const OPEN          = (1 << 4);
-        /// Undo
-        const UNDO          = (1 << 5);
-        /// Redo
-        const REDO          = (1 << 6);
     }
 }
 
