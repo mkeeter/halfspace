@@ -407,6 +407,7 @@ pub struct App {
 
     modal: Option<Modal>,
     quit_confirmed: bool,
+    request_repaint: bool,
 }
 
 #[derive(Clone)]
@@ -542,6 +543,7 @@ impl App {
             dialogs,
             modal: None,
             quit_confirmed: false,
+            request_repaint: false,
         };
         (app, notify_rx)
     }
@@ -621,8 +623,10 @@ impl App {
 
         egui::menu::bar(ui, |ui| {
             ui.menu_button("File", |ui| {
+                let mut clicked = false;
                 if ui.button("New").clicked() {
-                    out |= AppResponse::NEW;
+                    self.on_new();
+                    clicked = true;
                 }
                 ui.separator();
                 if !cfg!(target_arch = "wasm32") {
@@ -648,7 +652,7 @@ impl App {
                         out |= AppResponse::QUIT;
                     }
                 }
-                if !out.is_empty() {
+                if !out.is_empty() || clicked {
                     ui.close_menu();
                 }
             });
@@ -678,11 +682,10 @@ impl App {
                 }
                 if let Some(state) = load_state {
                     if self.undo.is_saved() {
-                        self.load_from_state(state.clone());
+                        self.load_from_state(state);
                     } else {
-                        self.modal = Some(Modal::Unsaved(
-                            Unsaved::LoadExample(state.clone()),
-                        ));
+                        self.modal =
+                            Some(Modal::Unsaved(Unsaved::LoadExample(state)));
                     }
                     ui.close_menu();
                 }
@@ -735,8 +738,8 @@ impl App {
             return;
         };
 
-        // Cancel dialog modal if escape is pressed
-        if matches!(modal, Modal::Dialog(..) | Modal::Error { .. })
+        // Cancel certain modals if escape is pressed
+        if matches!(modal, Modal::Unsaved(..) | Modal::Error { .. })
             && ctx.input(|i| i.key_pressed(egui::Key::Escape))
         {
             self.modal = None;
@@ -799,7 +802,7 @@ impl App {
                     };
                     match d {
                         Unsaved::New => {
-                            self.on_new(ctx);
+                            self.new_file();
                         }
                         Unsaved::Quit => {
                             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -930,10 +933,23 @@ impl App {
         out
     }
 
-    fn on_new(&mut self, ctx: &egui::Context) {
+    fn on_new(&mut self) {
+        if self.modal.is_some() {
+            warn!("cannot execute on_new with open modal");
+        } else if self.undo.is_saved() {
+            info!("new file");
+            self.new_file()
+        } else {
+            info!("modal");
+            self.modal = Some(Modal::Unsaved(Unsaved::New))
+        }
+    }
+
+    /// Resets our file to an empty state
+    fn new_file(&mut self) {
         self.file = None;
         self.load_from_state(AppState::default());
-        ctx.request_repaint();
+        self.request_repaint = true;
     }
 }
 
@@ -1027,7 +1043,8 @@ impl eframe::App for App {
                     egui::Modifiers::MAC_CMD,
                     egui::Key::N,
                 )) {
-                    out |= AppResponse::NEW;
+                    info!("making new file");
+                    self.on_new();
                 }
                 if i.consume_shortcut(&egui::KeyboardShortcut::new(
                     egui::Modifiers::MAC_CMD,
@@ -1086,13 +1103,6 @@ impl eframe::App for App {
         // Handle app-level actions
         for f in out.iter() {
             match f {
-                AppResponse::NEW => {
-                    if self.undo.is_saved() {
-                        self.on_new(ctx)
-                    } else {
-                        self.modal = Some(Modal::Unsaved(Unsaved::New))
-                    }
-                }
                 AppResponse::WORLD_CHANGED => {
                     self.start_world_rebuild();
                 }
@@ -1167,6 +1177,10 @@ impl eframe::App for App {
         };
         if !cfg!(target_arch = "wasm32") {
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+        }
+
+        if std::mem::take(&mut self.request_repaint) {
+            ctx.request_repaint();
         }
     }
 }
@@ -1344,8 +1358,6 @@ bitflags::bitflags! {
         const UNDO          = (1 << 5);
         /// Redo
         const REDO          = (1 << 6);
-        /// Request to create a new model
-        const NEW           = (1 << 7);
     }
 }
 
