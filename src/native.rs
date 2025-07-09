@@ -97,4 +97,18 @@ impl App {
         let s = std::str::from_utf8(&data)?;
         AppState::deserialize(s)
     }
+
+    pub(crate) fn update_title(&mut self, ctx: &egui::Context) {
+        let marker = if self.undo.is_saved() { "" } else { "*" };
+        let title = if let Some(f) = &self.file {
+            let f = f
+                .file_name()
+                .map(|s| s.to_string_lossy())
+                .unwrap_or_else(|| "[no file name]".to_owned().into());
+            format!("{f}{marker}")
+        } else {
+            format!("[untitled]{marker}")
+        };
+        ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+    }
 }

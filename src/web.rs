@@ -115,3 +115,9 @@ pub fn run() {
             .expect("failed to start eframe");
     });
 }
+
+impl App {
+    pub(crate) fn update_title(&mut self, _ctx: &egui::Context) {
+        // no-op on the web backend
+    }
+}
