@@ -1037,169 +1037,17 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        let wgpu_state = frame.wgpu_render_state().unwrap();
-        if let Some(r) = wgpu_state
-            .renderer
-            .write()
-            .callback_resources
-            .get_mut::<painters::WgpuResources>()
-        {
-            r.reset();
-        }
-
-        let is_dragging = ctx.input(|i| i.pointer.any_down());
-        let drag_released = ctx.input(|i| i.pointer.any_released());
-        if drag_released {
-            self.undo.checkpoint(&self.data);
-        } else if !is_dragging {
-            self.undo.feed_state(&self.data);
-        }
-
-        // Receive new data from the worker pool, which includes evaluation,
-        // rendering, and dialogs.
-        while let Some(m) = self.rx.try_recv() {
-            match m {
-                Message::RebuildWorld { generation, world } => {
-                    if generation
-                        == self
-                            .generation
-                            .load(std::sync::atomic::Ordering::Acquire)
-                    {
-                        self.data = world;
-                    }
-                }
-                Message::RenderView {
-                    block,
-                    generation,
-                    data,
-                    start_time,
-                } => {
-                    if let Some(e) = self.views.get_mut(&block) {
-                        e.update(generation, data, start_time.elapsed())
-                    }
-                }
-                Message::DialogOpen { state, path } => match self.modal {
-                    Some(Modal::Dialog(Dialog::Open)) => {
-                        self.load_from_state(state);
-                        self.modal = None;
-                        self.file = path;
-                    }
-                    _ => warn!(
-                        "received dialog open with unexpected modal {:?}",
-                        self.modal
-                    ),
-                },
-                Message::DialogSaveAs { state, path } => match self.modal {
-                    Some(Modal::Dialog(Dialog::SaveAs)) => {
-                        self.undo.mark_saved(state.world);
-                        self.file = path;
-                        self.modal = None;
-                    }
-                    _ => warn!(
-                        "received dialog save as with unexpected modal {:?}",
-                        self.modal
-                    ),
-                },
-                Message::DialogCancel => match self.modal {
-                    Some(Modal::Dialog(..)) => self.modal = None,
-                    _ => warn!(
-                        "received dialog cancel with unexpected modal {:?}",
-                        self.modal
-                    ),
-                },
-                Message::DialogError { title, message } => match self.modal {
-                    Some(Modal::Dialog(..)) => {
-                        self.modal = Some(Modal::Error { title, message })
-                    }
-                    _ => warn!(
-                        "received dialog error with unexpected modal {:?}",
-                        self.modal
-                    ),
-                },
-            }
-        }
-        let mut quit_requested = false;
-        if self.modal.is_none() {
-            ctx.input_mut(|i| {
-                if i.consume_shortcut(&egui::KeyboardShortcut::new(
-                    egui::Modifiers::MAC_CMD,
-                    egui::Key::N,
-                )) {
-                    self.on_new();
-                }
-                if i.consume_shortcut(&egui::KeyboardShortcut::new(
-                    egui::Modifiers::MAC_CMD,
-                    egui::Key::Q,
-                )) {
-                    // We can't call on_quit directly because ctx is locked
-                    quit_requested = true;
-                }
-                if i.consume_shortcut(&egui::KeyboardShortcut::new(
-                    egui::Modifiers::MAC_CMD | egui::Modifiers::SHIFT,
-                    egui::Key::S,
-                )) {
-                    self.on_save_as();
-                }
-                if i.consume_shortcut(&egui::KeyboardShortcut::new(
-                    egui::Modifiers::MAC_CMD,
-                    egui::Key::S,
-                )) {
-                    self.on_save();
-                }
-                if i.consume_shortcut(&egui::KeyboardShortcut::new(
-                    egui::Modifiers::MAC_CMD,
-                    egui::Key::O,
-                )) {
-                    self.on_open();
-                }
-                if i.consume_shortcut(&egui::KeyboardShortcut::new(
-                    egui::Modifiers::MAC_CMD | egui::Modifiers::SHIFT,
-                    egui::Key::Z,
-                )) {
-                    self.on_redo();
-                }
-                if i.consume_shortcut(&egui::KeyboardShortcut::new(
-                    egui::Modifiers::MAC_CMD,
-                    egui::Key::Z,
-                )) {
-                    self.on_undo();
-                }
-            });
-        }
-        if quit_requested {
-            self.on_quit(ctx);
-        }
-
-        // Attempt to intercept window-level quit commands.
-        // Note that this doesn't actually work on macOS right now, see
-        // https://github.com/emilk/egui/issues/7115
-        if ctx.input(|i| i.viewport().close_requested()) {
-            if self.undo.is_saved() || self.quit_confirmed {
-                // do nothing - we will close
-            } else {
-                // Open a quit modal and cancel the close request
-                self.modal = Some(Modal::Unsaved(Unsaved::Quit));
-                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            }
-        }
+        Self::reset_wgpu_state(frame);
+        self.update_undo_redo(ctx);
+        self.handle_messages();
+        self.check_shortcuts(ctx);
+        self.intercept_quit(ctx);
 
         if self.draw_ui(ctx) {
             self.start_world_rebuild();
         }
 
-        let marker = if self.undo.is_saved() { "" } else { "*" };
-        let title = if let Some(f) = &self.file {
-            let f = f
-                .file_name()
-                .map(|s| s.to_string_lossy())
-                .unwrap_or_else(|| "[no file name]".to_owned().into());
-            format!("{f}{marker}")
-        } else {
-            format!("[untitled]{marker}")
-        };
-        if !cfg!(target_arch = "wasm32") {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
-        }
+        self.update_title(ctx);
 
         if std::mem::take(&mut self.request_repaint) {
             ctx.request_repaint();
@@ -1322,6 +1170,187 @@ impl App {
         self.views.retain(|i, _| self.data.blocks.contains_key(i));
         self.start_world_rebuild();
         self.request_repaint = true;
+    }
+
+    /// Resets [`WgpuResources`](painters::WgpuResources) attached to a frame
+    fn reset_wgpu_state(frame: &eframe::Frame) {
+        let wgpu_state = frame.wgpu_render_state().unwrap();
+        if let Some(r) = wgpu_state
+            .renderer
+            .write()
+            .callback_resources
+            .get_mut::<painters::WgpuResources>()
+        {
+            r.reset();
+        }
+    }
+
+    /// Updates the undo tracking system
+    fn update_undo_redo(&mut self, ctx: &egui::Context) {
+        let (is_dragging, drag_released) =
+            ctx.input(|i| (i.pointer.any_down(), i.pointer.any_released()));
+        if drag_released {
+            self.undo.checkpoint(&self.data);
+        } else if !is_dragging {
+            self.undo.feed_state(&self.data);
+        }
+    }
+
+    /// Receive updates from the worker pool
+    ///
+    /// These may include evaluation results, rendering, and dialog states
+    fn handle_messages(&mut self) {
+        while let Some(m) = self.rx.try_recv() {
+            self.handle_message(m);
+        }
+    }
+
+    /// Handles a single message
+    fn handle_message(&mut self, m: Message) {
+        match m {
+            Message::RebuildWorld { generation, world } => {
+                if generation
+                    == self
+                        .generation
+                        .load(std::sync::atomic::Ordering::Acquire)
+                {
+                    self.data = world;
+                }
+            }
+            Message::RenderView {
+                block,
+                generation,
+                data,
+                start_time,
+            } => {
+                if let Some(e) = self.views.get_mut(&block) {
+                    e.update(generation, data, start_time.elapsed())
+                }
+            }
+            Message::DialogOpen { state, path } => match self.modal {
+                Some(Modal::Dialog(Dialog::Open)) => {
+                    self.load_from_state(state);
+                    self.modal = None;
+                    self.file = path;
+                }
+                _ => warn!(
+                    "received dialog open with unexpected modal {:?}",
+                    self.modal
+                ),
+            },
+            Message::DialogSaveAs { state, path } => match self.modal {
+                Some(Modal::Dialog(Dialog::SaveAs)) => {
+                    self.undo.mark_saved(state.world);
+                    self.file = path;
+                    self.modal = None;
+                }
+                _ => warn!(
+                    "received dialog save as with unexpected modal {:?}",
+                    self.modal
+                ),
+            },
+            Message::DialogCancel => match self.modal {
+                Some(Modal::Dialog(..)) => self.modal = None,
+                _ => warn!(
+                    "received dialog cancel with unexpected modal {:?}",
+                    self.modal
+                ),
+            },
+            Message::DialogError { title, message } => match self.modal {
+                Some(Modal::Dialog(..)) => {
+                    self.modal = Some(Modal::Error { title, message })
+                }
+                _ => warn!(
+                    "received dialog error with unexpected modal {:?}",
+                    self.modal
+                ),
+            },
+        }
+    }
+
+    fn check_shortcuts(&mut self, ctx: &egui::Context) {
+        let mut quit_requested = false;
+        if self.modal.is_none() {
+            ctx.input_mut(|i| {
+                if i.consume_shortcut(&egui::KeyboardShortcut::new(
+                    egui::Modifiers::MAC_CMD,
+                    egui::Key::N,
+                )) {
+                    self.on_new();
+                }
+                if i.consume_shortcut(&egui::KeyboardShortcut::new(
+                    egui::Modifiers::MAC_CMD,
+                    egui::Key::Q,
+                )) {
+                    // We can't call on_quit directly because ctx is locked
+                    quit_requested = true;
+                }
+                if i.consume_shortcut(&egui::KeyboardShortcut::new(
+                    egui::Modifiers::MAC_CMD | egui::Modifiers::SHIFT,
+                    egui::Key::S,
+                )) {
+                    self.on_save_as();
+                }
+                if i.consume_shortcut(&egui::KeyboardShortcut::new(
+                    egui::Modifiers::MAC_CMD,
+                    egui::Key::S,
+                )) {
+                    self.on_save();
+                }
+                if i.consume_shortcut(&egui::KeyboardShortcut::new(
+                    egui::Modifiers::MAC_CMD,
+                    egui::Key::O,
+                )) {
+                    self.on_open();
+                }
+                if i.consume_shortcut(&egui::KeyboardShortcut::new(
+                    egui::Modifiers::MAC_CMD | egui::Modifiers::SHIFT,
+                    egui::Key::Z,
+                )) {
+                    self.on_redo();
+                }
+                if i.consume_shortcut(&egui::KeyboardShortcut::new(
+                    egui::Modifiers::MAC_CMD,
+                    egui::Key::Z,
+                )) {
+                    self.on_undo();
+                }
+            });
+        }
+        if quit_requested {
+            self.on_quit(ctx);
+        }
+    }
+
+    /// Intercept window-level quit commands and pop up a modal if unsaved
+    fn intercept_quit(&mut self, ctx: &egui::Context) {
+        // Note that this doesn't actually work on macOS right now, see
+        // https://github.com/emilk/egui/issues/7115
+        if ctx.input(|i| i.viewport().close_requested()) {
+            if self.undo.is_saved() || self.quit_confirmed {
+                // do nothing - we will close
+            } else {
+                // Open a quit modal and cancel the close request
+                self.modal = Some(Modal::Unsaved(Unsaved::Quit));
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            }
+        }
+    }
+
+    fn update_title(&mut self, ctx: &egui::Context) {
+        let marker = if self.undo.is_saved() { "" } else { "*" };
+        let title = if let Some(f) = &self.file {
+            let f = f
+                .file_name()
+                .map(|s| s.to_string_lossy())
+                .unwrap_or_else(|| "[no file name]".to_owned().into());
+            format!("{f}{marker}")
+        } else {
+            format!("[untitled]{marker}")
+        };
+        if !cfg!(target_arch = "wasm32") {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+        }
     }
 }
 
