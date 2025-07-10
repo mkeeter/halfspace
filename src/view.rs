@@ -342,15 +342,14 @@ impl ViewData {
     pub fn new(image_size: fidget::render::ImageSize) -> Self {
         Self {
             task: None,
-            canvas: ViewCanvas::Canvas3 {
-                canvas: fidget::gui::Canvas3::new(
-                    fidget::render::VoxelSize::new(
+            canvas: ViewCanvas::Canvas2 {
+                canvas: fidget::gui::Canvas2::new(
+                    fidget::render::ImageSize::new(
                         image_size.width(),
                         image_size.height(),
-                        image_size.width(),
                     ),
                 ),
-                mode: ViewMode3::Shaded,
+                mode: ViewMode2::Sdf,
             },
             image: None,
             generation: 0,
