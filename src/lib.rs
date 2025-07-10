@@ -395,9 +395,6 @@ pub struct App {
     /// File path used for loading and saving
     pub file: Option<std::path::PathBuf>,
 
-    /// File name used for downloading
-    download: Option<String>,
-
     meta: state::Metadata,
     tree: egui_dock::DockState<gui::Tab>,
     syntax: egui_extras::syntax_highlighting::SyntectSettings,
@@ -449,6 +446,7 @@ enum Dialog {
 }
 
 #[derive(Clone)]
+#[must_use]
 #[allow(clippy::large_enum_variant)]
 enum Modal {
     /// An action requires a check to discard unsaved changes
@@ -459,7 +457,7 @@ enum Modal {
         title: String,
         message: String,
     },
-    /// A download has been requested; populate `App::download`
+    /// A download has been requested; populate `meta.download`
     Download {
         state: AppState,
         name: String,
@@ -572,7 +570,6 @@ impl App {
             tree: egui_dock::DockState::new(vec![]),
             undo,
             file: None,
-            download: None,
             syntax,
             views: HashMap::new(),
             meta: state::Metadata::default(),
@@ -979,7 +976,7 @@ impl App {
                         let state = std::mem::take(state);
                         self.modal = None;
                         self.do_download(&name, state);
-                        self.download = Some(name);
+                        self.meta.name = Some(name);
                     }
                     Response::Cancel => self.modal = None,
                     Response::None => (),
@@ -1079,9 +1076,9 @@ impl App {
             warn!("ignoring download while modal is active");
         } else {
             let state = self.get_state();
-            if let Some(f) = self.download.take() {
+            if let Some(f) = self.meta.name.take() {
                 self.do_download(&f, state);
-                self.download = Some(f);
+                self.meta.name = Some(f);
             } else {
                 self.modal = Some(Modal::Download {
                     state,
