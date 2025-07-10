@@ -793,10 +793,17 @@ impl App {
         };
 
         // Cancel certain modals if escape is pressed
-        if matches!(
+        let (enter_pressed, escape_pressed) = ctx.input(|i| {
+            (
+                i.key_pressed(egui::Key::Enter),
+                i.key_pressed(egui::Key::Escape),
+            )
+        });
+        if (matches!(
             modal,
             Modal::Unsaved(..) | Modal::Error { .. } | Modal::Download { .. }
-        ) && ctx.input(|i| i.key_pressed(egui::Key::Escape))
+        ) && escape_pressed)
+            || (matches!(modal, Modal::Error { .. }) && enter_pressed)
         {
             self.modal = None;
             return;
@@ -958,6 +965,8 @@ impl App {
                                 Response::Ok
                             } else if ui.button("Cancel").clicked() {
                                 Response::Cancel
+                            } else if err.is_none() && enter_pressed {
+                                Response::Ok
                             } else {
                                 Response::None
                             }
