@@ -12,11 +12,9 @@ mod state;
 mod view;
 mod world;
 
-#[cfg(not(target_arch = "wasm32"))]
-pub mod native;
-
-#[cfg(target_arch = "wasm32")]
-pub mod web;
+#[cfg_attr(target_arch = "wasm32", path = "web.rs")]
+#[cfg_attr(not(target_arch = "wasm32"), path = "native.rs")]
+pub mod platform;
 
 use state::{AppState, WorldState};
 use world::{BlockIndex, World};
@@ -394,8 +392,13 @@ pub struct App {
     examples: Vec<Example>,
     undo: state::Undo,
 
+    /// File path used for loading and saving
     pub file: Option<std::path::PathBuf>,
 
+    /// File name used for downloading
+    download: Option<String>,
+
+    meta: state::Metadata,
     tree: egui_dock::DockState<gui::Tab>,
     syntax: egui_extras::syntax_highlighting::SyntectSettings,
     views: HashMap<BlockIndex, view::ViewData>,
@@ -404,6 +407,9 @@ pub struct App {
 
     /// Dialogs are handled in a separate task
     dialogs: tokio::sync::mpsc::UnboundedSender<DialogRequest>,
+
+    /// Show debug options and menu items in native build
+    debug: bool,
 
     modal: Option<Modal>,
     quit_confirmed: bool,
@@ -442,12 +448,41 @@ enum Dialog {
     SaveAs,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 #[allow(clippy::large_enum_variant)]
 enum Modal {
+    /// An action requires a check to discard unsaved changes
     Unsaved(Unsaved),
+    /// A dialog box is open off-thread and the screen should be blocked
     Dialog(Dialog),
-    Error { title: String, message: String },
+    Error {
+        title: String,
+        message: String,
+    },
+    /// A download has been requested; populate `App::download`
+    Download {
+        state: AppState,
+        name: String,
+    },
+}
+
+impl std::fmt::Debug for Modal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Modal::Unsaved(u) => f.debug_tuple("Unsaved").field(u).finish(),
+            Modal::Dialog(d) => f.debug_tuple("Dialog").field(d).finish(),
+            Modal::Error { title, message } => f
+                .debug_struct("Error")
+                .field("title", title)
+                .field("message", message)
+                .finish(),
+            Modal::Download { name, .. } => f
+                .debug_struct("Download")
+                .field("name", name)
+                .field("state", &"..")
+                .finish(),
+        }
+    }
 }
 
 impl App {
@@ -458,6 +493,7 @@ impl App {
     pub fn new(
         cc: &eframe::CreationContext<'_>,
         dialogs: tokio::sync::mpsc::UnboundedSender<DialogRequest>,
+        debug: bool,
     ) -> (Self, tokio::sync::mpsc::UnboundedReceiver<()>) {
         // Install custom render pipelines
         let wgpu_state = cc.wgpu_render_state.as_ref().unwrap();
@@ -536,16 +572,24 @@ impl App {
             tree: egui_dock::DockState::new(vec![]),
             undo,
             file: None,
+            download: None,
             syntax,
             views: HashMap::new(),
+            meta: state::Metadata::default(),
             generation: std::sync::Arc::new(0.into()),
             rx,
+            debug,
             dialogs,
             modal: None,
             quit_confirmed: false,
             request_repaint: false,
         };
         (app, notify_rx)
+    }
+
+    /// Gets our current `AppState`
+    fn get_state(&self) -> AppState {
+        AppState::new(&self.data, &self.views, &self.tree, &self.meta)
     }
 
     /// Writes to the given file and marks the current state as saved
@@ -559,9 +603,8 @@ impl App {
             .truncate(true)
             .write(true)
             .open(filename)?;
-        let state = AppState::new(&self.data, &self.views, &self.tree);
-        let json_str = serde_json::to_string_pretty(&state)?;
-        f.write_all(json_str.as_bytes())?;
+        let state = self.get_state();
+        f.write_all(state.serialize().as_bytes())?;
         f.flush()?;
         self.undo.mark_saved(state.world);
         Ok(())
@@ -581,6 +624,7 @@ impl App {
     pub fn load_from_state(&mut self, state: AppState) {
         self.data = state.world.into();
         self.tree = state.dock;
+        self.meta = state.meta;
         self.views = state
             .views
             .into_iter()
@@ -626,8 +670,8 @@ impl App {
                     self.on_new();
                     clicked = true;
                 }
-                ui.separator();
                 if !cfg!(target_arch = "wasm32") {
+                    ui.separator();
                     if ui.button("Save").clicked() {
                         self.on_save();
                         clicked = true;
@@ -636,10 +680,11 @@ impl App {
                         self.on_save_as();
                         clicked = true;
                     }
-                } else {
-                    // Use 'Download' instead of Save / Save As for wasm
+                }
+                if cfg!(target_arch = "wasm32") || self.debug {
+                    ui.separator();
                     if ui.button("Download").clicked() {
-                        self.on_save_as();
+                        self.on_download();
                         clicked = true;
                     }
                 }
@@ -680,8 +725,12 @@ impl App {
             ui.menu_button("Examples", |ui| {
                 let mut load_state = None;
                 for e in &self.examples {
-                    let name =
-                        e.data.description.as_ref().unwrap_or(&e.file_name);
+                    let name = e
+                        .data
+                        .meta
+                        .description
+                        .as_ref()
+                        .unwrap_or(&e.file_name);
                     if ui.button(name).clicked() {
                         load_state = Some(e.data.clone())
                     }
@@ -742,13 +791,15 @@ impl App {
 
     /// Draws a blocking modal (if present in `self.modal`)
     fn draw_modal(&mut self, ctx: &egui::Context) {
-        let Some(modal) = &self.modal else {
+        let Some(modal) = &mut self.modal else {
             return;
         };
 
         // Cancel certain modals if escape is pressed
-        if matches!(modal, Modal::Unsaved(..) | Modal::Error { .. })
-            && ctx.input(|i| i.key_pressed(egui::Key::Escape))
+        if matches!(
+            modal,
+            Modal::Unsaved(..) | Modal::Error { .. } | Modal::Download { .. }
+        ) && ctx.input(|i| i.key_pressed(egui::Key::Escape))
         {
             self.modal = None;
             return;
@@ -828,7 +879,7 @@ impl App {
                 }
             }
             Modal::Error { title, message } => {
-                let reset_modal = egui::Window::new(title)
+                let reset_modal = egui::Window::new(title.as_str())
                     .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                     .collapsible(false)
                     .resizable(false)
@@ -836,7 +887,7 @@ impl App {
                     .frame(egui::Frame::popup(&ctx.style()))
                     .show(ctx, |ui| {
                         ui.add(
-                            egui::Label::new(message)
+                            egui::Label::new(message.as_str())
                                 .wrap_mode(egui::TextWrapMode::Extend),
                         );
                         ui.add_space(5.0);
@@ -853,6 +904,87 @@ impl App {
                 }
             }
             Modal::Dialog(..) => (),
+            Modal::Download { state, name } => {
+                enum Response {
+                    Ok,
+                    Cancel,
+                    None,
+                }
+                let mut valid_extension = None;
+                let r = egui::Window::new("Set download name")
+                    .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                    .collapsible(false)
+                    .resizable(false)
+                    .order(egui::Order::Foreground)
+                    .frame(egui::Frame::popup(&ctx.style()))
+                    .show(ctx, |ui| {
+                        ui.text_edit_singleline(name);
+                        let just_normal_characters = name.chars().all(|c| {
+                            c.is_ascii_alphanumeric()
+                                || c == '.'
+                                || c == '-'
+                                || c == '_'
+                        });
+                        valid_extension =
+                            if let Some((_, ext)) = name.rsplit_once('.') {
+                                Some(ext == "half")
+                            } else {
+                                None
+                            };
+                        let err = if !just_normal_characters {
+                            Some("Invalid characters in name")
+                        } else if valid_extension == Some(false) {
+                            Some("Extension must be .half")
+                        } else if name.is_empty() {
+                            Some("Name cannot be empty")
+                        } else {
+                            None
+                        };
+                        if let Some(err) = err {
+                            ui.add_space(5.0);
+                            ui.horizontal(|ui| {
+                                ui.colored_label(
+                                    ui.style().visuals.error_fg_color,
+                                    gui::WARN,
+                                );
+                                ui.label(err)
+                            });
+                        }
+                        ui.add_space(5.0);
+                        ui.horizontal(|ui| {
+                            if ui
+                                .add_enabled_ui(err.is_none(), |ui| {
+                                    ui.button("Download").clicked()
+                                })
+                                .inner
+                            {
+                                Response::Ok
+                            } else if ui.button("Cancel").clicked() {
+                                Response::Cancel
+                            } else {
+                                Response::None
+                            }
+                        })
+                        .inner
+                    })
+                    .unwrap()
+                    .inner
+                    .unwrap();
+                match r {
+                    Response::Ok => {
+                        let mut name = std::mem::take(name);
+                        if valid_extension.is_none() {
+                            name += ".half";
+                        }
+                        let state = std::mem::take(state);
+                        self.modal = None;
+                        self.do_download(&name, state);
+                        self.download = Some(name);
+                    }
+                    Response::Cancel => self.modal = None,
+                    Response::None => (),
+                }
+            }
         };
     }
 
@@ -942,6 +1074,31 @@ impl App {
         changed
     }
 
+    fn on_download(&mut self) {
+        if self.modal.is_some() {
+            warn!("ignoring download while modal is active");
+        } else {
+            let state = self.get_state();
+            if let Some(f) = self.download.take() {
+                self.do_download(&f, state);
+                self.download = Some(f);
+            } else {
+                self.modal = Some(Modal::Download {
+                    state,
+                    name: String::new(),
+                });
+            }
+        }
+    }
+
+    fn do_download(&mut self, f: &str, state: AppState) {
+        let json_str = state.serialize();
+        match platform::download_file(f, &json_str) {
+            None => self.undo.mark_saved(state.world),
+            Some(d) => self.modal = Some(d),
+        }
+    }
+
     fn on_quit(&mut self, ctx: &egui::Context) {
         if self.undo.is_saved() {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -979,7 +1136,7 @@ impl App {
         if self.modal.is_some() {
             warn!("ignoring save as while modal is active");
         } else {
-            let state = AppState::new(&self.data, &self.views, &self.tree);
+            let state = self.get_state();
             if self.dialogs.send(DialogRequest::SaveAs { state }).is_ok() {
                 self.modal = Some(Modal::Dialog(Dialog::SaveAs));
             } else {

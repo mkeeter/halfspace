@@ -2,7 +2,9 @@
   "tag": "halfspace",
   "major": 1,
   "minor": 1,
-  "description": "Smooth union",
+  "meta": {
+    "description": "Smooth union"
+  },
   "world": {
     "next_index": 3,
     "order": [

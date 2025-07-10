@@ -82,7 +82,8 @@ pub struct AppState {
     tag: String,
     major: usize,
     minor: usize,
-    pub description: Option<String>,
+    #[serde(default)]
+    pub meta: Metadata,
     pub world: WorldState,
     pub views: HashMap<BlockIndex, ViewState>,
     pub dock: egui_dock::DockState<Tab>,
@@ -96,7 +97,7 @@ impl Default for AppState {
             tag: TAG.to_owned(),
             major: MAJOR_VERSION,
             minor: MINOR_VERSION,
-            description: None,
+            meta: Metadata::default(),
             world: WorldState::default(),
             views: HashMap::new(),
             dock: egui_dock::DockState::new(vec![]),
@@ -109,6 +110,7 @@ impl AppState {
         world: &crate::World,
         views: &HashMap<BlockIndex, ViewData>,
         dock: &egui_dock::DockState<Tab>,
+        meta: &Metadata,
     ) -> Self {
         let world = world.into();
         let dock = dock.clone();
@@ -120,7 +122,7 @@ impl AppState {
             tag: TAG.to_owned(),
             major: MAJOR_VERSION,
             minor: MINOR_VERSION,
-            description: None,
+            meta: meta.clone(),
             world,
             views,
             dock,
@@ -153,6 +155,19 @@ impl AppState {
                     ReadError::from(e)
                 }
             })?;
+        let meta: Metadata = raw
+            .meta
+            .map(|r| {
+                serde_json::from_value(r).map_err(|e| {
+                    if perhaps_too_new {
+                        too_new()
+                    } else {
+                        ReadError::from(e)
+                    }
+                })
+            })
+            .transpose()?
+            .unwrap_or_default();
         let mut views: HashMap<BlockIndex, ViewState> =
             serde_json::from_value(raw.views).map_err(|e| {
                 if perhaps_too_new {
@@ -173,11 +188,15 @@ impl AppState {
             tag: raw.tag,
             major: raw.major,
             minor: raw.minor,
-            description: raw.description,
+            meta,
             views,
             world,
             dock,
         })
+    }
+
+    pub fn serialize(&self) -> String {
+        serde_json::to_string_pretty(self).expect("serialization failed")
     }
 }
 
@@ -186,7 +205,7 @@ struct RawAppState {
     tag: String,
     major: usize,
     minor: usize,
-    description: Option<String>,
+    meta: Option<serde_json::Value>,
     world: serde_json::Value,
     views: serde_json::Value,
     dock: serde_json::Value,

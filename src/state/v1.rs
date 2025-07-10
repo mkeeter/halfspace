@@ -6,7 +6,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub const MAJOR_VERSION: usize = 1;
-pub const MINOR_VERSION: usize = 2;
+pub const MINOR_VERSION: usize = 3;
+
+/// Metadata associated with the file
+#[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Metadata {
+    pub description: Option<String>,
+    pub name: Option<String>,
+}
 
 /// Serialization-friendly subset of world state
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]

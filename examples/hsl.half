@@ -2,7 +2,9 @@
   "tag": "halfspace",
   "major": 1,
   "minor": 2,
-  "description": "HSL color",
+  "meta": {
+    "description": "HSL color"
+  },
   "world": {
     "next_index": 1,
     "order": [

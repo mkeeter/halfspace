@@ -1,4 +1,4 @@
-use crate::{dialog_worker, state, wgpu_setup, App, AppState};
+use crate::{dialog_worker, state, wgpu_setup, App, AppState, Modal};
 use log::{info, warn};
 use std::io::Read;
 
@@ -11,6 +11,10 @@ struct Args {
     /// Show verbose logging
     #[clap(short, long)]
     verbose: bool,
+
+    /// Enable debug menu items
+    #[clap(short, long)]
+    debug: bool,
 
     /// Example to load
     #[clap(long, conflicts_with = "target")]
@@ -40,7 +44,7 @@ pub fn run() -> anyhow::Result<()> {
         native_options,
         Box::new(|cc| {
             let (dialog_tx, dialog_rx) = tokio::sync::mpsc::unbounded_channel();
-            let (mut app, mut notify_rx) = App::new(cc, dialog_tx);
+            let (mut app, mut notify_rx) = App::new(cc, dialog_tx, args.debug);
             if let Some(example) = args.example {
                 if !app.load_example(&format!("{example}.half")) {
                     warn!("could not find example '{example}'");
@@ -111,4 +115,14 @@ impl App {
         };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
     }
+}
+
+pub(crate) fn download_file(filename: &str, _text: &str) -> Option<Modal> {
+    Some(Modal::Error {
+        title: "Download failed".to_owned(),
+        message: format!(
+            "Downloading to {filename} isn't \
+            implemented in the native platform"
+        ),
+    })
 }
