@@ -418,23 +418,23 @@ pub struct App {
 
 #[derive(Clone)]
 #[allow(clippy::large_enum_variant)]
-enum Unsaved {
+enum NextAction {
     Quit,
     New,
     Open,
     LoadExample(AppState),
 }
 
-impl std::fmt::Debug for Unsaved {
+impl std::fmt::Debug for NextAction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut dbg = f.debug_tuple(match self {
-            Unsaved::Quit => "Quit",
-            Unsaved::New => "New",
-            Unsaved::Open => "Open",
-            Unsaved::LoadExample(_) => "LoadExample",
+            NextAction::Quit => "Quit",
+            NextAction::New => "New",
+            NextAction::Open => "Open",
+            NextAction::LoadExample(_) => "LoadExample",
         });
 
-        if let Unsaved::LoadExample(_) = self {
+        if let NextAction::LoadExample(_) = self {
             dbg.field(&"..");
         }
 
@@ -453,7 +453,7 @@ enum Dialog {
 #[allow(clippy::large_enum_variant)]
 enum Modal {
     /// An action requires a check to discard unsaved changes
-    Unsaved(Unsaved),
+    Unsaved(NextAction),
     /// A dialog box is open off-thread and the screen should be blocked
     Dialog(Dialog),
     Error {
@@ -770,8 +770,9 @@ impl App {
                     if self.undo.is_saved() {
                         self.load_from_state(state);
                     } else {
-                        self.modal =
-                            Some(Modal::Unsaved(Unsaved::LoadExample(state)));
+                        self.modal = Some(Modal::Unsaved(
+                            NextAction::LoadExample(state),
+                        ));
                     }
                     ui.close_menu();
                 }
@@ -989,10 +990,10 @@ impl App {
         match modal {
             Modal::Unsaved(m) => {
                 let s = match m {
-                    Unsaved::New => "New",
-                    Unsaved::Open => "Open",
-                    Unsaved::Quit => "Quit",
-                    Unsaved::LoadExample(..) => "Load example",
+                    NextAction::New => "New",
+                    NextAction::Open => "Open",
+                    NextAction::Quit => "Quit",
+                    NextAction::LoadExample(..) => "Load example",
                 };
                 let r = draw_modal_window(ctx, s, |ui| {
                     ui.label("You have unsaved changes. Continue?");
@@ -1013,21 +1014,21 @@ impl App {
                         unreachable!()
                     };
                     match d {
-                        Unsaved::New => {
+                        NextAction::New => {
                             self.new_file();
                         }
-                        Unsaved::Quit => {
+                        NextAction::Quit => {
                             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                             self.quit_confirmed = true;
                         }
-                        Unsaved::Open => {
+                        NextAction::Open => {
                             if self.dialogs.send(DialogRequest::Open).is_ok() {
                                 self.modal = Some(Modal::Dialog(Dialog::Open));
                             } else {
                                 error!("could not send to dialog thread");
                             }
                         }
-                        Unsaved::LoadExample(s) => self.load_from_state(s),
+                        NextAction::LoadExample(s) => self.load_from_state(s),
                     }
                 }
             }
@@ -1214,7 +1215,7 @@ impl App {
         if self.undo.is_saved() {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         } else {
-            self.modal = Some(Modal::Unsaved(Unsaved::Quit));
+            self.modal = Some(Modal::Unsaved(NextAction::Quit));
         }
     }
 
@@ -1319,7 +1320,7 @@ impl App {
                 error!("could not send Open to dialog thread");
             }
         } else {
-            self.modal = Some(Modal::Unsaved(Unsaved::Open));
+            self.modal = Some(Modal::Unsaved(NextAction::Open));
         }
     }
 
@@ -1331,7 +1332,7 @@ impl App {
             self.new_file()
         } else {
             info!("modal");
-            self.modal = Some(Modal::Unsaved(Unsaved::New))
+            self.modal = Some(Modal::Unsaved(NextAction::New))
         }
     }
 
@@ -1640,7 +1641,7 @@ impl App {
                 // do nothing - we will close
             } else {
                 // Open a quit modal and cancel the close request
-                self.modal = Some(Modal::Unsaved(Unsaved::Quit));
+                self.modal = Some(Modal::Unsaved(NextAction::Quit));
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             }
         }
