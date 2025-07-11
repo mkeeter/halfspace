@@ -863,6 +863,76 @@ impl App {
                 ui.allocate_rect(screen_rect, egui::Sense::all());
             });
 
+        enum FileNameResponse {
+            Ok(String),
+            Cancel,
+            None,
+        }
+
+        fn dialog_name(
+            ui: &mut egui::Ui,
+            name: &mut String,
+        ) -> Result<String, &'static str> {
+            ui.text_edit_singleline(name);
+            let just_normal_characters = name.chars().all(|c| {
+                c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_'
+            });
+            let valid_extension = if let Some((_, ext)) = name.rsplit_once('.')
+            {
+                Some(ext == "half")
+            } else {
+                None
+            };
+            let err = if !just_normal_characters {
+                Some("Invalid characters in name")
+            } else if valid_extension == Some(false) {
+                Some("Extension must be .half")
+            } else if name.is_empty() {
+                Some("Name cannot be empty")
+            } else {
+                None
+            };
+            if let Some(err) = err {
+                ui.add_space(5.0);
+                ui.horizontal(|ui| {
+                    ui.colored_label(
+                        ui.style().visuals.error_fg_color,
+                        gui::WARN,
+                    );
+                    ui.label(err)
+                });
+                Err(err)
+            } else {
+                let mut name = name.clone();
+                if valid_extension.is_none() {
+                    name += ".half";
+                }
+                Ok(name)
+            }
+        }
+
+        fn dialog_buttons(
+            ui: &mut egui::Ui,
+            r: Result<String, &'static str>,
+            label: &'static str,
+            enter_pressed: bool,
+        ) -> FileNameResponse {
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled_ui(r.is_ok(), |ui| ui.button(label).clicked())
+                    .inner
+                    || (r.is_ok() && enter_pressed)
+                {
+                    FileNameResponse::Ok(r.unwrap())
+                } else if ui.button("Cancel").clicked() {
+                    FileNameResponse::Cancel
+                } else {
+                    FileNameResponse::None
+                }
+            })
+            .inner
+        }
+
         match modal {
             Modal::Unsaved(m) => {
                 let s = match m {
@@ -944,12 +1014,6 @@ impl App {
             }
             Modal::Dialog(..) => (),
             Modal::Download { state, name } => {
-                enum Response {
-                    Ok,
-                    Cancel,
-                    None,
-                }
-                let mut valid_extension = None;
                 let r = egui::Window::new("Set download name")
                     .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                     .collapsible(false)
@@ -957,82 +1021,25 @@ impl App {
                     .order(egui::Order::Foreground)
                     .frame(egui::Frame::popup(&ctx.style()))
                     .show(ctx, |ui| {
-                        ui.text_edit_singleline(name);
-                        let just_normal_characters = name.chars().all(|c| {
-                            c.is_ascii_alphanumeric()
-                                || c == '.'
-                                || c == '-'
-                                || c == '_'
-                        });
-                        valid_extension =
-                            if let Some((_, ext)) = name.rsplit_once('.') {
-                                Some(ext == "half")
-                            } else {
-                                None
-                            };
-                        let err = if !just_normal_characters {
-                            Some("Invalid characters in name")
-                        } else if valid_extension == Some(false) {
-                            Some("Extension must be .half")
-                        } else if name.is_empty() {
-                            Some("Name cannot be empty")
-                        } else {
-                            None
-                        };
-                        if let Some(err) = err {
-                            ui.add_space(5.0);
-                            ui.horizontal(|ui| {
-                                ui.colored_label(
-                                    ui.style().visuals.error_fg_color,
-                                    gui::WARN,
-                                );
-                                ui.label(err)
-                            });
-                        }
                         ui.add_space(5.0);
-                        ui.horizontal(|ui| {
-                            if ui
-                                .add_enabled_ui(err.is_none(), |ui| {
-                                    ui.button("Download").clicked()
-                                })
-                                .inner
-                            {
-                                Response::Ok
-                            } else if ui.button("Cancel").clicked() {
-                                Response::Cancel
-                            } else if err.is_none() && enter_pressed {
-                                Response::Ok
-                            } else {
-                                Response::None
-                            }
-                        })
-                        .inner
+                        let r = dialog_name(ui, name);
+                        dialog_buttons(ui, r, "Download", enter_pressed)
                     })
                     .unwrap()
                     .inner
                     .unwrap();
                 match r {
-                    Response::Ok => {
-                        let mut name = std::mem::take(name);
-                        if valid_extension.is_none() {
-                            name += ".half";
-                        }
+                    FileNameResponse::Ok(name) => {
                         let state = std::mem::take(state);
                         self.modal = None;
                         self.do_download(&name, state);
                         self.meta.name = Some(name);
                     }
-                    Response::Cancel => self.modal = None,
-                    Response::None => (),
+                    FileNameResponse::Cancel => self.modal = None,
+                    FileNameResponse::None => (),
                 }
             }
             Modal::SaveLocal { state, files, name } => {
-                enum Response {
-                    Ok,
-                    Cancel,
-                    None,
-                }
-                let mut valid_extension = None;
                 let max_height = ctx.input(|i| {
                     i.viewport()
                         .inner_rect
@@ -1071,47 +1078,8 @@ impl App {
                                     }
                                 },
                             );
-                        // TODO duplicate name entry stuff here
-                        ui.add(
-                            egui::TextEdit::singleline(name)
-                                .desired_width(f32::INFINITY),
-                        );
-                        let just_normal_characters = name.chars().all(|c| {
-                            c.is_ascii_alphanumeric()
-                                || c == '.'
-                                || c == '-'
-                                || c == '_'
-                        });
-                        valid_extension =
-                            if let Some((_, ext)) = name.rsplit_once('.') {
-                                Some(ext == "half")
-                            } else {
-                                None
-                            };
-                        let err = if !just_normal_characters {
-                            Some("Invalid characters in name")
-                        } else if valid_extension == Some(false) {
-                            Some("Extension must be .half")
-                        } else if name.is_empty() {
-                            Some("Name cannot be empty")
-                        } else {
-                            None
-                        };
-                        if let Some(err) = err {
-                            ui.add_space(5.0);
-                            ui.horizontal(|ui| {
-                                ui.colored_label(
-                                    ui.style().visuals.error_fg_color,
-                                    gui::WARN,
-                                );
-                                ui.label(err)
-                            });
-                        }
-                        let mut expected = name.clone();
-                        if valid_extension.is_none() {
-                            expected += ".half";
-                        }
-                        if files.contains(&expected) {
+                        let r = dialog_name(ui, name);
+                        if r.as_ref().is_ok_and(|n| files.contains(n)) {
                             ui.add_space(5.0);
                             ui.horizontal(|ui| {
                                 ui.colored_label(
@@ -1122,33 +1090,13 @@ impl App {
                             });
                         }
                         ui.add_space(5.0);
-                        ui.horizontal(|ui| {
-                            if ui
-                                .add_enabled_ui(err.is_none(), |ui| {
-                                    ui.button("Save").clicked()
-                                })
-                                .inner
-                            {
-                                Response::Ok
-                            } else if ui.button("Cancel").clicked() {
-                                Response::Cancel
-                            } else if err.is_none() && enter_pressed {
-                                Response::Ok
-                            } else {
-                                Response::None
-                            }
-                        })
-                        .inner
+                        dialog_buttons(ui, r, "Save", enter_pressed)
                     })
                     .unwrap()
                     .inner
                     .unwrap();
                 match r {
-                    Response::Ok => {
-                        let mut name = std::mem::take(name);
-                        if valid_extension.is_none() {
-                            name += ".half";
-                        }
+                    FileNameResponse::Ok(name) => {
                         let state = std::mem::take(state);
                         self.modal = None;
                         platform::save_to_local_storage(
@@ -1159,8 +1107,8 @@ impl App {
                         self.meta.name = Some(name);
                         self.local_name_confirmed = true;
                     }
-                    Response::Cancel => self.modal = None,
-                    Response::None => (),
+                    FileNameResponse::Cancel => self.modal = None,
+                    FileNameResponse::None => (),
                 }
             }
         };
