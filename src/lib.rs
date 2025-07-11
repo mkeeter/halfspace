@@ -411,6 +411,9 @@ pub struct App {
     modal: Option<Modal>,
     quit_confirmed: bool,
     request_repaint: bool,
+
+    /// Confirms that `meta.name` should be used for local saves
+    local_name_confirmed: bool,
 }
 
 #[derive(Clone)]
@@ -457,9 +460,14 @@ enum Modal {
         title: String,
         message: String,
     },
-    /// A download has been requested; populate `meta.download`
+    /// A download has been requested; populate `meta.name`
     Download {
         state: AppState,
+        name: String,
+    },
+    SaveLocal {
+        state: AppState,
+        files: Vec<String>,
         name: String,
     },
 }
@@ -477,6 +485,12 @@ impl std::fmt::Debug for Modal {
             Modal::Download { name, .. } => f
                 .debug_struct("Download")
                 .field("name", name)
+                .field("state", &"..")
+                .finish(),
+            Modal::SaveLocal { name, .. } => f
+                .debug_struct("SaveLocal")
+                .field("name", name)
+                .field("files", &"..")
                 .field("state", &"..")
                 .finish(),
         }
@@ -580,6 +594,7 @@ impl App {
             modal: None,
             quit_confirmed: false,
             request_repaint: false,
+            local_name_confirmed: false,
         };
         (app, notify_rx)
     }
@@ -667,8 +682,19 @@ impl App {
                     self.on_new();
                     clicked = true;
                 }
-                if !cfg!(target_arch = "wasm32") {
-                    ui.separator();
+                ui.separator();
+                if cfg!(target_arch = "wasm32") {
+                    // Web menu
+                    if ui.button("Upload").clicked() {
+                        self.on_open();
+                        clicked = true;
+                    }
+                    if ui.button("Download").clicked() {
+                        self.on_download();
+                        clicked = true;
+                    }
+                } else {
+                    // Native menu items!
                     if ui.button("Save").clicked() {
                         self.on_save();
                         clicked = true;
@@ -677,21 +703,29 @@ impl App {
                         self.on_save_as();
                         clicked = true;
                     }
-                }
-                if cfg!(target_arch = "wasm32") || self.debug {
-                    ui.separator();
-                    if ui.button("Download").clicked() {
-                        self.on_download();
+                    if ui.button("Open").clicked() {
+                        self.on_open();
                         clicked = true;
                     }
-                }
-                ui.separator();
-                if ui.button("Open").clicked() {
-                    self.on_open();
-                    clicked = true;
-                }
-                if !cfg!(target_arch = "wasm32") {
                     ui.separator();
+
+                    // Special debug menu items to test web behavior
+                    if self.debug {
+                        if ui.button("Download").clicked() {
+                            self.on_download();
+                            clicked = true;
+                        }
+                        if ui.button("Save (local)").clicked() {
+                            self.on_save_local();
+                            clicked = true;
+                        }
+                        if ui.button("Save As (local)").clicked() {
+                            self.on_save_as_local();
+                            clicked = true;
+                        }
+                        ui.separator();
+                    }
+
                     if ui.button("Quit").clicked() {
                         self.on_quit(ctx);
                         clicked = true;
@@ -803,7 +837,8 @@ impl App {
             modal,
             Modal::Unsaved(..) | Modal::Error { .. } | Modal::Download { .. }
         ) && escape_pressed)
-            || (matches!(modal, Modal::Error { .. }) && enter_pressed)
+            || (matches!(modal, Modal::Error { .. } | Modal::SaveLocal { .. })
+                && enter_pressed)
         {
             self.modal = None;
             return;
@@ -991,6 +1026,143 @@ impl App {
                     Response::None => (),
                 }
             }
+            Modal::SaveLocal { state, files, name } => {
+                enum Response {
+                    Ok,
+                    Cancel,
+                    None,
+                }
+                let mut valid_extension = None;
+                let max_height = ctx.input(|i| {
+                    i.viewport()
+                        .inner_rect
+                        .map(|r| r.height() / 2.0)
+                        .unwrap_or(100.0)
+                });
+                let r = egui::Window::new("Save to local storage")
+                    .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                    .collapsible(false)
+                    .resizable(false)
+                    .order(egui::Order::Foreground)
+                    .max_height(max_height)
+                    .frame(egui::Frame::popup(&ctx.style()))
+                    .show(ctx, |ui| {
+                        let height =
+                            egui::TextStyle::Body.resolve(ui.style()).size;
+                        egui::ScrollArea::vertical()
+                            .auto_shrink(false)
+                            .show_rows(
+                                ui,
+                                height,
+                                files.len(),
+                                |ui, row_range| {
+                                    ui.style_mut()
+                                        .visuals
+                                        .widgets
+                                        .inactive
+                                        .weak_bg_fill =
+                                        egui::Color32::TRANSPARENT;
+                                    for i in row_range {
+                                        let r = ui
+                                            .add(egui::Button::new(&files[i]));
+                                        if r.clicked() {
+                                            *name = files[i].clone();
+                                        }
+                                    }
+                                },
+                            );
+                        // TODO duplicate name entry stuff here
+                        ui.add(
+                            egui::TextEdit::singleline(name)
+                                .desired_width(f32::INFINITY),
+                        );
+                        let just_normal_characters = name.chars().all(|c| {
+                            c.is_ascii_alphanumeric()
+                                || c == '.'
+                                || c == '-'
+                                || c == '_'
+                        });
+                        valid_extension =
+                            if let Some((_, ext)) = name.rsplit_once('.') {
+                                Some(ext == "half")
+                            } else {
+                                None
+                            };
+                        let err = if !just_normal_characters {
+                            Some("Invalid characters in name")
+                        } else if valid_extension == Some(false) {
+                            Some("Extension must be .half")
+                        } else if name.is_empty() {
+                            Some("Name cannot be empty")
+                        } else {
+                            None
+                        };
+                        if let Some(err) = err {
+                            ui.add_space(5.0);
+                            ui.horizontal(|ui| {
+                                ui.colored_label(
+                                    ui.style().visuals.error_fg_color,
+                                    gui::WARN,
+                                );
+                                ui.label(err)
+                            });
+                        }
+                        let mut expected = name.clone();
+                        if valid_extension.is_none() {
+                            expected += ".half";
+                        }
+                        if files.contains(&expected) {
+                            ui.add_space(5.0);
+                            ui.horizontal(|ui| {
+                                ui.colored_label(
+                                    ui.style().visuals.warn_fg_color,
+                                    gui::WARN,
+                                );
+                                ui.label("Overwriting existing file")
+                            });
+                        }
+                        ui.add_space(5.0);
+                        ui.horizontal(|ui| {
+                            if ui
+                                .add_enabled_ui(err.is_none(), |ui| {
+                                    ui.button("Save").clicked()
+                                })
+                                .inner
+                            {
+                                Response::Ok
+                            } else if ui.button("Cancel").clicked() {
+                                Response::Cancel
+                            } else if err.is_none() && enter_pressed {
+                                Response::Ok
+                            } else {
+                                Response::None
+                            }
+                        })
+                        .inner
+                    })
+                    .unwrap()
+                    .inner
+                    .unwrap();
+                match r {
+                    Response::Ok => {
+                        let mut name = std::mem::take(name);
+                        if valid_extension.is_none() {
+                            name += ".half";
+                        }
+                        let state = std::mem::take(state);
+                        self.modal = None;
+                        platform::save_to_local_storage(
+                            &name,
+                            &state.serialize(),
+                        );
+                        self.undo.mark_saved(state.world);
+                        self.meta.name = Some(name);
+                        self.local_name_confirmed = true;
+                    }
+                    Response::Cancel => self.modal = None,
+                    Response::None => (),
+                }
+            }
         };
     }
 
@@ -1123,6 +1295,46 @@ impl App {
         } else {
             // XXX show a dialog or something?
             warn!("no redo available");
+        }
+    }
+
+    fn on_save_local(&mut self) {
+        if self.modal.is_some() {
+            warn!("ignoring save while modal is active");
+        } else if let Some(name) = &self.meta.name {
+            let state = self.get_state();
+            if self.local_name_confirmed {
+                platform::save_to_local_storage(name, &state.serialize());
+            } else {
+                let files = platform::list_local_storage();
+                if files.contains(name) {
+                    self.modal = Some(Modal::SaveLocal {
+                        state,
+                        files,
+                        name: name.clone(),
+                    });
+                } else {
+                    platform::save_to_local_storage(name, &state.serialize());
+                }
+            }
+        } else {
+            self.modal = Some(Modal::SaveLocal {
+                files: platform::list_local_storage(),
+                state: self.get_state(),
+                name: String::new(),
+            });
+        }
+    }
+
+    fn on_save_as_local(&mut self) {
+        if self.modal.is_some() {
+            warn!("ignoring save while modal is active");
+        } else {
+            self.modal = Some(Modal::SaveLocal {
+                files: platform::list_local_storage(),
+                state: self.get_state(),
+                name: self.meta.name.clone().unwrap_or_default(),
+            });
         }
     }
 
@@ -1395,6 +1607,7 @@ impl App {
                     self.load_from_state(state);
                     self.modal = None;
                     self.file = path;
+                    self.local_name_confirmed = false;
                 }
                 _ => warn!(
                     "received dialog open with unexpected modal {:?}",

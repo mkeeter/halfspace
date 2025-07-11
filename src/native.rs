@@ -126,3 +126,41 @@ pub(crate) fn download_file(filename: &str, _text: &str) -> Option<Modal> {
         ),
     })
 }
+
+const LOCAL_STORAGE: &str = ".localdb";
+
+pub(crate) fn list_local_storage() -> Vec<String> {
+    let s = std::fs::read_to_string(LOCAL_STORAGE)
+        .unwrap_or_else(|_| String::new());
+    s.trim()
+        .lines()
+        .map(|line| line.split_once('|').unwrap().0.to_owned())
+        .collect()
+}
+
+pub(crate) fn save_to_local_storage(path: &str, contents: &str) {
+    let prev = std::fs::read_to_string(LOCAL_STORAGE)
+        .unwrap_or_else(|_| String::new());
+    let mut out = String::new();
+    for line in prev.lines() {
+        let (name, rest) = line.split_once('|').unwrap();
+        if name != path {
+            out += &format!("{name}|{rest}\n");
+        }
+    }
+    let raw_contents = serde_json::to_string(&contents).unwrap();
+    out += &format!("{path}|{raw_contents}\n");
+    std::fs::write(LOCAL_STORAGE, out).unwrap();
+}
+
+pub(crate) fn read_from_local_storage(path: &str) -> String {
+    let data = std::fs::read_to_string(LOCAL_STORAGE)
+        .unwrap_or_else(|_| String::new());
+    for line in data.lines() {
+        let (name, rest) = line.split_once('|').unwrap();
+        if name == path {
+            return serde_json::from_str(rest).unwrap();
+        }
+    }
+    panic!("file {path} not found");
+}

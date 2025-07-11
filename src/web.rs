@@ -177,3 +177,49 @@ fn download_blob(file_name: &str, url: &str) -> Result<(), JsValue> {
 
     Ok(())
 }
+
+/// Prefix to namespace file storage keys
+const FILE_PREFIX: &str = "vfs:";
+
+/// List all "files" in localStorage (keys starting with `vfs:`)
+pub(crate) fn list_local_storage() -> Vec<String> {
+    let storage = window()
+        .and_then(|w| w.local_storage().ok().flatten())
+        .expect("localStorage not available");
+
+    let mut result = Vec::new();
+    let len = storage.length().unwrap_or(0);
+
+    for i in 0..len {
+        if let Some(key) = storage.key(i).unwrap_or(None) {
+            if let Some(stripped) = key.strip_prefix(FILE_PREFIX) {
+                result.push(stripped.to_string());
+            }
+        }
+    }
+
+    result
+}
+
+/// Write a file (string content) to a given path
+pub(crate) fn save_to_local_storage(path: &str, contents: &str) {
+    let storage = window()
+        .and_then(|w| w.local_storage().ok().flatten())
+        .expect("localStorage not available");
+
+    storage
+        .set_item(&format!("{FILE_PREFIX}{path}"), contents)
+        .expect("failed to write to localStorage");
+}
+
+/// Read a file from a given path
+pub(crate) fn read_from_local_storage(path: &str) -> Option<String> {
+    let storage = window()
+        .and_then(|w| w.local_storage().ok().flatten())
+        .expect("localStorage not available");
+
+    storage
+        .get_item(&format!("{FILE_PREFIX}{path}"))
+        .ok()
+        .flatten()
+}
