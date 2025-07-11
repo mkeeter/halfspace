@@ -835,10 +835,12 @@ impl App {
         });
         if (matches!(
             modal,
-            Modal::Unsaved(..) | Modal::Error { .. } | Modal::Download { .. }
+            Modal::Unsaved(..)
+                | Modal::Error { .. }
+                | Modal::Download { .. }
+                | Modal::SaveLocal { .. }
         ) && escape_pressed)
-            || (matches!(modal, Modal::Error { .. } | Modal::SaveLocal { .. })
-                && enter_pressed)
+            || (matches!(modal, Modal::Error { .. }) && enter_pressed)
         {
             self.modal = None;
             return;
@@ -869,6 +871,7 @@ impl App {
             None,
         }
 
+        /// Helper function to get a file name
         fn dialog_name(
             ui: &mut egui::Ui,
             name: &mut String,
@@ -911,6 +914,7 @@ impl App {
             }
         }
 
+        /// Helper function to show a pair of buttons
         fn dialog_buttons(
             ui: &mut egui::Ui,
             r: Result<String, &'static str>,
@@ -933,6 +937,55 @@ impl App {
             .inner
         }
 
+        fn draw_modal_window<R>(
+            ctx: &egui::Context,
+            title: &str,
+            add_contents: impl FnOnce(&mut egui::Ui) -> R,
+        ) -> R {
+            let (max_height, max_width) = ctx.input(|i| {
+                let r = i.viewport().inner_rect;
+                (
+                    r.map(|r| r.height() / 2.0).unwrap_or(100.0),
+                    r.map(|r| r.width() / 2.0).unwrap_or(100.0),
+                )
+            });
+            egui::Window::new(title)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                .collapsible(false)
+                .resizable(false)
+                .order(egui::Order::Foreground)
+                .max_height(max_height)
+                .max_width(max_width)
+                .frame(egui::Frame::popup(&ctx.style()))
+                .show(ctx, add_contents)
+                .unwrap()
+                .inner
+                .unwrap()
+        }
+
+        fn file_selector(
+            ui: &mut egui::Ui,
+            files: &[String],
+            name: &mut String,
+        ) {
+            use egui::containers::scroll_area::ScrollBarVisibility;
+            let height = egui::TextStyle::Body.resolve(ui.style()).size;
+            egui::ScrollArea::vertical()
+                .scroll_bar_visibility(ScrollBarVisibility::AlwaysVisible)
+                .auto_shrink(false)
+                .show_rows(ui, height, files.len(), |ui, row_range| {
+                    // Hide button backgrounds
+                    ui.style_mut().visuals.widgets.inactive.weak_bg_fill =
+                        egui::Color32::TRANSPARENT;
+                    for i in row_range {
+                        let r = ui.add(egui::Button::new(&files[i]));
+                        if r.clicked() {
+                            *name = files[i].clone();
+                        }
+                    }
+                });
+        }
+
         match modal {
             Modal::Unsaved(m) => {
                 let s = match m {
@@ -941,29 +994,20 @@ impl App {
                     Unsaved::Quit => "Quit",
                     Unsaved::LoadExample(..) => "Load example",
                 };
-                let r = egui::Window::new(s)
-                    .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-                    .collapsible(false)
-                    .resizable(false)
-                    .order(egui::Order::Foreground)
-                    .frame(egui::Frame::popup(&ctx.style()))
-                    .show(ctx, |ui| {
-                        ui.label("You have unsaved changes. Continue?");
-                        ui.horizontal(|ui| {
-                            if ui.button("Ok").clicked() {
-                                true
-                            } else if ui.button("Cancel").clicked() {
-                                self.modal = None;
-                                false
-                            } else {
-                                false
-                            }
-                        })
-                        .inner
+                let r = draw_modal_window(ctx, s, |ui| {
+                    ui.label("You have unsaved changes. Continue?");
+                    ui.horizontal(|ui| {
+                        if ui.button("Ok").clicked() {
+                            true
+                        } else if ui.button("Cancel").clicked() {
+                            self.modal = None;
+                            false
+                        } else {
+                            false
+                        }
                     })
-                    .unwrap()
                     .inner
-                    .unwrap();
+                });
                 if r {
                     let Some(Modal::Unsaved(d)) = self.modal.take() else {
                         unreachable!()
@@ -988,46 +1032,26 @@ impl App {
                 }
             }
             Modal::Error { title, message } => {
-                let reset_modal = egui::Window::new(title.as_str())
-                    .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-                    .collapsible(false)
-                    .resizable(false)
-                    .order(egui::Order::Foreground)
-                    .frame(egui::Frame::popup(&ctx.style()))
-                    .show(ctx, |ui| {
-                        ui.add(
-                            egui::Label::new(message.as_str())
-                                .wrap_mode(egui::TextWrapMode::Extend),
-                        );
-                        ui.add_space(5.0);
-                        ui.horizontal(|ui| {
-                            ui.button("oopsie whoopsie").clicked()
-                        })
+                let r = draw_modal_window(ctx, title, |ui| {
+                    ui.add(
+                        egui::Label::new(message.as_str())
+                            .wrap_mode(egui::TextWrapMode::Extend),
+                    );
+                    ui.add_space(5.0);
+                    ui.horizontal(|ui| ui.button("oopsie whoopsie").clicked())
                         .inner
-                    })
-                    .unwrap()
-                    .inner
-                    .unwrap();
-                if reset_modal {
+                });
+                if r {
                     self.modal = None;
                 }
             }
             Modal::Dialog(..) => (),
             Modal::Download { state, name } => {
-                let r = egui::Window::new("Set download name")
-                    .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-                    .collapsible(false)
-                    .resizable(false)
-                    .order(egui::Order::Foreground)
-                    .frame(egui::Frame::popup(&ctx.style()))
-                    .show(ctx, |ui| {
-                        ui.add_space(5.0);
-                        let r = dialog_name(ui, name);
-                        dialog_buttons(ui, r, "Download", enter_pressed)
-                    })
-                    .unwrap()
-                    .inner
-                    .unwrap();
+                let r = draw_modal_window(ctx, "Set download name", |ui| {
+                    ui.add_space(5.0);
+                    let r = dialog_name(ui, name);
+                    dialog_buttons(ui, r, "Download", enter_pressed)
+                });
                 match r {
                     FileNameResponse::Ok(name) => {
                         let state = std::mem::take(state);
@@ -1040,61 +1064,22 @@ impl App {
                 }
             }
             Modal::SaveLocal { state, files, name } => {
-                let max_height = ctx.input(|i| {
-                    i.viewport()
-                        .inner_rect
-                        .map(|r| r.height() / 2.0)
-                        .unwrap_or(100.0)
-                });
-                let r = egui::Window::new("Save to local storage")
-                    .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-                    .collapsible(false)
-                    .resizable(false)
-                    .order(egui::Order::Foreground)
-                    .max_height(max_height)
-                    .frame(egui::Frame::popup(&ctx.style()))
-                    .show(ctx, |ui| {
-                        let height =
-                            egui::TextStyle::Body.resolve(ui.style()).size;
-                        egui::ScrollArea::vertical()
-                            .auto_shrink(false)
-                            .show_rows(
-                                ui,
-                                height,
-                                files.len(),
-                                |ui, row_range| {
-                                    ui.style_mut()
-                                        .visuals
-                                        .widgets
-                                        .inactive
-                                        .weak_bg_fill =
-                                        egui::Color32::TRANSPARENT;
-                                    for i in row_range {
-                                        let r = ui
-                                            .add(egui::Button::new(&files[i]));
-                                        if r.clicked() {
-                                            *name = files[i].clone();
-                                        }
-                                    }
-                                },
-                            );
-                        let r = dialog_name(ui, name);
-                        if r.as_ref().is_ok_and(|n| files.contains(n)) {
-                            ui.add_space(5.0);
-                            ui.horizontal(|ui| {
-                                ui.colored_label(
-                                    ui.style().visuals.warn_fg_color,
-                                    gui::WARN,
-                                );
-                                ui.label("Overwriting existing file")
-                            });
-                        }
+                let r = draw_modal_window(ctx, "Save to local storage", |ui| {
+                    file_selector(ui, files, name);
+                    let r = dialog_name(ui, name);
+                    if r.as_ref().is_ok_and(|n| files.contains(n)) {
                         ui.add_space(5.0);
-                        dialog_buttons(ui, r, "Save", enter_pressed)
-                    })
-                    .unwrap()
-                    .inner
-                    .unwrap();
+                        ui.horizontal(|ui| {
+                            ui.colored_label(
+                                ui.style().visuals.warn_fg_color,
+                                gui::WARN,
+                            );
+                            ui.label("Overwriting existing file")
+                        });
+                    }
+                    ui.add_space(5.0);
+                    dialog_buttons(ui, r, "Save", enter_pressed)
+                });
                 match r {
                     FileNameResponse::Ok(name) => {
                         let state = std::mem::take(state);
