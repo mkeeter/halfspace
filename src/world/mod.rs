@@ -233,9 +233,6 @@ impl World {
         // Inputs are evaluated in a separate context with a scope that's
         // accumulated from previous block outputs.
         let mut input_scope = rhai::Scope::new();
-        input_scope.push_constant("x", fidget::context::Tree::x());
-        input_scope.push_constant("y", fidget::context::Tree::y());
-        input_scope.push_constant("z", fidget::context::Tree::z());
 
         // We maintain a separate map of block names to detect duplicates
         let mut name_map = HashMap::new();

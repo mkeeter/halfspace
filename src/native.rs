@@ -1,6 +1,9 @@
-use crate::{dialog_worker, state, wgpu_setup, App, AppState, Modal};
-use log::{info, warn};
-use std::io::Read;
+use crate::{
+    dialog_worker, state, wgpu_setup, App, AppState, Dialog, DialogRequest,
+    Modal, NextAction,
+};
+use log::{error, info, warn};
+use std::io::{Read, Write};
 
 use clap::Parser;
 
@@ -114,6 +117,67 @@ impl App {
             format!("[untitled]{marker}")
         };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+    }
+
+    pub(crate) fn on_save(&mut self) {
+        if self.modal.is_some() {
+            warn!("ignoring save while modal is active");
+        } else if self.file.is_some() {
+            let f = self.file.take().unwrap();
+            self.write_to_file(&f).unwrap();
+            self.file = Some(f);
+        } else {
+            self.on_save_as();
+        }
+    }
+
+    pub(crate) fn on_save_as(&mut self) {
+        if self.modal.is_some() {
+            warn!("ignoring save as while modal is active");
+        } else {
+            let state = self.get_state();
+            if self.dialogs.send(DialogRequest::SaveAs { state }).is_ok() {
+                self.modal = Some(Modal::Dialog(Dialog::SaveAs));
+            } else {
+                error!("could not send SaveAs to dialog thread");
+            }
+        }
+    }
+
+    pub(crate) fn on_open(&mut self) {
+        if self.modal.is_some() {
+            warn!("cannot execute open with active modal");
+        } else if self.undo.is_saved() {
+            if self.dialogs.send(DialogRequest::Open).is_ok() {
+                self.modal = Some(Modal::Dialog(Dialog::Open));
+            } else {
+                error!("could not send Open to dialog thread");
+            }
+        } else {
+            self.modal = Some(Modal::Unsaved(NextAction::Open));
+        }
+    }
+
+    pub(crate) fn on_upload(&mut self) {
+        panic!("on_upload should not be called natively")
+    }
+
+    /// Writes to the given file and marks the current state as saved
+    pub(crate) fn write_to_file(
+        &mut self,
+        filename: &std::path::Path,
+    ) -> std::io::Result<()> {
+        info!("writing to {filename:?}");
+        let mut f = std::fs::File::options()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(filename)?;
+        let state = self.get_state();
+        f.write_all(state.serialize().as_bytes())?;
+        f.flush()?;
+        self.undo.mark_saved(state.world);
+        Ok(())
     }
 }
 

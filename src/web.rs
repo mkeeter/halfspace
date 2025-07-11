@@ -1,5 +1,7 @@
-use crate::{dialog_worker, wgpu_setup, App, Modal};
-use log::{info, warn};
+use crate::{
+    dialog_worker, wgpu_setup, App, Dialog, DialogRequest, Modal, NextAction,
+};
+use log::{error, info, warn};
 use wasm_bindgen::prelude::*;
 
 /// Re-export init_thread_pool to be called on the web
@@ -120,6 +122,32 @@ pub fn run() {
 impl App {
     pub(crate) fn update_title(&mut self, _ctx: &egui::Context) {
         // no-op on the web backend
+    }
+
+    pub(crate) fn on_open(&mut self) {
+        self.on_open_local();
+    }
+
+    pub(crate) fn on_save(&mut self) {
+        self.on_save_local();
+    }
+
+    pub(crate) fn on_save_as(&mut self) {
+        self.on_save_as_local();
+    }
+
+    pub(crate) fn on_upload(&mut self) {
+        if self.modal.is_some() {
+            warn!("cannot execute open with active modal");
+        } else if self.undo.is_saved() {
+            if self.dialogs.send(DialogRequest::Open).is_ok() {
+                self.modal = Some(Modal::Dialog(Dialog::Open));
+            } else {
+                error!("could not send Open to dialog thread");
+            }
+        } else {
+            self.modal = Some(Modal::Unsaved(NextAction::Open));
+        }
     }
 }
 

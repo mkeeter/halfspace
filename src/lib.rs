@@ -2,7 +2,6 @@ use eframe::egui_wgpu::wgpu;
 use egui_dnd::dnd;
 use log::{debug, error, info, warn};
 use std::collections::{HashMap, HashSet};
-use std::io::Write;
 use web_time::Instant;
 
 mod gui;
@@ -613,24 +612,6 @@ impl App {
         AppState::new(&self.data, &self.views, &self.tree, &self.meta)
     }
 
-    /// Writes to the given file and marks the current state as saved
-    fn write_to_file(
-        &mut self,
-        filename: &std::path::Path,
-    ) -> std::io::Result<()> {
-        info!("writing to {filename:?}");
-        let mut f = std::fs::File::options()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .open(filename)?;
-        let state = self.get_state();
-        f.write_all(state.serialize().as_bytes())?;
-        f.flush()?;
-        self.undo.mark_saved(state.world);
-        Ok(())
-    }
-
     /// Loads an example by name, returning `false` if not found
     #[must_use]
     pub fn load_example(&mut self, target: &str) -> bool {
@@ -695,7 +676,7 @@ impl App {
                 if cfg!(target_arch = "wasm32") {
                     // Web menu
                     if ui.button("Upload").clicked() {
-                        self.on_open();
+                        self.on_upload();
                         clicked = true;
                     }
                     if ui.button("Download").clicked() {
@@ -1064,7 +1045,13 @@ impl App {
                             self.quit_confirmed = true;
                         }
                         NextAction::Open => {
-                            if self.dialogs.send(DialogRequest::Open).is_ok() {
+                            if cfg!(target_arch = "wasm32") {
+                                self.do_open_local()
+                            } else if self
+                                .dialogs
+                                .send(DialogRequest::Open)
+                                .is_ok()
+                            {
                                 self.modal = Some(Modal::Dialog(Dialog::Open));
                             } else {
                                 error!("could not send to dialog thread");
@@ -1332,13 +1319,19 @@ impl App {
     fn on_open_local(&mut self) {
         if self.modal.is_some() {
             warn!("ignoring open local while modal is active");
+        } else if self.undo.is_saved() {
+            self.do_open_local()
         } else {
-            let files = platform::list_local_storage();
-            self.modal = Some(Modal::OpenLocal {
-                files,
-                name: String::new(),
-            });
+            self.modal = Some(Modal::Unsaved(NextAction::Open));
         }
+    }
+
+    fn do_open_local(&mut self) {
+        let files = platform::list_local_storage();
+        self.modal = Some(Modal::OpenLocal {
+            files,
+            name: String::new(),
+        });
     }
 
     fn on_save_local(&mut self) {
@@ -1387,31 +1380,6 @@ impl App {
         }
     }
 
-    fn on_save(&mut self) {
-        if self.modal.is_some() {
-            warn!("ignoring save while modal is active");
-        } else if self.file.is_some() {
-            let f = self.file.take().unwrap();
-            self.write_to_file(&f).unwrap();
-            self.file = Some(f);
-        } else {
-            self.on_save_as();
-        }
-    }
-
-    fn on_save_as(&mut self) {
-        if self.modal.is_some() {
-            warn!("ignoring save as while modal is active");
-        } else {
-            let state = self.get_state();
-            if self.dialogs.send(DialogRequest::SaveAs { state }).is_ok() {
-                self.modal = Some(Modal::Dialog(Dialog::SaveAs));
-            } else {
-                error!("could not send SaveAs to dialog thread");
-            }
-        }
-    }
-
     fn on_undo(&mut self) {
         if self.modal.is_some() {
             warn!("ignoring undo while modal is active");
@@ -1422,20 +1390,6 @@ impl App {
         } else {
             // XXX show a dialog or something?
             warn!("no undo available");
-        }
-    }
-
-    fn on_open(&mut self) {
-        if self.modal.is_some() {
-            warn!("cannot execute open with active modal");
-        } else if self.undo.is_saved() {
-            if self.dialogs.send(DialogRequest::Open).is_ok() {
-                self.modal = Some(Modal::Dialog(Dialog::Open));
-            } else {
-                error!("could not send Open to dialog thread");
-            }
-        } else {
-            self.modal = Some(Modal::Unsaved(NextAction::Open));
         }
     }
 
