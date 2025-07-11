@@ -715,7 +715,6 @@ impl App {
                         self.on_open_local();
                         clicked = true;
                     }
-                    ui.separator();
                 } else {
                     // Native menu items!
                     if ui.button("Save").clicked() {
@@ -804,6 +803,24 @@ impl App {
                     ui.close_menu();
                 }
             });
+            if cfg!(target_arch = "wasm32") || self.debug {
+                ui.with_layout(
+                    egui::Layout::right_to_left(egui::Align::Center),
+                    |ui| {
+                        let t = match &self.meta.name {
+                            Some(name) => {
+                                if self.undo.is_saved() {
+                                    name.to_owned()
+                                } else {
+                                    format!("{name} [unsaved]")
+                                }
+                            }
+                            None => "[unsaved]".to_owned(),
+                        };
+                        ui.add_enabled(false, egui::Label::new(t))
+                    },
+                );
+            }
         });
     }
 
@@ -1236,13 +1253,15 @@ impl App {
     #[must_use]
     fn draw_ui(&mut self, ctx: &egui::Context) -> bool {
         let mut changed = false;
+        egui::TopBottomPanel::top("menu").show(ctx, |ui| {
+            ui.add_space(2.0);
+            self.draw_menu(ctx, ui);
+            ui.add_space(2.0);
+        });
+
         changed |= egui::SidePanel::left("left_panel")
             .min_width(250.0)
-            .show(ctx, |ui| {
-                self.draw_menu(ctx, ui);
-                ui.separator();
-                self.draw_block_list(ui)
-            })
+            .show(ctx, |ui| self.draw_block_list(ui))
             .inner;
 
         let size = egui::CentralPanel::default()
@@ -1327,8 +1346,13 @@ impl App {
             warn!("ignoring save while modal is active");
         } else if let Some(name) = &self.meta.name {
             let state = self.get_state();
+            // If we have previously confirmed the local name through a save or
+            // open dialog, then we'll overwrite an existing file.  On the other
+            // hand, if we've only set the local name through downloads, we will
+            // confirm that it's okay to overwrite.
             if self.local_name_confirmed {
                 platform::save_to_local_storage(name, &state.serialize());
+                self.undo.mark_saved(state.world);
             } else {
                 let files = platform::list_local_storage();
                 if files.contains(name) {
@@ -1339,6 +1363,7 @@ impl App {
                     });
                 } else {
                     platform::save_to_local_storage(name, &state.serialize());
+                    self.undo.mark_saved(state.world);
                 }
             }
         } else {
