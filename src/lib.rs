@@ -470,6 +470,10 @@ enum Modal {
         files: Vec<String>,
         name: String,
     },
+    OpenLocal {
+        files: Vec<String>,
+        name: String,
+    },
 }
 
 impl std::fmt::Debug for Modal {
@@ -492,6 +496,11 @@ impl std::fmt::Debug for Modal {
                 .field("name", name)
                 .field("files", &"..")
                 .field("state", &"..")
+                .finish(),
+            Modal::OpenLocal { name, .. } => f
+                .debug_struct("OpenLocal")
+                .field("name", name)
+                .field("files", &"..")
                 .finish(),
         }
     }
@@ -693,6 +702,20 @@ impl App {
                         self.on_download();
                         clicked = true;
                     }
+                    ui.separator();
+                    if ui.button("Save").clicked() {
+                        self.on_save_local();
+                        clicked = true;
+                    }
+                    if ui.button("Save As").clicked() {
+                        self.on_save_as_local();
+                        clicked = true;
+                    }
+                    if ui.button("Open").clicked() {
+                        self.on_open_local();
+                        clicked = true;
+                    }
+                    ui.separator();
                 } else {
                     // Native menu items!
                     if ui.button("Save").clicked() {
@@ -721,6 +744,10 @@ impl App {
                         }
                         if ui.button("Save As (local)").clicked() {
                             self.on_save_as_local();
+                            clicked = true;
+                        }
+                        if ui.button("Open (local)").clicked() {
+                            self.on_open_local();
                             clicked = true;
                         }
                         ui.separator();
@@ -822,7 +849,7 @@ impl App {
     }
 
     /// Draws a blocking modal (if present in `self.modal`)
-    fn draw_modal(&mut self, ctx: &egui::Context) {
+    fn draw_modal(&mut self, ctx: &egui::Context, window_size: egui::Vec2) {
         let Some(modal) = &mut self.modal else {
             return;
         };
@@ -840,12 +867,15 @@ impl App {
                 | Modal::Error { .. }
                 | Modal::Download { .. }
                 | Modal::SaveLocal { .. }
+                | Modal::OpenLocal { .. }
         ) && escape_pressed)
             || (matches!(modal, Modal::Error { .. }) && enter_pressed)
         {
             self.modal = None;
             return;
         }
+
+        let dialog_size = window_size / 2.0;
 
         // Block all interaction behind the modal
         let screen_rect = ctx.screen_rect();
@@ -941,22 +971,16 @@ impl App {
         fn draw_modal_window<R>(
             ctx: &egui::Context,
             title: &str,
+            dialog_size: egui::Vec2,
             add_contents: impl FnOnce(&mut egui::Ui) -> R,
         ) -> R {
-            let (max_height, max_width) = ctx.input(|i| {
-                let r = i.viewport().inner_rect;
-                (
-                    r.map(|r| r.height() / 2.0).unwrap_or(100.0),
-                    r.map(|r| r.width() / 2.0).unwrap_or(100.0),
-                )
-            });
             egui::Window::new(title)
                 .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                 .collapsible(false)
                 .resizable(false)
                 .order(egui::Order::Foreground)
-                .max_height(max_height)
-                .max_width(max_width)
+                .max_height(dialog_size.x)
+                .max_width(dialog_size.y)
                 .frame(egui::Frame::popup(&ctx.style()))
                 .show(ctx, add_contents)
                 .unwrap()
@@ -995,8 +1019,9 @@ impl App {
                     NextAction::Quit => "Quit",
                     NextAction::LoadExample(..) => "Load example",
                 };
-                let r = draw_modal_window(ctx, s, |ui| {
+                let r = draw_modal_window(ctx, s, dialog_size, |ui| {
                     ui.label("You have unsaved changes. Continue?");
+                    ui.add_space(5.0);
                     ui.horizontal(|ui| {
                         if ui.button("Ok").clicked() {
                             true
@@ -1033,7 +1058,7 @@ impl App {
                 }
             }
             Modal::Error { title, message } => {
-                let r = draw_modal_window(ctx, title, |ui| {
+                let r = draw_modal_window(ctx, title, dialog_size, |ui| {
                     ui.add(
                         egui::Label::new(message.as_str())
                             .wrap_mode(egui::TextWrapMode::Extend),
@@ -1048,11 +1073,16 @@ impl App {
             }
             Modal::Dialog(..) => (),
             Modal::Download { state, name } => {
-                let r = draw_modal_window(ctx, "Set download name", |ui| {
-                    ui.add_space(5.0);
-                    let r = dialog_name(ui, name);
-                    dialog_buttons(ui, r, "Download", enter_pressed)
-                });
+                let r = draw_modal_window(
+                    ctx,
+                    "Set download name",
+                    dialog_size,
+                    |ui| {
+                        ui.add_space(5.0);
+                        let r = dialog_name(ui, name);
+                        dialog_buttons(ui, r, "Download", enter_pressed)
+                    },
+                );
                 match r {
                     FileNameResponse::Ok(name) => {
                         let state = std::mem::take(state);
@@ -1065,26 +1095,32 @@ impl App {
                 }
             }
             Modal::SaveLocal { state, files, name } => {
-                let r = draw_modal_window(ctx, "Save to local storage", |ui| {
-                    file_selector(ui, files, name);
-                    let r = dialog_name(ui, name);
-                    if r.as_ref().is_ok_and(|n| files.contains(n)) {
+                let r = draw_modal_window(
+                    ctx,
+                    "Save to local storage",
+                    dialog_size,
+                    |ui| {
+                        file_selector(ui, files, name);
+                        let r = dialog_name(ui, name);
+                        if r.as_ref().is_ok_and(|n| files.contains(n)) {
+                            ui.add_space(5.0);
+                            ui.horizontal(|ui| {
+                                ui.colored_label(
+                                    ui.style().visuals.warn_fg_color,
+                                    gui::WARN,
+                                );
+                                ui.label("Overwriting existing file")
+                            });
+                        }
                         ui.add_space(5.0);
-                        ui.horizontal(|ui| {
-                            ui.colored_label(
-                                ui.style().visuals.warn_fg_color,
-                                gui::WARN,
-                            );
-                            ui.label("Overwriting existing file")
-                        });
-                    }
-                    ui.add_space(5.0);
-                    dialog_buttons(ui, r, "Save", enter_pressed)
-                });
+                        dialog_buttons(ui, r, "Save", enter_pressed)
+                    },
+                );
                 match r {
                     FileNameResponse::Ok(name) => {
-                        let state = std::mem::take(state);
+                        let mut state = std::mem::take(state);
                         self.modal = None;
+                        state.meta.name = Some(name.clone());
                         platform::save_to_local_storage(
                             &name,
                             &state.serialize(),
@@ -1092,6 +1128,43 @@ impl App {
                         self.undo.mark_saved(state.world);
                         self.meta.name = Some(name);
                         self.local_name_confirmed = true;
+                    }
+                    FileNameResponse::Cancel => self.modal = None,
+                    FileNameResponse::None => (),
+                }
+            }
+            Modal::OpenLocal { files, name } => {
+                let r = draw_modal_window(
+                    ctx,
+                    "Open from local storage",
+                    dialog_size,
+                    |ui| {
+                        file_selector(ui, files, name);
+                        let mut r = dialog_name(ui, name);
+                        if r.as_ref().is_ok_and(|n| !files.contains(n)) {
+                            r = Err("no file selected");
+                        }
+                        ui.add_space(5.0);
+                        dialog_buttons(ui, r, "Open", enter_pressed)
+                    },
+                );
+                match r {
+                    FileNameResponse::Ok(name) => {
+                        let data = platform::read_from_local_storage(&name);
+                        self.modal = match AppState::deserialize(&data) {
+                            Ok(state) => {
+                                self.load_from_state(state);
+                                self.local_name_confirmed = true;
+                                None
+                            }
+                            Err(e) => Some(Modal::Error {
+                                title: "Failed to load".to_owned(),
+                                message: format!(
+                                    "{:#}",
+                                    anyhow::Error::from(e)
+                                ),
+                            }),
+                        };
                     }
                     FileNameResponse::Cancel => self.modal = None,
                     FileNameResponse::None => (),
@@ -1172,16 +1245,21 @@ impl App {
             })
             .inner;
 
-        egui::CentralPanel::default()
+        let size = egui::CentralPanel::default()
             .frame(
                 egui::Frame::central_panel(&ctx.style())
                     .inner_margin(0.0)
                     .fill(egui::Color32::TRANSPARENT),
             )
-            .show(ctx, |ui| changed |= self.draw_tab_region(ctx, ui));
+            .show(ctx, |ui| {
+                let size = ui.available_size();
+                changed |= self.draw_tab_region(ctx, ui);
+                size
+            })
+            .inner;
 
         // Draw optional modals
-        self.draw_modal(ctx);
+        self.draw_modal(ctx, size);
 
         changed
     }
@@ -1229,6 +1307,18 @@ impl App {
         } else {
             // XXX show a dialog or something?
             warn!("no redo available");
+        }
+    }
+
+    fn on_open_local(&mut self) {
+        if self.modal.is_some() {
+            warn!("ignoring open local while modal is active");
+        } else {
+            let files = platform::list_local_storage();
+            self.modal = Some(Modal::OpenLocal {
+                files,
+                name: String::new(),
+            });
         }
     }
 

@@ -183,7 +183,7 @@ const FILE_PREFIX: &str = "vfs:";
 
 /// List all "files" in localStorage (keys starting with `vfs:`)
 pub(crate) fn list_local_storage() -> Vec<String> {
-    let storage = window()
+    let storage = web_sys::window()
         .and_then(|w| w.local_storage().ok().flatten())
         .expect("localStorage not available");
 
@@ -203,7 +203,7 @@ pub(crate) fn list_local_storage() -> Vec<String> {
 
 /// Write a file (string content) to a given path
 pub(crate) fn save_to_local_storage(path: &str, contents: &str) {
-    let storage = window()
+    let storage = web_sys::window()
         .and_then(|w| w.local_storage().ok().flatten())
         .expect("localStorage not available");
 
@@ -213,13 +213,13 @@ pub(crate) fn save_to_local_storage(path: &str, contents: &str) {
 }
 
 /// Read a file from a given path
-pub(crate) fn read_from_local_storage(path: &str) -> Option<String> {
-    let storage = window()
+pub(crate) fn read_from_local_storage(path: &str) -> String {
+    let storage = web_sys::window()
         .and_then(|w| w.local_storage().ok().flatten())
         .expect("localStorage not available");
 
     storage
         .get_item(&format!("{FILE_PREFIX}{path}"))
-        .ok()
-        .flatten()
+        .unwrap()
+        .unwrap()
 }
