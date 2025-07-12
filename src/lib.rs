@@ -566,45 +566,45 @@ impl App {
         egui::menu::bar(ui, |ui| {
             ui.menu_button("File", |ui| {
                 let mut clicked = false;
-                if ui.button("New").clicked() {
+                if ui.button("\u{ea7b} New").clicked() {
                     self.on_new();
                     clicked = true;
                 }
                 ui.separator();
                 if cfg!(target_arch = "wasm32") {
                     // Web menu
-                    if ui.button("Upload").clicked() {
+                    if ui.button("\u{f093} Upload").clicked() {
                         self.on_load(false);
                         clicked = true;
                     }
-                    if ui.button("Download").clicked() {
+                    if ui.button("\u{f019} Download").clicked() {
                         self.on_download();
                         clicked = true;
                     }
                     ui.separator();
-                    if ui.button("Save").clicked() {
+                    if ui.button("\u{eb4b} Save").clicked() {
                         self.on_save_local();
                         clicked = true;
                     }
-                    if ui.button("Save As").clicked() {
+                    if ui.button("\u{eb4a} Save As").clicked() {
                         self.on_save_as_local();
                         clicked = true;
                     }
-                    if ui.button("Open").clicked() {
+                    if ui.button("\u{f07c} Open").clicked() {
                         self.on_open();
                         clicked = true;
                     }
                 } else {
                     // Native menu items!
-                    if ui.button("Save").clicked() {
+                    if ui.button("\u{eb4b} Save").clicked() {
                         self.on_save();
                         clicked = true;
                     }
-                    if ui.button("Save as").clicked() {
+                    if ui.button("\u{eb4a} Save as").clicked() {
                         self.on_save_as();
                         clicked = true;
                     }
-                    if ui.button("Open").clicked() {
+                    if ui.button("\u{f07c} Open").clicked() {
                         self.on_open();
                         clicked = true;
                     }
@@ -612,7 +612,8 @@ impl App {
 
                     // Special debug menu items to test web behavior
                     if self.debug {
-                        if ui.button("Download").clicked() {
+                        ui.label("Debug zone:");
+                        if ui.button("\u{f019} Download").clicked() {
                             self.on_download();
                             clicked = true;
                         }
@@ -631,7 +632,7 @@ impl App {
                         ui.separator();
                     }
 
-                    if ui.button("Quit").clicked() {
+                    if ui.button("\u{f0a48} Quit").clicked() {
                         self.on_quit(ctx);
                         clicked = true;
                     }
@@ -694,7 +695,7 @@ impl App {
                                     format!("{name} [unsaved]")
                                 }
                             }
-                            None => "[unsaved]".to_owned(),
+                            None => "[no file name]".to_owned(),
                         };
                         ui.add_enabled(false, egui::Label::new(t))
                     },
@@ -848,18 +849,31 @@ impl App {
             label: &'static str,
             enter_pressed: bool,
         ) -> FileNameResponse {
-            ui.horizontal(|ui| {
+            let w = ui.available_width();
+            let initial_padding =
+                (w - (w * 0.8 + ui.ctx().style().spacing.item_spacing.x)) / 2.0;
+            let button_size = egui::Vec2::new(w * 0.4, 20.0);
+            ui.add_space(5.0);
+            ui.horizontal_top(|ui| {
+                ui.add_space(initial_padding);
+                let mut out = FileNameResponse::None;
                 if ui
-                    .add_enabled_ui(r.is_ok(), |ui| ui.button(label).clicked())
+                    .add_enabled_ui(r.is_ok(), |ui| {
+                        ui.add_sized(button_size, egui::Button::new(label))
+                            .clicked()
+                    })
                     .inner
                     || (r.is_ok() && enter_pressed)
                 {
-                    FileNameResponse::Ok(r.unwrap())
-                } else if ui.button("Cancel").clicked() {
-                    FileNameResponse::Cancel
-                } else {
-                    FileNameResponse::None
+                    out = FileNameResponse::Ok(r.unwrap())
                 }
+                if ui
+                    .add_sized(button_size, egui::Button::new("Cancel"))
+                    .clicked()
+                {
+                    out = FileNameResponse::Cancel;
+                }
+                out
             })
             .inner
         }
@@ -944,9 +958,9 @@ impl App {
                         }
                         NextAction::LoadFile { local } => {
                             if local {
-                                self.do_open_local()
+                                self.open_local()
                             } else {
-                                self.do_open();
+                                self.platform_open();
                             }
                         }
                         NextAction::LoadExample(s) => self.load_from_state(s),
@@ -982,7 +996,7 @@ impl App {
                     FileNameResponse::Ok(name) => {
                         let state = std::mem::take(state);
                         self.modal = None;
-                        self.do_download(&name, state);
+                        self.download_file(&name, state);
                         self.meta.name = Some(name);
                     }
                     FileNameResponse::Cancel => self.modal = None,
@@ -1168,7 +1182,7 @@ impl App {
         } else {
             let state = self.get_state();
             if let Some(f) = self.meta.name.take() {
-                self.do_download(&f, state);
+                self.download_file(&f, state);
                 self.meta.name = Some(f);
             } else {
                 self.modal = Some(Modal::Download {
@@ -1179,7 +1193,7 @@ impl App {
         }
     }
 
-    fn do_download(&mut self, f: &str, state: AppState) {
+    fn download_file(&mut self, f: &str, state: AppState) {
         let json_str = state.serialize();
         match self.platform.download_file(f, &json_str) {
             None => self.undo.mark_saved(state.world),
@@ -1218,16 +1232,16 @@ impl App {
             warn!("ignoring load while modal is active");
         } else if self.undo.is_saved() {
             if local {
-                self.do_open_local()
+                self.open_local()
             } else {
-                self.do_open()
+                self.platform_open()
             }
         } else {
             self.modal = Some(Modal::Unsaved(NextAction::LoadFile { local }));
         }
     }
 
-    fn do_open_local(&mut self) {
+    fn open_local(&mut self) {
         let files = self.platform.list_local_storage();
         self.modal = Some(Modal::OpenLocal {
             files,
@@ -1283,6 +1297,22 @@ impl App {
         }
     }
 
+    fn on_save(&mut self) {
+        if self.modal.is_some() {
+            warn!("ignoring save while modal is active");
+        } else {
+            self.platform_save();
+        }
+    }
+
+    fn on_save_as(&mut self) {
+        if self.modal.is_some() {
+            warn!("ignoring save as while modal is active");
+        } else {
+            self.platform_save_as();
+        }
+    }
+
     fn on_undo(&mut self) {
         if self.modal.is_some() {
             warn!("ignoring undo while modal is active");
@@ -1326,7 +1356,7 @@ impl eframe::App for App {
             self.start_world_rebuild();
         }
 
-        self.update_title(ctx);
+        self.platform_update_title(ctx);
 
         if std::mem::take(&mut self.request_repaint) {
             ctx.request_repaint();

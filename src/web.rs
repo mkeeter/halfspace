@@ -110,19 +110,19 @@ pub fn run() {
 }
 
 impl App {
-    pub(crate) fn update_title(&self, _ctx: &egui::Context) {
+    pub(crate) fn platform_update_title(&self, _ctx: &egui::Context) {
         // no-op on the web backend
     }
 
-    pub(crate) fn on_save(&mut self) {
+    pub(crate) fn platform_save(&mut self) {
         self.on_save_local();
     }
 
-    pub(crate) fn on_save_as(&mut self) {
+    pub(crate) fn platform_save_as(&mut self) {
         self.on_save_as_local();
     }
 
-    pub(crate) fn do_open(&mut self) {
+    pub(crate) fn platform_open(&mut self) {
         if self.platform.dialogs.send(DialogRequest::Open).is_ok() {
             self.modal = Some(Modal::WaitForLoad);
         } else {
@@ -131,15 +131,15 @@ impl App {
     }
 }
 
-/// Prefix to namespace file storage keys
-const FILE_PREFIX: &str = "vfs:";
-
 pub struct Data {
     /// Dialogs are handled in a separate task
     dialogs: tokio::sync::mpsc::UnboundedSender<DialogRequest>,
 }
 
 impl Data {
+    /// Prefix to namespace file storage keys
+    const FILE_PREFIX: &str = "vfs:";
+
     pub(crate) fn new(queue: MessageSender) -> Data {
         let (dialog_tx, dialog_rx) = tokio::sync::mpsc::unbounded_channel();
         wasm_bindgen_futures::spawn_local(dialog_worker(dialog_rx, queue));
@@ -157,7 +157,7 @@ impl Data {
 
         for i in 0..len {
             if let Some(key) = storage.key(i).unwrap_or(None) {
-                if let Some(stripped) = key.strip_prefix(FILE_PREFIX) {
+                if let Some(stripped) = key.strip_prefix(Self::FILE_PREFIX) {
                     result.push(stripped.to_string());
                 }
             }
@@ -173,7 +173,7 @@ impl Data {
             .expect("localStorage not available");
 
         storage
-            .set_item(&format!("{FILE_PREFIX}{path}"), contents)
+            .set_item(&format!("{}{path}", Self::FILE_PREFIX), contents)
             .expect("failed to write to localStorage");
     }
 
@@ -184,7 +184,7 @@ impl Data {
             .expect("localStorage not available");
 
         storage
-            .get_item(&format!("{FILE_PREFIX}{path}"))
+            .get_item(&format!("{}{path}", Self::FILE_PREFIX))
             .unwrap()
             .unwrap()
     }
@@ -286,5 +286,5 @@ pub(crate) async fn dialog_worker(
         };
         tx.send(r);
     }
-    info!("dialog thread is exiting");
+    info!("dialog task is exiting");
 }

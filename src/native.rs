@@ -9,12 +9,14 @@ use clap::Parser;
 pub struct Data;
 
 impl Data {
+    const LOCAL_STORAGE: &str = ".localdb";
+
     pub(crate) fn new(_queue: MessageSender) -> Data {
         Data
     }
 
     pub(crate) fn list_local_storage(&self) -> Vec<String> {
-        let s = std::fs::read_to_string(LOCAL_STORAGE)
+        let s = std::fs::read_to_string(Self::LOCAL_STORAGE)
             .unwrap_or_else(|_| String::new());
         s.trim()
             .lines()
@@ -23,7 +25,7 @@ impl Data {
     }
 
     pub(crate) fn save_to_local_storage(&self, path: &str, contents: &str) {
-        let prev = std::fs::read_to_string(LOCAL_STORAGE)
+        let prev = std::fs::read_to_string(Self::LOCAL_STORAGE)
             .unwrap_or_else(|_| String::new());
         let mut out = String::new();
         for line in prev.lines() {
@@ -34,11 +36,11 @@ impl Data {
         }
         let raw_contents = serde_json::to_string(&contents).unwrap();
         out += &format!("{path}|{raw_contents}\n");
-        std::fs::write(LOCAL_STORAGE, out).unwrap();
+        std::fs::write(Self::LOCAL_STORAGE, out).unwrap();
     }
 
     pub(crate) fn read_from_local_storage(&self, path: &str) -> String {
-        let data = std::fs::read_to_string(LOCAL_STORAGE)
+        let data = std::fs::read_to_string(Self::LOCAL_STORAGE)
             .unwrap_or_else(|_| String::new());
         for line in data.lines() {
             let (name, rest) = line.split_once('|').unwrap();
@@ -145,18 +147,7 @@ pub fn run() -> anyhow::Result<()> {
 }
 
 impl App {
-    fn load_from_file(
-        filename: &std::path::Path,
-    ) -> Result<AppState, state::ReadError> {
-        info!("loading {filename:?}");
-        let mut f = std::fs::File::options().read(true).open(filename)?;
-        let mut data = vec![];
-        f.read_to_end(&mut data)?;
-        let s = std::str::from_utf8(&data)?;
-        AppState::deserialize(s)
-    }
-
-    pub(crate) fn update_title(&self, ctx: &egui::Context) {
+    pub(crate) fn platform_update_title(&self, ctx: &egui::Context) {
         let marker = if self.undo.is_saved() { "" } else { "*" };
         let title = if let Some(f) = &self.file {
             let f = f
@@ -170,37 +161,31 @@ impl App {
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
     }
 
-    pub(crate) fn on_save(&mut self) {
-        if self.modal.is_some() {
-            warn!("ignoring save while modal is active");
-        } else if let Some(f) = self.file.take() {
+    pub(crate) fn platform_save(&mut self) {
+        if let Some(f) = self.file.take() {
             self.write_to_file(&f).unwrap();
             self.file = Some(f);
         } else {
-            self.on_save_as();
+            self.platform_save_as();
         }
     }
 
-    pub(crate) fn on_save_as(&mut self) {
-        if self.modal.is_some() {
-            warn!("ignoring save as while modal is active");
-        } else {
-            let filename = rfd::FileDialog::new()
-                .add_filter("halfspace", &["half"])
-                .save_file();
-            if let Some(filename) = filename {
-                if self.write_to_file(&filename).is_ok() {
-                    self.file = Some(filename);
-                } else {
-                    panic!("could not create file");
-                }
+    pub(crate) fn platform_save_as(&mut self) {
+        let filename = rfd::FileDialog::new()
+            .add_filter("halfspace", &["half"])
+            .save_file();
+        if let Some(filename) = filename {
+            if self.write_to_file(&filename).is_ok() {
+                self.file = Some(filename);
             } else {
-                warn!("file save cancelled due to empty selection");
+                panic!("could not create file");
             }
+        } else {
+            warn!("file save cancelled due to empty selection");
         }
     }
 
-    pub(crate) fn do_open(&mut self) {
+    pub(crate) fn platform_open(&mut self) {
         assert!(self.modal.is_none());
         self.modal = Some(Modal::WaitForLoad);
 
@@ -223,6 +208,19 @@ impl App {
             self.rx.sender().send(Message::CancelLoad);
         }
     }
+}
+
+impl App {
+    fn load_from_file(
+        filename: &std::path::Path,
+    ) -> Result<AppState, state::ReadError> {
+        info!("loading {filename:?}");
+        let mut f = std::fs::File::options().read(true).open(filename)?;
+        let mut data = vec![];
+        f.read_to_end(&mut data)?;
+        let s = std::str::from_utf8(&data)?;
+        AppState::deserialize(s)
+    }
 
     /// Writes to the given file and marks the current state as saved
     fn write_to_file(
@@ -242,5 +240,3 @@ impl App {
         Ok(())
     }
 }
-
-const LOCAL_STORAGE: &str = ".localdb";
