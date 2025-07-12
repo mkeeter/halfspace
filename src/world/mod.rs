@@ -366,6 +366,15 @@ impl World {
 
         input_scope
     }
+
+    pub fn import_data(&mut self, mut other: World) {
+        for (i, b) in self.blocks.iter_mut() {
+            let Some(ob) = other.blocks.remove(i) else {
+                continue;
+            };
+            b.data = ob.data;
+        }
+    }
 }
 
 /// Handle to intermediate block data during evaluation

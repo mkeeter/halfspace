@@ -282,7 +282,6 @@ fn theme_visuals() -> egui::Visuals {
 enum Message {
     RebuildWorld {
         world: World,
-        generation: u64,
     },
     RenderView {
         block: BlockIndex,
@@ -400,6 +399,7 @@ pub struct App {
     views: HashMap<BlockIndex, view::ViewData>,
 
     rx: MessageReceiver,
+    script_state: ScriptState,
 
     /// Dialogs are handled in a separate task
     dialogs: tokio::sync::mpsc::UnboundedSender<DialogRequest>,
@@ -413,6 +413,11 @@ pub struct App {
 
     /// Confirms that `meta.name` should be used for local saves
     local_name_confirmed: bool,
+}
+
+enum ScriptState {
+    Done,
+    Running { changed: bool },
 }
 
 #[derive(Clone)]
@@ -590,6 +595,7 @@ impl App {
             library: world::ShapeLibrary::build(),
             examples,
             tree: egui_dock::DockState::new(vec![]),
+            script_state: ScriptState::Done,
             undo,
             file: None,
             syntax,
@@ -638,30 +644,20 @@ impl App {
         self.rx.increment_gen(); // orphan previous tasks
     }
 
-    pub fn start_world_rebuild(&self) {
+    pub fn start_world_rebuild(&mut self) {
+        if let ScriptState::Running { changed } = &mut self.script_state {
+            *changed = true;
+            return;
+        }
+
         // Send the world to a worker thread for re-evaluation
         let world = WorldState::from(&self.data);
-        let generation = self
-            .generation
-            .fetch_add(1u64, std::sync::atomic::Ordering::Release)
-            + 1;
-        let gen_handle = self.generation.clone();
         let tx = self.rx.sender_with_gen();
         rayon::spawn(move || {
-            // The world may have moved on before this script
-            // evaluation started; if so, then skip it entirely.
-            let current_gen =
-                gen_handle.load(std::sync::atomic::Ordering::Acquire);
-            if current_gen == generation {
-                let world = World::from(world);
-                // Re-check generation before sending
-                let current_gen =
-                    gen_handle.load(std::sync::atomic::Ordering::Acquire);
-                if current_gen == generation {
-                    tx.send(Message::RebuildWorld { generation, world })
-                }
-            }
-        })
+            let world = World::from(world);
+            tx.send(Message::RebuildWorld { world })
+        });
+        self.script_state = ScriptState::Running { changed: false };
     }
 
     fn draw_menu(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
@@ -1586,13 +1582,16 @@ impl App {
     /// Handles a single message
     fn handle_message(&mut self, m: Message) {
         match m {
-            Message::RebuildWorld { generation, world } => {
-                if generation
-                    == self
-                        .generation
-                        .load(std::sync::atomic::Ordering::Acquire)
-                {
-                    self.data = world;
+            Message::RebuildWorld { world } => {
+                self.data.import_data(world);
+                let ScriptState::Running { changed } = std::mem::replace(
+                    &mut self.script_state,
+                    ScriptState::Done,
+                ) else {
+                    panic!("got RebuildWorld while script wasn't running");
+                };
+                if changed {
+                    self.start_world_rebuild();
                 }
             }
             Message::RenderView {
