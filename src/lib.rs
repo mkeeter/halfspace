@@ -772,7 +772,9 @@ impl App {
             return;
         }
 
-        let dialog_size = window_size / 2.0;
+        // XXX weird hacky behavior
+        let dialog_size =
+            (window_size / 2.0).max(egui::Vec2::new(200.0, 200.0));
 
         // Block all interaction behind the modal
         let screen_rect = ctx.screen_rect();
@@ -804,7 +806,9 @@ impl App {
             ui: &mut egui::Ui,
             name: &mut String,
         ) -> Result<String, &'static str> {
-            ui.text_edit_singleline(name);
+            ui.add(
+                egui::TextEdit::singleline(name).desired_width(f32::INFINITY),
+            );
             let just_normal_characters = name.chars().all(|c| {
                 c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_'
             });
@@ -884,13 +888,18 @@ impl App {
             dialog_size: egui::Vec2,
             add_contents: impl FnOnce(&mut egui::Ui) -> R,
         ) -> R {
+            // XXX width is weirdly stateful if you shrink and expand
             egui::Window::new(title)
                 .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                 .collapsible(false)
                 .resizable(false)
                 .order(egui::Order::Foreground)
-                .max_height(dialog_size.x)
-                .max_width(dialog_size.y)
+                .min_width(dialog_size.x)
+                .max_width(dialog_size.x)
+                .default_width(dialog_size.x)
+                .min_height(dialog_size.y)
+                .max_height(dialog_size.y)
+                .default_height(dialog_size.x)
                 .frame(egui::Frame::popup(&ctx.style()))
                 .show(ctx, add_contents)
                 .unwrap()
@@ -907,6 +916,7 @@ impl App {
             let height = egui::TextStyle::Body.resolve(ui.style()).size;
             egui::ScrollArea::vertical()
                 .scroll_bar_visibility(ScrollBarVisibility::AlwaysVisible)
+                .max_width(f32::INFINITY)
                 .auto_shrink(false)
                 .show_rows(ui, height, files.len(), |ui, row_range| {
                     // Hide button backgrounds
