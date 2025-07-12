@@ -156,7 +156,7 @@ impl App {
         AppState::deserialize(s)
     }
 
-    pub(crate) fn update_title(&mut self, ctx: &egui::Context) {
+    pub(crate) fn update_title(&self, ctx: &egui::Context) {
         let marker = if self.undo.is_saved() { "" } else { "*" };
         let title = if let Some(f) = &self.file {
             let f = f
