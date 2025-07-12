@@ -112,15 +112,15 @@ pub fn run() -> anyhow::Result<()> {
                 }
             }
 
-            let ctx = cc.egui_ctx.clone();
-
             // Worker thread to request repaints based on notifications
+            let ctx = cc.egui_ctx.clone();
             std::thread::spawn(move || {
                 while let Some(()) = notify_rx.blocking_recv() {
                     ctx.request_repaint();
                 }
                 info!("repaint notification thread is stopping");
             });
+
             if let Some(filename) = args.target {
                 match App::load_from_file(&filename) {
                     Ok(state) => {
