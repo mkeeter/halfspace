@@ -189,49 +189,6 @@ fn download_blob(file_name: &str, url: &str) -> Result<(), JsValue> {
 /// Prefix to namespace file storage keys
 const FILE_PREFIX: &str = "vfs:";
 
-/// List all "files" in localStorage (keys starting with `vfs:`)
-pub(crate) fn list_local_storage() -> Vec<String> {
-    let storage = web_sys::window()
-        .and_then(|w| w.local_storage().ok().flatten())
-        .expect("localStorage not available");
-
-    let mut result = Vec::new();
-    let len = storage.length().unwrap_or(0);
-
-    for i in 0..len {
-        if let Some(key) = storage.key(i).unwrap_or(None) {
-            if let Some(stripped) = key.strip_prefix(FILE_PREFIX) {
-                result.push(stripped.to_string());
-            }
-        }
-    }
-
-    result
-}
-
-/// Write a file (string content) to a given path
-pub(crate) fn save_to_local_storage(path: &str, contents: &str) {
-    let storage = web_sys::window()
-        .and_then(|w| w.local_storage().ok().flatten())
-        .expect("localStorage not available");
-
-    storage
-        .set_item(&format!("{FILE_PREFIX}{path}"), contents)
-        .expect("failed to write to localStorage");
-}
-
-/// Read a file from a given path
-pub(crate) fn read_from_local_storage(path: &str) -> String {
-    let storage = web_sys::window()
-        .and_then(|w| w.local_storage().ok().flatten())
-        .expect("localStorage not available");
-
-    storage
-        .get_item(&format!("{FILE_PREFIX}{path}"))
-        .unwrap()
-        .unwrap()
-}
-
 pub struct Data {
     /// Dialogs are handled in a separate task
     dialogs: tokio::sync::mpsc::UnboundedSender<DialogRequest>,
@@ -242,6 +199,49 @@ impl Data {
         let (dialog_tx, dialog_rx) = tokio::sync::mpsc::unbounded_channel();
         wasm_bindgen_futures::spawn_local(dialog_worker(dialog_rx, queue));
         Data { dialogs: dialog_tx }
+    }
+
+    /// List all "files" in localStorage (keys starting with `vfs:`)
+    pub(crate) fn list_local_storage(&self) -> Vec<String> {
+        let storage = web_sys::window()
+            .and_then(|w| w.local_storage().ok().flatten())
+            .expect("localStorage not available");
+
+        let mut result = Vec::new();
+        let len = storage.length().unwrap_or(0);
+
+        for i in 0..len {
+            if let Some(key) = storage.key(i).unwrap_or(None) {
+                if let Some(stripped) = key.strip_prefix(FILE_PREFIX) {
+                    result.push(stripped.to_string());
+                }
+            }
+        }
+
+        result
+    }
+
+    /// Write a file (string content) to a given path
+    pub(crate) fn save_to_local_storage(&self, path: &str, contents: &str) {
+        let storage = web_sys::window()
+            .and_then(|w| w.local_storage().ok().flatten())
+            .expect("localStorage not available");
+
+        storage
+            .set_item(&format!("{FILE_PREFIX}{path}"), contents)
+            .expect("failed to write to localStorage");
+    }
+
+    /// Read a file from a given path
+    pub(crate) fn read_from_local_storage(&self, path: &str) -> String {
+        let storage = web_sys::window()
+            .and_then(|w| w.local_storage().ok().flatten())
+            .expect("localStorage not available");
+
+        storage
+            .get_item(&format!("{FILE_PREFIX}{path}"))
+            .unwrap()
+            .unwrap()
     }
 }
 

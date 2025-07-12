@@ -312,7 +312,6 @@ pub struct App {
     rx: MessageReceiver,
     script_state: ScriptState,
 
-    #[cfg_attr(not(target_arch = "wasm32"), expect(unused))]
     platform: platform::Data,
 
     /// Show debug options and menu items in native build
@@ -1017,10 +1016,8 @@ impl App {
                         let mut state = std::mem::take(state);
                         self.modal = None;
                         state.meta.name = Some(name.clone());
-                        platform::save_to_local_storage(
-                            &name,
-                            &state.serialize(),
-                        );
+                        self.platform
+                            .save_to_local_storage(&name, &state.serialize());
                         self.undo.mark_saved(state.world);
                         self.meta.name = Some(name);
                         self.local_name_confirmed = true;
@@ -1046,7 +1043,7 @@ impl App {
                 );
                 match r {
                     FileNameResponse::Ok(name) => {
-                        let data = platform::read_from_local_storage(&name);
+                        let data = self.platform.read_from_local_storage(&name);
                         self.modal = match AppState::deserialize(&data) {
                             Ok(state) => {
                                 self.load_from_state(state);
@@ -1231,7 +1228,7 @@ impl App {
     }
 
     fn do_open_local(&mut self) {
-        let files = platform::list_local_storage();
+        let files = self.platform.list_local_storage();
         self.modal = Some(Modal::OpenLocal {
             files,
             name: String::new(),
@@ -1248,10 +1245,11 @@ impl App {
             // hand, if we've only set the local name through downloads, we will
             // confirm that it's okay to overwrite.
             if self.local_name_confirmed {
-                platform::save_to_local_storage(name, &state.serialize());
+                self.platform
+                    .save_to_local_storage(name, &state.serialize());
                 self.undo.mark_saved(state.world);
             } else {
-                let files = platform::list_local_storage();
+                let files = self.platform.list_local_storage();
                 if files.contains(name) {
                     self.modal = Some(Modal::SaveLocal {
                         state,
@@ -1259,13 +1257,14 @@ impl App {
                         name: name.clone(),
                     });
                 } else {
-                    platform::save_to_local_storage(name, &state.serialize());
+                    self.platform
+                        .save_to_local_storage(name, &state.serialize());
                     self.undo.mark_saved(state.world);
                 }
             }
         } else {
             self.modal = Some(Modal::SaveLocal {
-                files: platform::list_local_storage(),
+                files: self.platform.list_local_storage(),
                 state: self.get_state(),
                 name: String::new(),
             });
@@ -1277,7 +1276,7 @@ impl App {
             warn!("ignoring save while modal is active");
         } else {
             self.modal = Some(Modal::SaveLocal {
-                files: platform::list_local_storage(),
+                files: self.platform.list_local_storage(),
                 state: self.get_state(),
                 name: self.meta.name.clone().unwrap_or_default(),
             });
