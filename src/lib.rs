@@ -1181,7 +1181,7 @@ impl App {
 
     fn do_download(&mut self, f: &str, state: AppState) {
         let json_str = state.serialize();
-        match platform::download_file(f, &json_str) {
+        match self.platform.download_file(f, &json_str) {
             None => self.undo.mark_saved(state.world),
             Some(d) => self.modal = Some(d),
         }

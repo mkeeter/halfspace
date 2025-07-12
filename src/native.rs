@@ -48,6 +48,20 @@ impl Data {
         }
         panic!("file {path} not found");
     }
+
+    pub(crate) fn download_file(
+        &self,
+        filename: &str,
+        _text: &str,
+    ) -> Option<Modal> {
+        Some(Modal::Error {
+            title: "Download failed".to_owned(),
+            message: format!(
+                "Downloading to {filename} isn't \
+                implemented in the native platform"
+            ),
+        })
+    }
 }
 
 /// An experimental CAD tool
@@ -227,16 +241,6 @@ impl App {
         self.undo.mark_saved(state.world);
         Ok(())
     }
-}
-
-pub(crate) fn download_file(filename: &str, _text: &str) -> Option<Modal> {
-    Some(Modal::Error {
-        title: "Download failed".to_owned(),
-        message: format!(
-            "Downloading to {filename} isn't \
-            implemented in the native platform"
-        ),
-    })
 }
 
 const LOCAL_STORAGE: &str = ".localdb";
