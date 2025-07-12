@@ -18,7 +18,15 @@ serve:
 
 # Run `cargo check` for both native and web builds
 check:
+    just check-native
+    just check-web
+
+# Run `cargo check` for the native build
+check-native:
     cargo check
+
+# Run `cargo check` for the web build
+check-web:
     {{cargo-web}} check --lib --target=wasm32-unknown-unknown
 
 # Run `cargo clippy` for both native and web builds

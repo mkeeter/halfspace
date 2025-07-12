@@ -1,6 +1,4 @@
-use crate::{
-    dialog_worker, wgpu_setup, App, Dialog, DialogRequest, Modal, NextAction,
-};
+use crate::{state, wgpu_setup, App, AppState, Message, MessageSender, Modal};
 use log::{error, info, warn};
 use wasm_bindgen::prelude::*;
 
@@ -86,10 +84,7 @@ pub fn run() {
                 canvas,
                 web_options,
                 Box::new(|cc| {
-                    let (dialog_tx, dialog_rx) =
-                        tokio::sync::mpsc::unbounded_channel();
-                    let (mut app, mut notify_rx) =
-                        App::new(cc, dialog_tx, false);
+                    let (mut app, mut notify_rx) = App::new(cc, false);
                     if let Some(example) = example {
                         if !app.load_example(&example) {
                             warn!("failed to load example '{example}'");
@@ -106,11 +101,6 @@ pub fn run() {
                         info!("repaint notification task is stopping");
                     });
 
-                    let queue = app.rx.sender();
-                    wasm_bindgen_futures::spawn_local(dialog_worker(
-                        dialog_rx, queue,
-                    ));
-
                     Ok(Box::new(app))
                 }),
             )
@@ -124,10 +114,6 @@ impl App {
         // no-op on the web backend
     }
 
-    pub(crate) fn on_open(&mut self) {
-        self.on_open_local();
-    }
-
     pub(crate) fn on_save(&mut self) {
         self.on_save_local();
     }
@@ -136,17 +122,11 @@ impl App {
         self.on_save_as_local();
     }
 
-    pub(crate) fn on_upload(&mut self) {
-        if self.modal.is_some() {
-            warn!("cannot execute open with active modal");
-        } else if self.undo.is_saved() {
-            if self.dialogs.send(DialogRequest::Open).is_ok() {
-                self.modal = Some(Modal::Dialog(Dialog::Open));
-            } else {
-                error!("could not send Open to dialog thread");
-            }
+    pub(crate) fn do_open(&mut self) {
+        if self.platform.dialogs.send(DialogRequest::Open).is_ok() {
+            self.modal = Some(Modal::WaitForLoad);
         } else {
-            self.modal = Some(Modal::Unsaved(NextAction::Open));
+            error!("could not send Open to dialog thread");
         }
     }
 }
@@ -154,9 +134,9 @@ impl App {
 pub(crate) fn download_file(filename: &str, text: &str) -> Option<Modal> {
     match download_file_inner(filename, text) {
         Ok(()) => None,
-        Err(j) => Some(Modal::Error {
+        Err(e) => Some(Modal::Error {
             title: "Download failed".to_owned(),
-            message: format!("{j:?}"),
+            message: format!("{e:?}"),
         }),
     }
 }
@@ -250,4 +230,54 @@ pub(crate) fn read_from_local_storage(path: &str) -> String {
         .get_item(&format!("{FILE_PREFIX}{path}"))
         .unwrap()
         .unwrap()
+}
+
+pub struct Data {
+    /// Dialogs are handled in a separate task
+    dialogs: tokio::sync::mpsc::UnboundedSender<DialogRequest>,
+}
+
+impl Data {
+    pub(crate) fn new(queue: MessageSender) -> Data {
+        let (dialog_tx, dialog_rx) = tokio::sync::mpsc::unbounded_channel();
+        wasm_bindgen_futures::spawn_local(dialog_worker(dialog_rx, queue));
+        Data { dialogs: dialog_tx }
+    }
+}
+
+pub enum DialogRequest {
+    Open,
+}
+
+pub(crate) async fn dialog_worker(
+    mut rx: tokio::sync::mpsc::UnboundedReceiver<DialogRequest>,
+    tx: MessageSender,
+) {
+    while let Some(m) = rx.recv().await {
+        let r = match m {
+            DialogRequest::Open => {
+                if let Some(f) = rfd::AsyncFileDialog::new()
+                    .add_filter("halfspace", &["half"])
+                    .pick_file()
+                    .await
+                {
+                    let data = f.read().await;
+                    match std::str::from_utf8(&data)
+                        .map_err(state::ReadError::NotUtf8)
+                        .and_then(AppState::deserialize)
+                    {
+                        Ok(state) => Message::Loaded { state, path: None },
+                        Err(e) => Message::LoadFailed {
+                            title: "Open error".to_owned(),
+                            message: format!("{:#}", anyhow::Error::from(e)),
+                        },
+                    }
+                } else {
+                    Message::CancelLoad
+                }
+            }
+        };
+        tx.send(r);
+    }
+    info!("dialog thread is exiting");
 }

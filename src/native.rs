@@ -1,11 +1,19 @@
-use crate::{
-    dialog_worker, state, wgpu_setup, App, AppState, Dialog, DialogRequest,
-    Modal, NextAction,
-};
-use log::{error, info, warn};
+use crate::{state, wgpu_setup, App, AppState, Message, MessageSender, Modal};
+use log::{info, warn};
 use std::io::{Read, Write};
 
 use clap::Parser;
+
+/// No platform-specific data
+#[derive(Default)]
+#[allow(unused)]
+pub struct Data;
+
+impl Data {
+    pub(crate) fn new(_queue: MessageSender) -> Data {
+        Data
+    }
+}
 
 /// An experimental CAD tool
 #[derive(clap::Parser, Debug)]
@@ -46,8 +54,7 @@ pub fn run() -> anyhow::Result<()> {
         "halfspace",
         native_options,
         Box::new(|cc| {
-            let (dialog_tx, dialog_rx) = tokio::sync::mpsc::unbounded_channel();
-            let (mut app, mut notify_rx) = App::new(cc, dialog_tx, args.debug);
+            let (mut app, mut notify_rx) = App::new(cc, args.debug);
             if let Some(example) = args.example {
                 if !app.load_example(&format!("{example}.half")) {
                     warn!("could not find example '{example}'");
@@ -55,11 +62,6 @@ pub fn run() -> anyhow::Result<()> {
             }
 
             let ctx = cc.egui_ctx.clone();
-
-            let queue = app.rx.sender();
-            std::thread::spawn(move || {
-                pollster::block_on(dialog_worker(dialog_rx, queue))
-            });
 
             // Worker thread to request repaints based on notifications
             std::thread::spawn(move || {
@@ -122,8 +124,7 @@ impl App {
     pub(crate) fn on_save(&mut self) {
         if self.modal.is_some() {
             warn!("ignoring save while modal is active");
-        } else if self.file.is_some() {
-            let f = self.file.take().unwrap();
+        } else if let Some(f) = self.file.take() {
             self.write_to_file(&f).unwrap();
             self.file = Some(f);
         } else {
@@ -135,31 +136,43 @@ impl App {
         if self.modal.is_some() {
             warn!("ignoring save as while modal is active");
         } else {
-            let state = self.get_state();
-            if self.dialogs.send(DialogRequest::SaveAs { state }).is_ok() {
-                self.modal = Some(Modal::Dialog(Dialog::SaveAs));
+            let filename = rfd::FileDialog::new()
+                .add_filter("halfspace", &["half"])
+                .save_file();
+            if let Some(filename) = filename {
+                if self.write_to_file(&filename).is_ok() {
+                    self.file = Some(filename);
+                } else {
+                    panic!("could not create file");
+                }
             } else {
-                error!("could not send SaveAs to dialog thread");
+                warn!("file save cancelled due to empty selection");
             }
         }
     }
 
-    pub(crate) fn on_open(&mut self) {
-        if self.modal.is_some() {
-            warn!("cannot execute open with active modal");
-        } else if self.undo.is_saved() {
-            if self.dialogs.send(DialogRequest::Open).is_ok() {
-                self.modal = Some(Modal::Dialog(Dialog::Open));
-            } else {
-                error!("could not send Open to dialog thread");
-            }
+    pub(crate) fn do_open(&mut self) {
+        assert!(self.modal.is_none());
+        self.modal = Some(Modal::WaitForLoad);
+
+        let filename = rfd::FileDialog::new()
+            .add_filter("halfspace", &["half"])
+            .pick_file();
+        if let Some(filename) = filename {
+            let m = match Self::load_from_file(&filename) {
+                Ok(state) => Message::Loaded {
+                    state,
+                    path: Some(filename),
+                },
+                Err(e) => Message::LoadFailed {
+                    title: "Load failed".to_owned(),
+                    message: format!("{:#}", anyhow::Error::from(e)),
+                },
+            };
+            self.rx.sender().send(m);
         } else {
-            self.modal = Some(Modal::Unsaved(NextAction::Open));
+            self.rx.sender().send(Message::CancelLoad);
         }
-    }
-
-    pub(crate) fn on_upload(&mut self) {
-        panic!("on_upload should not be called natively")
     }
 
     /// Writes to the given file and marks the current state as saved

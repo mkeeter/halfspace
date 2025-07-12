@@ -71,86 +71,6 @@ pub async fn wgpu_setup() -> Result<egui_wgpu::WgpuSetupExisting, WgpuError> {
     })
 }
 
-#[allow(clippy::large_enum_variant)]
-pub enum DialogRequest {
-    Open,
-    SaveAs { state: AppState },
-}
-
-pub(crate) async fn dialog_worker(
-    mut rx: tokio::sync::mpsc::UnboundedReceiver<DialogRequest>,
-    tx: MessageSender,
-) {
-    // Helper function to get a path (if running natively)
-    #[cfg(target_arch = "wasm32")]
-    let get_path = |_| None;
-    #[cfg(not(target_arch = "wasm32"))]
-    let get_path = |f: rfd::FileHandle| Some(f.path().to_owned());
-
-    while let Some(m) = rx.recv().await {
-        let r = match m {
-            DialogRequest::Open => {
-                if let Some(f) = rfd::AsyncFileDialog::new()
-                    .add_filter("halfspace", &["half"])
-                    .pick_file()
-                    .await
-                {
-                    let data = f.read().await;
-                    let path = get_path(f);
-
-                    match std::str::from_utf8(&data)
-                        .map_err(state::ReadError::NotUtf8)
-                        .and_then(AppState::deserialize)
-                    {
-                        Ok(state) => Message::DialogOpen { state, path },
-                        Err(e) => Message::DialogError {
-                            title: "Open error".to_owned(),
-                            message: format!(
-                                "Could not deserialize:\n{:?}",
-                                anyhow::Error::from(e)
-                            ),
-                        },
-                    }
-                } else {
-                    Message::DialogCancel
-                }
-            }
-            DialogRequest::SaveAs { state } => {
-                if let Some(f) = rfd::AsyncFileDialog::new()
-                    .add_filter("halfspace", &["half"])
-                    .save_file()
-                    .await
-                {
-                    // TODO error handling?
-                    let json_str = serde_json::to_string_pretty(&state)
-                        .expect("serialization failed");
-
-                    // Note that in the WebAssembly build, this always returns
-                    // immediately, even if the user cancelled the download.
-                    // It's also not possible to set the extension :/
-                    match f.write(json_str.as_bytes()).await {
-                        Ok(()) => {
-                            let path = get_path(f);
-                            Message::DialogSaveAs { state, path }
-                        }
-                        Err(e) => Message::DialogError {
-                            title: "Save error".to_owned(),
-                            message: format!(
-                                "Save filed: {:#?}",
-                                anyhow::Error::from(e)
-                            ),
-                        },
-                    }
-                } else {
-                    Message::DialogCancel
-                }
-            }
-        };
-        tx.send(r);
-    }
-    info!("dialog thread is exiting");
-}
-
 // Base-16 Eighties, approximately
 pub mod color {
     pub const BASE0: egui::Color32 = egui::Color32::from_rgb(0x20, 0x20, 0x20);
@@ -279,6 +199,7 @@ fn theme_visuals() -> egui::Visuals {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 enum Message {
     RebuildWorld {
         world: World,
@@ -289,25 +210,15 @@ enum Message {
         start_time: Instant,
         data: view::ViewImage,
     },
-
-    /// A file has been opened; here is its data
-    DialogOpen {
+    Loaded {
         state: AppState,
         path: Option<std::path::PathBuf>,
     },
-    /// We have saved a file, returns the `AppState`
-    DialogSaveAs {
-        state: AppState,
-        path: Option<std::path::PathBuf>,
-    },
-    /// The dialog action has been cancelled
-    DialogCancel, // TODO make this dialog-specific?
-
-    /// The dialog action has returned an error
-    DialogError {
+    LoadFailed {
         title: String,
         message: String,
     },
+    CancelLoad,
 }
 
 #[derive(Clone)]
@@ -401,8 +312,8 @@ pub struct App {
     rx: MessageReceiver,
     script_state: ScriptState,
 
-    /// Dialogs are handled in a separate task
-    dialogs: tokio::sync::mpsc::UnboundedSender<DialogRequest>,
+    #[cfg_attr(not(target_arch = "wasm32"), expect(unused))]
+    platform: platform::Data,
 
     /// Show debug options and menu items in native build
     debug: bool,
@@ -425,31 +336,23 @@ enum ScriptState {
 enum NextAction {
     Quit,
     New,
-    Open,
+    LoadFile { local: bool },
     LoadExample(AppState),
 }
 
 impl std::fmt::Debug for NextAction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut dbg = f.debug_tuple(match self {
-            NextAction::Quit => "Quit",
-            NextAction::New => "New",
-            NextAction::Open => "Open",
-            NextAction::LoadExample(_) => "LoadExample",
-        });
-
-        if let NextAction::LoadExample(_) = self {
-            dbg.field(&"..");
+        match self {
+            NextAction::Quit => f.debug_tuple("Quit").finish(),
+            NextAction::New => f.debug_tuple("New").finish(),
+            NextAction::LoadFile { local } => {
+                f.debug_struct("Open").field("local", &local).finish()
+            }
+            NextAction::LoadExample(_) => {
+                f.debug_tuple("LoadExample").field(&"..").finish()
+            }
         }
-
-        dbg.finish()
     }
-}
-
-#[derive(Copy, Clone, Debug)]
-enum Dialog {
-    Open,
-    SaveAs,
 }
 
 #[derive(Clone)]
@@ -458,8 +361,6 @@ enum Dialog {
 enum Modal {
     /// An action requires a check to discard unsaved changes
     Unsaved(NextAction),
-    /// A dialog box is open off-thread and the screen should be blocked
-    Dialog(Dialog),
     Error {
         title: String,
         message: String,
@@ -478,13 +379,13 @@ enum Modal {
         files: Vec<String>,
         name: String,
     },
+    WaitForLoad,
 }
 
 impl std::fmt::Debug for Modal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Modal::Unsaved(u) => f.debug_tuple("Unsaved").field(u).finish(),
-            Modal::Dialog(d) => f.debug_tuple("Dialog").field(d).finish(),
             Modal::Error { title, message } => f
                 .debug_struct("Error")
                 .field("title", title)
@@ -506,6 +407,7 @@ impl std::fmt::Debug for Modal {
                 .field("name", name)
                 .field("files", &"..")
                 .finish(),
+            Modal::WaitForLoad => f.debug_struct("WaitForLoad").finish(),
         }
     }
 }
@@ -517,7 +419,6 @@ impl App {
     /// repaint when it receives a message.
     pub fn new(
         cc: &eframe::CreationContext<'_>,
-        dialogs: tokio::sync::mpsc::UnboundedSender<DialogRequest>,
         debug: bool,
     ) -> (Self, tokio::sync::mpsc::UnboundedReceiver<()>) {
         // Install custom render pipelines
@@ -590,6 +491,8 @@ impl App {
         let rx = MessageReceiver::new(notify_tx);
         let data = World::new();
         let undo = state::Undo::new(&data);
+        let queue = rx.sender();
+        let platform = platform::Data::new(queue);
         let app = Self {
             data,
             library: world::ShapeLibrary::build(),
@@ -602,9 +505,9 @@ impl App {
             views: HashMap::new(),
             meta: state::Metadata::default(),
             generation: std::sync::Arc::new(0.into()),
+            platform,
             rx,
             debug,
-            dialogs,
             modal: None,
             quit_confirmed: false,
             request_repaint: false,
@@ -672,7 +575,7 @@ impl App {
                 if cfg!(target_arch = "wasm32") {
                     // Web menu
                     if ui.button("Upload").clicked() {
-                        self.on_upload();
+                        self.on_load(false);
                         clicked = true;
                     }
                     if ui.button("Download").clicked() {
@@ -689,7 +592,7 @@ impl App {
                         clicked = true;
                     }
                     if ui.button("Open").clicked() {
-                        self.on_open_local();
+                        self.on_open();
                         clicked = true;
                     }
                 } else {
@@ -723,7 +626,7 @@ impl App {
                             clicked = true;
                         }
                         if ui.button("Open (local)").clicked() {
-                            self.on_open_local();
+                            self.on_load(true);
                             clicked = true;
                         }
                         ui.separator();
@@ -1009,7 +912,7 @@ impl App {
             Modal::Unsaved(m) => {
                 let s = match m {
                     NextAction::New => "New",
-                    NextAction::Open => "Open",
+                    NextAction::LoadFile { .. } => "Load file",
                     NextAction::Quit => "Quit",
                     NextAction::LoadExample(..) => "Load example",
                 };
@@ -1040,17 +943,11 @@ impl App {
                             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                             self.quit_confirmed = true;
                         }
-                        NextAction::Open => {
-                            if cfg!(target_arch = "wasm32") {
+                        NextAction::LoadFile { local } => {
+                            if local {
                                 self.do_open_local()
-                            } else if self
-                                .dialogs
-                                .send(DialogRequest::Open)
-                                .is_ok()
-                            {
-                                self.modal = Some(Modal::Dialog(Dialog::Open));
                             } else {
-                                error!("could not send to dialog thread");
+                                self.do_open();
                             }
                         }
                         NextAction::LoadExample(s) => self.load_from_state(s),
@@ -1071,7 +968,6 @@ impl App {
                     self.modal = None;
                 }
             }
-            Modal::Dialog(..) => (),
             Modal::Download { state, name } => {
                 let r = draw_modal_window(
                     ctx,
@@ -1169,6 +1065,9 @@ impl App {
                     FileNameResponse::Cancel => self.modal = None,
                     FileNameResponse::None => (),
                 }
+            }
+            Modal::WaitForLoad => {
+                // Nothing to do here, just block the screen
             }
         };
     }
@@ -1312,13 +1211,22 @@ impl App {
         }
     }
 
-    fn on_open_local(&mut self) {
+    fn on_open(&mut self) {
+        // "Open" is a local load for WASM32 builds, and a native load otherwise
+        self.on_load(cfg!(target_arch = "wasm32"));
+    }
+
+    fn on_load(&mut self, local: bool) {
         if self.modal.is_some() {
-            warn!("ignoring open local while modal is active");
+            warn!("ignoring load while modal is active");
         } else if self.undo.is_saved() {
-            self.do_open_local()
+            if local {
+                self.do_open_local()
+            } else {
+                self.do_open()
+            }
         } else {
-            self.modal = Some(Modal::Unsaved(NextAction::Open));
+            self.modal = Some(Modal::Unsaved(NextAction::LoadFile { local }));
         }
     }
 
@@ -1393,10 +1301,8 @@ impl App {
         if self.modal.is_some() {
             warn!("cannot execute on_new with active modal");
         } else if self.undo.is_saved() {
-            info!("new file");
             self.new_file()
         } else {
-            info!("modal");
             self.modal = Some(Modal::Unsaved(NextAction::New))
         }
     }
@@ -1604,42 +1510,33 @@ impl App {
                     e.update(generation, data, start_time.elapsed())
                 }
             }
-            Message::DialogOpen { state, path } => match self.modal {
-                Some(Modal::Dialog(Dialog::Open)) => {
+            Message::Loaded { state, path } => match self.modal {
+                Some(Modal::WaitForLoad) => {
                     self.load_from_state(state);
-                    self.modal = None;
                     self.file = path;
-                    self.local_name_confirmed = false;
+                    self.modal = None;
+                    self.local_name_confirmed = true;
                 }
                 _ => warn!(
-                    "received dialog open with unexpected modal {:?}",
+                    "received Loaded with unexpected modal {:?}",
                     self.modal
                 ),
             },
-            Message::DialogSaveAs { state, path } => match self.modal {
-                Some(Modal::Dialog(Dialog::SaveAs)) => {
-                    self.undo.mark_saved(state.world);
-                    self.file = path;
+            Message::CancelLoad => match self.modal {
+                Some(Modal::WaitForLoad) => {
                     self.modal = None;
                 }
                 _ => warn!(
-                    "received dialog save as with unexpected modal {:?}",
+                    "received CancelLoad with unexpected modal {:?}",
                     self.modal
                 ),
             },
-            Message::DialogCancel => match self.modal {
-                Some(Modal::Dialog(..)) => self.modal = None,
-                _ => warn!(
-                    "received dialog cancel with unexpected modal {:?}",
-                    self.modal
-                ),
-            },
-            Message::DialogError { title, message } => match self.modal {
-                Some(Modal::Dialog(..)) => {
-                    self.modal = Some(Modal::Error { title, message })
+            Message::LoadFailed { title, message } => match self.modal {
+                Some(Modal::WaitForLoad) => {
+                    self.modal = Some(Modal::Error { title, message });
                 }
                 _ => warn!(
-                    "received dialog error with unexpected modal {:?}",
+                    "received Loadfailed with unexpected modal {:?}",
                     self.modal
                 ),
             },
