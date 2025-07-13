@@ -1,0 +1,334 @@
+{
+  "tag": "halfspace",
+  "major": 1,
+  "minor": 3,
+  "meta": {
+    "description": "Menger sponge",
+    "name": null
+  },
+  "world": {
+    "next_index": 4,
+    "order": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "blocks": {
+      "2": {
+        "name": "sphereify",
+        "script": "let s = input(\"shape\");\nlet r_euclidean = sqrt(x*x + y*y + z*z);\nlet r_manhattan = max(x.abs(), max(y.abs(), z.abs()));\nlet ratio = r_manhattan / r_euclidean;\noutput(\"out\", s.remap(x / ratio, y / ratio, z / ratio));",
+        "inputs": {
+          "shape": "volume"
+        }
+      },
+      "1": {
+        "name": "volume",
+        "script": "let s = input(\"shape\");\noutput(\"out\", intersection(s, s.remap(y, z, x), s.remap(z, x, y)))",
+        "inputs": {
+          "shape": "cross_section"
+        }
+      },
+      "3": {
+        "name": "slice",
+        "script": "let s = input(\"shape\");\nlet d = input(\"offset\");\noutput(\"out\", intersection(s, x + y + z + d));",
+        "inputs": {
+          "shape": "volume",
+          "offset": "0"
+        }
+      },
+      "0": {
+        "name": "cross_section",
+        "script": "fn recurse(x, y, z, depth) {\n    let r = ((x + 1) % 2 - 1).abs();\n    let base = intersection(r, r.remap(y, x, z)) - 1/3.;\n    let out = base;\n    for i in 0..depth {\n        out = union(base, out.remap(x * 3, y * 3, z))\n    }\n    out\n}\n\nlet d = input(\"depth\");\nlet square = intersection(x.abs() - 1, y.abs() - 1);\nlet xy = difference(square, recurse(x, y, z, d));\n\noutput(\"xy\", xy);",
+        "inputs": {
+          "depth": "3"
+        }
+      }
+    }
+  },
+  "views": {
+    "3": {
+      "View3": {
+        "mode": "Shaded",
+        "center": [
+          -0.021503806,
+          0.04535556,
+          0.04886222
+        ],
+        "scale": 1.635804,
+        "pitch": 0.8945539,
+        "yaw": 2.8991888,
+        "width": 1243,
+        "height": 838,
+        "depth": 1243
+      }
+    },
+    "1": {
+      "View3": {
+        "mode": "Shaded",
+        "center": [
+          -0.826403,
+          -1.1981838,
+          0.8109609
+        ],
+        "scale": 1.7171324,
+        "pitch": 1.0317484,
+        "yaw": -0.6074574,
+        "width": 1242,
+        "height": 838,
+        "depth": 1242
+      }
+    },
+    "2": {
+      "View3": {
+        "mode": "Shaded",
+        "center": [
+          -0.16051745,
+          -0.0949533,
+          -0.023915172
+        ],
+        "scale": 1.1728344,
+        "pitch": 0.97334886,
+        "yaw": 0.271147,
+        "width": 1243,
+        "height": 838,
+        "depth": 1243
+      }
+    },
+    "0": {
+      "View2": {
+        "mode": "Sdf",
+        "center": [
+          0.060395233,
+          -0.01671885
+        ],
+        "scale": 1.265756,
+        "width": 2487,
+        "height": 823
+      }
+    }
+  },
+  "dock": {
+    "surfaces": [
+      {
+        "Main": {
+          "nodes": [
+            {
+              "Horizontal": {
+                "rect": {
+                  "min": {
+                    "x": 268.34375,
+                    "y": 29.0
+                  },
+                  "max": {
+                    "x": 1512.0,
+                    "y": 916.0
+                  }
+                },
+                "fraction": 0.5,
+                "fully_collapsed": false,
+                "collapsed_leaf_count": 0
+              }
+            },
+            {
+              "Vertical": {
+                "rect": {
+                  "min": {
+                    "x": 268.34375,
+                    "y": 29.0
+                  },
+                  "max": {
+                    "x": 889.5,
+                    "y": 916.0
+                  }
+                },
+                "fraction": 0.5,
+                "fully_collapsed": false,
+                "collapsed_leaf_count": 0
+              }
+            },
+            {
+              "Vertical": {
+                "rect": {
+                  "min": {
+                    "x": 890.5,
+                    "y": 29.0
+                  },
+                  "max": {
+                    "x": 1512.0,
+                    "y": 916.0
+                  }
+                },
+                "fraction": 0.5,
+                "fully_collapsed": false,
+                "collapsed_leaf_count": 0
+              }
+            },
+            {
+              "Leaf": {
+                "rect": {
+                  "min": {
+                    "x": 268.34375,
+                    "y": 29.0
+                  },
+                  "max": {
+                    "x": 889.5,
+                    "y": 472.0
+                  }
+                },
+                "viewport": {
+                  "min": {
+                    "x": 268.34375,
+                    "y": 53.0
+                  },
+                  "max": {
+                    "x": 889.5,
+                    "y": 472.0
+                  }
+                },
+                "tabs": [
+                  {
+                    "index": 0,
+                    "mode": "Script"
+                  }
+                ],
+                "active": 0,
+                "scroll": 0.0,
+                "collapsed": false
+              }
+            },
+            {
+              "Leaf": {
+                "rect": {
+                  "min": {
+                    "x": 268.34375,
+                    "y": 473.0
+                  },
+                  "max": {
+                    "x": 889.5,
+                    "y": 916.0
+                  }
+                },
+                "viewport": {
+                  "min": {
+                    "x": 268.34375,
+                    "y": 497.0
+                  },
+                  "max": {
+                    "x": 889.5,
+                    "y": 916.0
+                  }
+                },
+                "tabs": [
+                  {
+                    "index": 1,
+                    "mode": "View"
+                  }
+                ],
+                "active": 0,
+                "scroll": 0.0,
+                "collapsed": false
+              }
+            },
+            {
+              "Leaf": {
+                "rect": {
+                  "min": {
+                    "x": 890.5,
+                    "y": 29.0
+                  },
+                  "max": {
+                    "x": 1512.0,
+                    "y": 472.0
+                  }
+                },
+                "viewport": {
+                  "min": {
+                    "x": 890.5,
+                    "y": 53.0
+                  },
+                  "max": {
+                    "x": 1512.0,
+                    "y": 472.0
+                  }
+                },
+                "tabs": [
+                  {
+                    "index": 3,
+                    "mode": "View"
+                  }
+                ],
+                "active": 0,
+                "scroll": 0.0,
+                "collapsed": false
+              }
+            },
+            {
+              "Leaf": {
+                "rect": {
+                  "min": {
+                    "x": 890.5,
+                    "y": 473.0
+                  },
+                  "max": {
+                    "x": 1512.0,
+                    "y": 916.0
+                  }
+                },
+                "viewport": {
+                  "min": {
+                    "x": 890.5,
+                    "y": 497.0
+                  },
+                  "max": {
+                    "x": 1512.0,
+                    "y": 916.0
+                  }
+                },
+                "tabs": [
+                  {
+                    "index": 2,
+                    "mode": "View"
+                  }
+                ],
+                "active": 0,
+                "scroll": 0.0,
+                "collapsed": false
+              }
+            },
+            "Empty",
+            "Empty",
+            "Empty",
+            "Empty",
+            "Empty",
+            "Empty",
+            "Empty",
+            "Empty"
+          ],
+          "focused_node": 5,
+          "collapsed": false,
+          "collapsed_leaf_count": 0
+        }
+      }
+    ],
+    "focused_surface": 0,
+    "translations": {
+      "tab_context_menu": {
+        "close_button": "Close",
+        "eject_button": "Eject"
+      },
+      "leaf": {
+        "close_button_disabled_tooltip": "This leaf contains non-closable tabs.",
+        "close_all_button": "Close window",
+        "close_all_button_menu_hint": "Right click to close this window.",
+        "close_all_button_modifier_hint": "Press modifier keys (Shift by default) to close this window.",
+        "close_all_button_modifier_menu_hint": "Press modifier keys (Shift by default) or right click to close this window.",
+        "close_all_button_disabled_tooltip": "This window contains non-closable tabs.",
+        "minimize_button": "Minimize window",
+        "minimize_button_menu_hint": "Right click to minimize this window.",
+        "minimize_button_modifier_hint": "Press modifier keys (Shift by default) to minimize this window.",
+        "minimize_button_modifier_menu_hint": "Press modifier keys (Shift by default) or right click to minimize this window."
+      }
+    }
+  }
+}
