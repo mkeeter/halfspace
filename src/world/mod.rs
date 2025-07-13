@@ -373,6 +373,10 @@ impl World {
                 continue;
             };
             b.data = ob.data;
+            b.inputs.retain(|k, _| ob.inputs.contains_key(k));
+            for (k, i) in ob.inputs {
+                b.inputs.entry(k).or_insert(i);
+            }
         }
     }
 }
