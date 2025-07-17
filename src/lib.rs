@@ -379,6 +379,7 @@ enum Modal {
         name: String,
     },
     WaitForLoad,
+    About,
 }
 
 impl std::fmt::Debug for Modal {
@@ -407,6 +408,7 @@ impl std::fmt::Debug for Modal {
                 .field("files", &"..")
                 .finish(),
             Modal::WaitForLoad => f.debug_struct("WaitForLoad").finish(),
+            Modal::About => f.debug_struct("About").finish(),
         }
     }
 }
@@ -683,6 +685,12 @@ impl App {
                     ui.close_menu();
                 }
             });
+            ui.menu_button("Help", |ui| {
+                if ui.button("\u{eb32} About").clicked() {
+                    self.on_about();
+                    ui.close_menu();
+                }
+            });
             if cfg!(target_arch = "wasm32") || self.debug {
                 ui.with_layout(
                     egui::Layout::right_to_left(egui::Align::Center),
@@ -765,8 +773,10 @@ impl App {
                 | Modal::Download { .. }
                 | Modal::SaveLocal { .. }
                 | Modal::OpenLocal { .. }
+                | Modal::About
         ) && escape_pressed)
-            || (matches!(modal, Modal::Error { .. }) && enter_pressed)
+            || (matches!(modal, Modal::Error { .. } | Modal::About)
+                && enter_pressed)
         {
             self.modal = None;
             return;
@@ -1090,6 +1100,37 @@ impl App {
             Modal::WaitForLoad => {
                 // Nothing to do here, just block the screen
             }
+            Modal::About => {
+                draw_modal_window(ctx, "About", dialog_size, |ui| {
+                    ui.add_space(5.0);
+                    use git_version::git_version;
+                    const VERSION: &str = git_version!(
+                        prefix = "git:",
+                        cargo_prefix = "cargo:",
+                        fallback = "unknown"
+                    );
+                    ui.horizontal(|ui| {
+                        ui.label("Version: ");
+                        ui.hyperlink_to(
+                            egui::RichText::new(VERSION).underline(),
+                            format!(
+                                "https://github.com/mkeeter/halfspace\
+                                /commit/{}",
+                                VERSION
+                                    .trim_end_matches("-modified")
+                                    .trim_start_matches("git:")
+                                    .trim_start_matches("cargo:")
+                            ),
+                        );
+                    });
+                    ui.add_space(5.0);
+                    ui.vertical_centered(|ui| {
+                        if ui.button("Okay").clicked() {
+                            self.modal = None;
+                        }
+                    });
+                });
+            }
         };
     }
 
@@ -1229,6 +1270,14 @@ impl App {
         } else {
             // XXX show a dialog or something?
             warn!("no redo available");
+        }
+    }
+
+    fn on_about(&mut self) {
+        if self.modal.is_some() {
+            warn!("ignoring about while modal is active");
+        } else {
+            self.modal = Some(Modal::About);
         }
     }
 

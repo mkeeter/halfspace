@@ -26,6 +26,7 @@ egui_dock = { git = "https://github.com/mkeeter/egui_dock", features = ["serde"]
 egui_extras = { git = "https://github.com/mkeeter/egui", features = ["syntect"], branch = "custom-syntect-settings-0.31.1-backport" }
 facet = "0.27.14"
 fidget = { git = "https://github.com/mkeeter/fidget" }
+git-version = "0.3.9"
 heck = "0.5"
 log = "0.4.27"
 nalgebra = "0.33.2"
