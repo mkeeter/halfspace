@@ -250,8 +250,8 @@ impl MessageReceiver {
         }
     }
     fn try_recv(&self) -> Option<Message> {
-        while let Ok((m, gen)) = self.receiver.try_recv() {
-            if gen.is_none() || gen == Some(self.generation) {
+        while let Ok((m, generation)) = self.receiver.try_recv() {
+            if generation.is_none() || generation == Some(self.generation) {
                 return Some(m);
             }
         }

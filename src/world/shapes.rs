@@ -2,8 +2,9 @@
 
 use facet::Facet;
 use fidget::shapes::{
-    types::{Vec2, Vec3, Vec4},
-    visit_shapes, ShapeVisitor,
+    ShapeVisitor,
+    types::{Type, Vec2, Vec3, Vec4},
+    visit_shapes,
 };
 use heck::ToSnakeCase;
 use log::warn;
@@ -42,6 +43,11 @@ pub enum ShapeCategory {
     Fidget,
 }
 
+pub struct ShapeInput {
+    pub ty: Option<Type>,
+    pub text: String,
+}
+
 pub struct ShapeDefinition {
     /// Name of the shape type (typically capitalized)
     pub name: String,
@@ -50,7 +56,7 @@ pub struct ShapeDefinition {
     pub script: String,
 
     /// Inputs to populate when building this shape as a block
-    pub inputs: HashMap<String, String>,
+    pub inputs: HashMap<String, ShapeInput>,
 
     /// Category of shape
     ///
@@ -80,7 +86,7 @@ impl ShapeVisitor for Visitor {
         let mut script = format!(
             "// auto-generated script for fidget::shapes::{shape_name}\n"
         );
-        let mut inputs: HashMap<String, String> = HashMap::new();
+        let mut inputs: HashMap<String, _> = HashMap::new();
         for f in s.fields {
             let field_name = f.name;
             let std::collections::hash_map::Entry::Vacant(i) =
@@ -89,7 +95,7 @@ impl ShapeVisitor for Visitor {
                 panic!("duplicate field name {field_name} in {shape_name}")
             };
 
-            i.insert(get_field_string(f));
+            i.insert(get_input_field(f));
             script += "\n";
             for line in f.doc {
                 script += &format!("// {line}\n");
@@ -116,20 +122,22 @@ impl ShapeVisitor for Visitor {
     }
 }
 
-/// For a field, get a reasonable default string
+/// For a field, get a [`ShapeInput`]
 ///
 /// If the field has a default, then build the default object and use it to
 /// generate the string; otherwise fall back to a hard-coded per-type string.
-fn get_field_string(f: &facet::Field) -> String {
+fn get_input_field(f: &facet::Field) -> ShapeInput {
     // Same set of types as `fidget::shapes::Type`
     let s =
         get_field_as::<Vec2>(f, |v| format!("[{}, {}]", v.x, v.y), "[0, 0]")
+            .map(|s| (Type::Vec2, s))
             .or_else(|| {
                 get_field_as::<Vec3>(
                     f,
                     |v| format!("[{}, {}, {}]", v.x, v.y, v.z),
                     "[0, 0, 0]",
                 )
+                .map(|s| (Type::Vec3, s))
             })
             .or_else(|| {
                 get_field_as::<Vec4>(
@@ -137,8 +145,12 @@ fn get_field_string(f: &facet::Field) -> String {
                     |v| format!("[{}, {}, {}, {}]", v.x, v.y, v.z, v.w),
                     "[0, 0, 0, 0]",
                 )
+                .map(|s| (Type::Vec4, s))
             })
-            .or_else(|| get_field_as::<f64>(f, |v| v.to_string(), "0"))
+            .or_else(|| {
+                get_field_as::<f64>(f, |v| v.to_string(), "0")
+                    .map(|s| (Type::Float, s))
+            })
             .or_else(|| {
                 get_field_as::<fidget::context::Tree>(
                     f,
@@ -148,6 +160,7 @@ fn get_field_string(f: &facet::Field) -> String {
                     },
                     "",
                 )
+                .map(|s| (Type::Tree, s))
             })
             .or_else(|| {
                 get_field_as::<Vec<fidget::context::Tree>>(
@@ -158,11 +171,16 @@ fn get_field_string(f: &facet::Field) -> String {
                     },
                     "[]",
                 )
+                .map(|s| (Type::VecTree, s))
             });
     if s.is_none() {
         warn!("unknown field type '{}'", f.shape().type_identifier);
     }
-    s.unwrap_or_default() // fall back to empty string
+    s.map(|(ty, text)| ShapeInput { ty: Some(ty), text })
+        .unwrap_or_else(|| ShapeInput {
+            ty: None,
+            text: String::new(), // fall back to empty string
+        })
 }
 
 fn get_field_as<T: Facet<'static>>(
@@ -197,9 +215,11 @@ mod test {
         let sphere = s.shapes.iter().find(|s| s.name == "Sphere").unwrap();
         assert_eq!(sphere.name, "Sphere");
         let r = &sphere.inputs["radius"];
-        assert_eq!(r, "1");
+        assert_eq!(r.ty, Some(Type::Float));
+        assert_eq!(r.text, "1");
         let center = &sphere.inputs["center"];
-        assert_eq!(center, "[0, 0, 0]");
+        assert_eq!(center.ty, Some(Type::Vec3));
+        assert_eq!(center.text, "[0, 0, 0]");
     }
 
     #[test]
@@ -208,8 +228,10 @@ mod test {
         let scale = s.shapes.iter().find(|s| s.name == "Scale").unwrap();
         assert_eq!(scale.name, "Scale");
         let shape = &scale.inputs["shape"];
-        assert_eq!(shape, "");
+        assert_eq!(shape.ty, Some(Type::Tree));
+        assert_eq!(shape.text, "");
         let scale = &scale.inputs["scale"];
-        assert_eq!(scale, "[1, 1, 1]");
+        assert_eq!(scale.ty, Some(Type::Vec3));
+        assert_eq!(scale.text, "[1, 1, 1]");
     }
 }

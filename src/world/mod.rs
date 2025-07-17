@@ -213,15 +213,62 @@ impl World {
         let index = BlockIndex::new(self.next_index);
         self.next_index += 1;
         let name = self.next_name_with_prefix(&s.name.to_snake_case());
+
+        // Special casing: if the shape has a single tree input and our last
+        // block has a single tree output, then we pre-populate the input.
+        let mut iter = s.inputs.iter().filter(|(_name, i)| {
+            matches!(
+                i.ty,
+                Some(
+                    fidget::shapes::types::Type::Tree
+                        | fidget::shapes::types::Type::VecTree
+                )
+            ) && i.text.is_empty()
+        });
+        let tree_input = iter.next().filter(|_| iter.next().is_none());
+        let mut last_tree = None;
+        if let Some(i) = self.order.last()
+            && let Some(data) = &self.blocks[i].data
+        {
+            let mut output_count = 0;
+            let mut has_tree = false;
+            for v in data.io_values.iter().flat_map(|(_name, i)| {
+                if let IoValue::Output { value, .. } = i {
+                    Some(value)
+                } else {
+                    None
+                }
+            }) {
+                output_count += 1;
+                if v.clone().try_cast::<fidget::context::Tree>().is_some() {
+                    has_tree = true;
+                }
+            }
+            if has_tree && output_count == 1 {
+                last_tree = Some(&self.blocks[i].name);
+            }
+        }
+        let mut inputs = s
+            .inputs
+            .iter()
+            .map(|(name, v)| (name.clone(), v.text.clone()))
+            .collect::<HashMap<_, _>>();
+        if let Some(tree_input) = tree_input
+            && let Some(last_tree) = last_tree
+        {
+            *inputs.get_mut(tree_input.0).unwrap() = last_tree.to_owned();
+        }
+
         self.blocks.insert(
             index,
             Block {
                 name,
                 script: s.script.clone(),
-                inputs: s.inputs.clone(),
+                inputs,
                 data: None,
             },
         );
+
         self.order.push(index);
         true
     }
