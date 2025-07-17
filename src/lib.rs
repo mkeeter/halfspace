@@ -1101,35 +1101,42 @@ impl App {
                 // Nothing to do here, just block the screen
             }
             Modal::About => {
-                draw_modal_window(ctx, "About", dialog_size, |ui| {
-                    ui.add_space(5.0);
-                    use git_version::git_version;
-                    const VERSION: &str = git_version!(
-                        prefix = "git:",
-                        cargo_prefix = "cargo:",
-                        fallback = "unknown"
-                    );
-                    ui.horizontal(|ui| {
-                        ui.label("Version: ");
-                        ui.hyperlink_to(
-                            egui::RichText::new(VERSION).underline(),
-                            format!(
-                                "https://github.com/mkeeter/halfspace\
-                                /commit/{}",
-                                VERSION
-                                    .trim_end_matches("-modified")
-                                    .trim_start_matches("git:")
-                                    .trim_start_matches("cargo:")
-                            ),
+                egui::Window::new("About")
+                    .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                    .collapsible(false)
+                    .resizable(false)
+                    .default_width(0.0)
+                    .order(egui::Order::Foreground)
+                    .frame(egui::Frame::popup(&ctx.style()))
+                    .show(ctx, |ui| {
+                        ui.add_space(5.0);
+                        use git_version::git_version;
+                        const VERSION: &str = git_version!(
+                            prefix = "git:",
+                            cargo_prefix = "cargo:",
+                            fallback = "unknown"
                         );
+                        ui.horizontal(|ui| {
+                            ui.label("Version: ");
+                            ui.hyperlink_to(
+                                egui::RichText::new(VERSION).underline(),
+                                format!(
+                                    "https://github.com/mkeeter/halfspace\
+                                /commit/{}",
+                                    VERSION
+                                        .trim_end_matches("-modified")
+                                        .trim_start_matches("git:")
+                                        .trim_start_matches("cargo:")
+                                ),
+                            );
+                        });
+                        ui.add_space(5.0);
+                        ui.vertical_centered(|ui| {
+                            if ui.button("Okay").clicked() {
+                                self.modal = None;
+                            }
+                        });
                     });
-                    ui.add_space(5.0);
-                    ui.vertical_centered(|ui| {
-                        if ui.button("Okay").clicked() {
-                            self.modal = None;
-                        }
-                    });
-                });
             }
         };
     }
