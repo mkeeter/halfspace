@@ -8,6 +8,16 @@ use std::collections::HashMap;
 pub const MAJOR_VERSION: usize = 1;
 pub const MINOR_VERSION: usize = 3;
 
+pub struct Reader;
+impl super::Reader for Reader {
+    type Tab = Tab;
+    type WorldState = WorldState;
+    type Metadata = Metadata;
+    type ViewState = ViewState;
+    const MAJOR_VERSION: usize = MAJOR_VERSION;
+    const MINOR_VERSION: usize = MINOR_VERSION;
+}
+
 /// Metadata associated with the file
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Metadata {

@@ -6,7 +6,7 @@ use std::{
 use fidget::context::Tree;
 
 pub use crate::state::BlockIndex;
-use crate::state::{BlockState, WorldState};
+use crate::state::{BlockState, ScriptState, WorldState};
 use facet::Facet;
 use heck::ToSnakeCase;
 
@@ -15,36 +15,60 @@ mod shapes;
 pub use scene::{Color, Drawable, Scene};
 pub use shapes::ShapeLibrary;
 
-pub struct Block {
+pub enum Block {
+    Script(ScriptBlock),
+}
+
+impl Block {
+    pub fn name(&self) -> &str {
+        match self {
+            Block::Script(s) => s.name.as_str(),
+        }
+    }
+
+    pub fn has_view(&self) -> bool {
+        match self {
+            Block::Script(s) => {
+                s.data.as_ref().is_some_and(|s| s.view.is_some())
+            }
+        }
+    }
+}
+
+pub struct ScriptBlock {
     pub name: String,
     pub script: String,
 
-    pub data: Option<BlockData>,
+    pub data: Option<ScriptData>,
 
     /// Map from input name to expression
     ///
-    /// This does not live in the [`BlockData`] because it must be persistent;
+    /// This does not live in the [`ScriptData`] because it must be persistent;
     /// the resulting values _are_ stored in the block state.
     pub inputs: HashMap<String, String>,
 }
 
 impl From<BlockState> for Block {
     fn from(value: BlockState) -> Self {
-        Self {
-            name: value.name,
-            script: value.script,
-            inputs: value.inputs,
-            data: None,
+        match value {
+            BlockState::Script(value) => Self::Script(ScriptBlock {
+                name: value.name,
+                script: value.script,
+                inputs: value.inputs,
+                data: None,
+            }),
         }
     }
 }
 
 impl From<&Block> for BlockState {
     fn from(b: &Block) -> BlockState {
-        BlockState {
-            name: b.name.clone(),
-            script: b.script.clone(),
-            inputs: b.inputs.clone(),
+        match b {
+            Block::Script(b) => BlockState::Script(ScriptState {
+                name: b.name.clone(),
+                script: b.script.clone(),
+                inputs: b.inputs.clone(),
+            }),
         }
     }
 }
@@ -54,12 +78,18 @@ impl Block {
     ///
     /// A block with no state is _invalid_, i.e. returns `false`
     pub fn is_valid(&self) -> bool {
-        self.data.as_ref().is_some_and(|s| s.error.is_none())
+        match self {
+            Block::Script(s) => {
+                s.data.as_ref().is_some_and(|s| s.error.is_none())
+            }
+        }
     }
 
     /// Gets the `BlockView`, if the block is free of errors
     pub fn get_view(&self) -> Option<&BlockView> {
-        self.data.as_ref().and_then(|s| s.view.as_ref())
+        match self {
+            Block::Script(s) => s.data.as_ref().and_then(|s| s.view.as_ref()),
+        }
     }
 }
 
@@ -112,11 +142,11 @@ pub struct BlockView {
     pub scene: scene::Scene,
 }
 
-/// Transient block data (e.g. evaluation results)
+/// Transient script data (e.g. evaluation results)
 ///
 /// This data is _not_ saved or serialized; it can be recalculated on-demand
 /// from the world's state.
-pub struct BlockData {
+pub struct ScriptData {
     /// Output from `print` calls in the script
     pub stdout: String,
     /// Output from `debug` calls in the script, pinned to specific lines
@@ -143,7 +173,7 @@ impl From<&World> for WorldState {
 }
 
 impl From<WorldState> for World {
-    /// Rebuilds the entire world, populating [`BlockData`] for each block
+    /// Rebuilds the entire world, populating data for each block
     fn from(state: WorldState) -> Self {
         let mut world = World {
             next_index: state.next_index,
@@ -168,9 +198,13 @@ impl PartialEq<WorldState> for World {
                 let Some(other) = other.blocks.get(i) else {
                     return false;
                 };
-                b.name == other.name
-                    && b.script == other.script
-                    && b.inputs == other.inputs
+                match (b, other) {
+                    (Block::Script(b), BlockState::Script(other)) => {
+                        b.name == other.name
+                            && b.script == other.script
+                            && b.inputs == other.inputs
+                    }
+                }
             })
     }
 }
@@ -200,7 +234,7 @@ impl World {
         let names = self
             .blocks
             .values()
-            .map(|b| b.name.as_str())
+            .map(|b| b.name())
             .collect::<HashSet<_>>();
 
         std::iter::once(s.to_owned())
@@ -225,7 +259,11 @@ impl World {
         let tree_input = iter.next().filter(|_| iter.next().is_none());
         let mut last_tree = None;
         if let Some(i) = self.order.last()
-            && let Some(data) = &self.blocks[i].data
+            && let Block::Script(ScriptBlock {
+                name,
+                data: Some(data),
+                ..
+            }) = &self.blocks[i]
         {
             let mut output_count = 0;
             let mut has_tree = false;
@@ -242,7 +280,7 @@ impl World {
                 }
             }
             if has_tree && output_count == 1 {
-                last_tree = Some(&self.blocks[i].name);
+                last_tree = Some(name);
             }
         }
         let mut inputs = s
@@ -258,12 +296,12 @@ impl World {
 
         self.blocks.insert(
             index,
-            Block {
+            Block::Script(ScriptBlock {
                 name,
                 script: s.script.clone(),
                 inputs,
                 data: None,
-            },
+            }),
         );
 
         self.order.push(index);
@@ -293,7 +331,20 @@ impl World {
         name_map: &mut HashMap<String, BlockIndex>,
     ) -> rhai::Scope<'static> {
         let block = self.blocks.get_mut(&i).unwrap();
-        block.data = Some(BlockData {
+        match block {
+            Block::Script(s) => {
+                Self::rebuild_script_block(i, s, input_scope, name_map)
+            }
+        }
+    }
+
+    fn rebuild_script_block(
+        i: BlockIndex,
+        block: &mut ScriptBlock,
+        input_scope: rhai::Scope<'static>,
+        name_map: &mut HashMap<String, BlockIndex>,
+    ) -> rhai::Scope<'static> {
+        block.data = Some(ScriptData {
             stdout: String::new(),
             error: None,
             debug: HashMap::new(),
@@ -416,10 +467,14 @@ impl World {
             let Some(ob) = other.blocks.remove(i) else {
                 continue;
             };
-            b.data = ob.data;
-            b.inputs.retain(|k, _| ob.inputs.contains_key(k));
-            for (k, i) in ob.inputs {
-                b.inputs.entry(k).or_insert(i);
+            match (b, ob) {
+                (Block::Script(b), Block::Script(ob)) => {
+                    b.data = ob.data;
+                    b.inputs.retain(|k, _| ob.inputs.contains_key(k));
+                    for (k, i) in ob.inputs {
+                        b.inputs.entry(k).or_insert(i);
+                    }
+                }
             }
         }
     }

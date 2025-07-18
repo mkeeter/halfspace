@@ -30,8 +30,9 @@ use std::collections::HashMap;
 
 mod undo;
 mod v1;
+mod v2;
 pub use undo::Undo;
-pub use v1::*;
+pub use v2::*;
 
 /// Unique index for blocks
 ///
@@ -62,6 +63,15 @@ pub enum ReadError {
 
     #[error("bad tag: expected {expected}, got {actual}")]
     BadTag { expected: String, actual: String },
+
+    #[error(
+        "bad major version: expected one of {expected_major:?}, \
+         got {actual_major}"
+    )]
+    BadMajorVersion {
+        expected_major: &'static [usize],
+        actual_major: usize,
+    },
 
     #[error(
         "file is too new: our version is {expected_major}.{expected_minor}, \
@@ -105,6 +115,26 @@ impl Default for AppState {
     }
 }
 
+trait Reader {
+    type WorldState: serde::de::DeserializeOwned;
+    type Metadata: serde::de::DeserializeOwned + Default;
+    type ViewState: serde::de::DeserializeOwned;
+    type Tab: serde::de::DeserializeOwned;
+    const MAJOR_VERSION: usize;
+    const MINOR_VERSION: usize;
+}
+
+trait MigrateFrom<R: Reader>: Reader + Sized {
+    fn migrate(r: ReadData<R>) -> ReadData<Self>;
+}
+
+struct ReadData<R: Reader> {
+    meta: R::Metadata,
+    views: HashMap<BlockIndex, R::ViewState>,
+    world: R::WorldState,
+    dock: egui_dock::DockState<R::Tab>,
+}
+
 impl AppState {
     pub fn new(
         world: &crate::World,
@@ -131,23 +161,50 @@ impl AppState {
 
     pub fn deserialize(s: &str) -> Result<Self, ReadError> {
         let raw: RawAppState = serde_json::from_str(s)?;
-        let too_new = || ReadError::TooNew {
-            expected_major: MAJOR_VERSION,
-            actual_major: raw.major,
-            expected_minor: MINOR_VERSION,
-            actual_minor: raw.minor,
-        };
         if raw.tag != TAG {
             return Err(ReadError::BadTag {
                 expected: TAG.to_owned(),
                 actual: raw.tag,
             });
         }
-        if raw.major > MAJOR_VERSION {
-            return Err(too_new());
-        }
-        let perhaps_too_new = raw.minor > MINOR_VERSION;
-        let world: WorldState =
+        let data = match raw.major {
+            v1::MAJOR_VERSION => {
+                let data = Self::deserialize_from_reader::<v1::Reader>(raw)?;
+                v2::Reader::migrate(data)
+            }
+            v2::MAJOR_VERSION => {
+                Self::deserialize_from_reader::<v2::Reader>(raw)?
+            }
+            i => {
+                return Err(ReadError::BadMajorVersion {
+                    actual_major: i,
+                    expected_major: &[v1::MAJOR_VERSION, v2::MAJOR_VERSION],
+                });
+            }
+        };
+
+        Ok(Self {
+            tag: TAG.to_owned(),
+            major: MAJOR_VERSION,
+            minor: MINOR_VERSION,
+            meta: data.meta,
+            views: data.views,
+            world: data.world,
+            dock: data.dock,
+        })
+    }
+
+    fn deserialize_from_reader<R: Reader>(
+        raw: RawAppState,
+    ) -> Result<ReadData<R>, ReadError> {
+        let too_new = || ReadError::TooNew {
+            expected_major: R::MAJOR_VERSION,
+            actual_major: raw.major,
+            expected_minor: R::MINOR_VERSION,
+            actual_minor: raw.minor,
+        };
+        let perhaps_too_new = raw.minor > R::MINOR_VERSION;
+        let world: R::WorldState =
             serde_json::from_value(raw.world).map_err(|e| {
                 if perhaps_too_new {
                     too_new()
@@ -155,7 +212,7 @@ impl AppState {
                     ReadError::from(e)
                 }
             })?;
-        let meta: Metadata = raw
+        let meta: R::Metadata = raw
             .meta
             .map(|r| {
                 serde_json::from_value(r).map_err(|e| {
@@ -168,7 +225,7 @@ impl AppState {
             })
             .transpose()?
             .unwrap_or_default();
-        let mut views: HashMap<BlockIndex, ViewState> =
+        let mut views: HashMap<BlockIndex, R::ViewState> =
             serde_json::from_value(raw.views).map_err(|e| {
                 if perhaps_too_new {
                     too_new()
@@ -184,10 +241,7 @@ impl AppState {
                 egui_dock::DockState::new(vec![])
             }
         };
-        Ok(Self {
-            tag: raw.tag,
-            major: raw.major,
-            minor: raw.minor,
+        Ok(ReadData {
             meta,
             views,
             world,

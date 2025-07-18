@@ -3,9 +3,11 @@ use std::collections::HashMap;
 
 pub use crate::state::{Tab, TabMode};
 use crate::{
-    view::{self, ViewCanvas, ViewData, ViewImage, ViewMode2, ViewMode3},
-    world::{Block, BlockError, BlockIndex, IoValue, NameError, World},
     BlockResponse, MessageSender, ViewResponse,
+    view::{self, ViewCanvas, ViewData, ViewImage, ViewMode2, ViewMode3},
+    world::{
+        Block, BlockError, BlockIndex, IoValue, NameError, ScriptBlock, World,
+    },
 };
 use fidget::shapes::types::{Vec2, Vec3};
 
@@ -43,7 +45,7 @@ impl<'a> egui_dock::TabViewer for WorldView<'a> {
     }
 
     fn title(&mut self, tab: &mut Tab) -> egui::WidgetText {
-        let mut name = self.world[tab.index].name.to_string();
+        let mut name = self.world[tab.index].name().to_string();
         match tab.mode {
             TabMode::Script => (),
             TabMode::View => name += " (view)",
@@ -307,7 +309,7 @@ impl<'a> WorldView<'a> {
                                  image in this mode",
                             ),
                         )
-                    }
+                    };
             }
         }
 
@@ -364,7 +366,7 @@ impl<'a> WorldView<'a> {
         ui: &mut egui::Ui,
         index: BlockIndex,
     ) -> ViewResponse {
-        let block = &mut self.world[index];
+        let Block::Script(block) = &mut self.world[index];
         let mut out = ViewResponse::empty();
         let theme =
             egui_extras::syntax_highlighting::CodeTheme::from_style(ui.style());
@@ -442,7 +444,11 @@ pub struct BlockUiFlags {
     pub is_view_open: Option<bool>,
 }
 
-fn draw_line_numbers(ui: &mut egui::Ui, index: BlockIndex, block: &Block) {
+fn draw_line_numbers(
+    ui: &mut egui::Ui,
+    index: BlockIndex,
+    block: &ScriptBlock,
+) {
     let mut line_count = block.script.lines().count();
     if block.script.is_empty() || block.script.ends_with('\n') {
         line_count += 1;
@@ -559,8 +565,10 @@ pub fn draggable_block(
 ) -> BlockResponse {
     let mut response = BlockResponse::empty();
     let padding = ui.spacing().icon_width + ui.spacing().icon_spacing;
-    if block.data.as_ref().is_some_and(|s| !s.io_values.is_empty()) {
-        egui::collapsing_header::CollapsingState::load_with_default_open(
+    match block {
+        Block::Script(block) => {
+            if block.data.as_ref().is_some_and(|s| !s.io_values.is_empty()) {
+                egui::collapsing_header::CollapsingState::load_with_default_open(
             ui.ctx(),
             index.id(),
             true,
@@ -569,27 +577,30 @@ pub fn draggable_block(
             response = draggable_block_header(ui, index, block, flags, handle)
         })
         .body_unindented(|ui| {
-            if block_body(ui, index, block, mat) {
+            if script_block_body(ui, index, block, mat) {
                 response |= BlockResponse::CHANGED;
             }
             if !flags.is_last {
                 ui.separator();
             }
         });
-    } else {
-        ui.horizontal(|ui| {
-            ui.add_space(padding);
-            response = draggable_block_header(ui, index, block, flags, handle)
-        });
+            } else {
+                ui.horizontal(|ui| {
+                    ui.add_space(padding);
+                    response =
+                        draggable_block_header(ui, index, block, flags, handle)
+                });
+            }
+            response
+        }
     }
-    response
 }
 
 #[must_use]
-fn block_body(
+fn script_block_body(
     ui: &mut egui::Ui,
     index: BlockIndex,
-    block: &mut Block,
+    block: &mut ScriptBlock,
     mat: nalgebra::Matrix4<f32>,
 ) -> bool {
     let mut changed = false;
@@ -598,7 +609,7 @@ fn block_body(
     for (name, value) in &block_data.io_values {
         ui.horizontal(|ui| {
             ui.add_space(padding);
-            changed |= block_io(ui, index, block, name, value, mat);
+            changed |= script_block_io(ui, index, block, name, value, mat);
         });
     }
     block.data = Some(block_data);
@@ -607,10 +618,10 @@ fn block_body(
 
 /// Draws a field for a block input or output
 #[must_use]
-fn block_io(
+fn script_block_io(
     ui: &mut egui::Ui,
     index: BlockIndex,
-    block: &mut Block,
+    block: &mut ScriptBlock,
     name: &str,
     value: &IoValue,
     mat: nalgebra::Matrix4<f32>,
@@ -629,7 +640,8 @@ fn block_io(
             false
         }
         IoValue::Input(value) => {
-            block_io_input(ui, index, block, name, value, mat)
+            let s = block.inputs.get_mut(name).unwrap();
+            block_io_input(ui, index, s, name, value, mat)
         }
     }
 }
@@ -658,12 +670,11 @@ fn try_parse_vec3(s: &str) -> Option<Vec3> {
 fn block_io_input(
     ui: &mut egui::Ui,
     index: BlockIndex,
-    block: &mut Block,
+    s: &mut String,
     name: &str,
     value: &Result<rhai::Dynamic, String>,
     mat: nalgebra::Matrix4<f32>,
 ) -> bool {
-    let s = block.inputs.get_mut(name).unwrap();
     let input_id = index.id().with("input_edit").with(name);
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         if let Err(err) = &value {
@@ -704,7 +715,7 @@ fn block_io_input(
 fn draggable_block_header(
     ui: &mut egui::Ui,
     index: BlockIndex,
-    block: &mut Block,
+    block: &mut ScriptBlock,
     flags: BlockUiFlags,
     handle: egui_dnd::Handle,
 ) -> BlockResponse {
@@ -767,7 +778,7 @@ fn draggable_block_header(
         ui.with_layout(
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
-                if block_name(ui, index, block) {
+                if block_name(ui, index, &mut block.name) {
                     response |= BlockResponse::CHANGED;
                 }
             },
@@ -779,13 +790,13 @@ fn draggable_block_header(
 /// Draws the name of a block, editable with a double-click
 ///
 /// Returns `true` if the name has changed, `false` otherwise
-fn block_name(ui: &mut egui::Ui, index: BlockIndex, block: &mut Block) -> bool {
+fn block_name(ui: &mut egui::Ui, index: BlockIndex, name: &mut String) -> bool {
     let id = index.id();
     let mut changed = false;
     match ui.memory(|mem| mem.data.get_temp(id)) {
         Some(NameEdit { needs_focus }) => {
             let text_edit_id = egui::Id::new(index).with("name_edit");
-            let mut out = egui::TextEdit::singleline(&mut block.name)
+            let mut out = egui::TextEdit::singleline(name)
                 .id(text_edit_id)
                 .desired_width(f32::INFINITY)
                 .show(ui);
@@ -797,7 +808,7 @@ fn block_name(ui: &mut egui::Ui, index: BlockIndex, block: &mut Block) -> bool {
                 out.state.cursor.set_char_range(Some(
                     egui::text::CCursorRange::two(
                         egui::text::CCursor::new(0),
-                        egui::text::CCursor::new(block.name.len()),
+                        egui::text::CCursor::new(name.len()),
                     ),
                 ));
                 out.state.store(ui.ctx(), response.id)
@@ -815,10 +826,10 @@ fn block_name(ui: &mut egui::Ui, index: BlockIndex, block: &mut Block) -> bool {
             });
         }
         None => {
-            let (enabled, name) = if block.name.is_empty() {
+            let (enabled, name) = if name.is_empty() {
                 (false, "[empty]")
             } else {
-                (true, block.name.as_str())
+                (true, name.as_str())
             };
             let response = ui.add_enabled(
                 enabled,

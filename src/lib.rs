@@ -1489,8 +1489,7 @@ impl App {
                 // longer defines a view, then close the view.  We'll leave the
                 // view open if the block isn't valid, to prevent views from
                 // flicking in and out as a script is edited.
-                let block_defines_view =
-                    block.data.as_ref().is_some_and(|s| s.view.is_some());
+                let block_defines_view = block.has_view();
                 if tree.has_view() && block.is_valid() && !block_defines_view {
                     tree.close_view();
                 }
