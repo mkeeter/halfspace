@@ -3,7 +3,7 @@
 use facet::Facet;
 use fidget::shapes::{
     ShapeVisitor,
-    types::{Type, Vec2, Vec3, Vec4},
+    types::{Vec2, Vec3, Vec4},
     visit_shapes,
 };
 use heck::ToSnakeCase;
@@ -44,7 +44,7 @@ pub enum ShapeCategory {
 }
 
 pub struct ShapeInput {
-    pub ty: Option<Type>,
+    pub ty: Option<facet::ConstTypeId>,
     pub text: String,
 }
 
@@ -130,14 +130,12 @@ fn get_input_field(f: &facet::Field) -> ShapeInput {
     // Same set of types as `fidget::shapes::Type`
     let s =
         get_field_as::<Vec2>(f, |v| format!("[{}, {}]", v.x, v.y), "[0, 0]")
-            .map(|s| (Type::Vec2, s))
             .or_else(|| {
                 get_field_as::<Vec3>(
                     f,
                     |v| format!("[{}, {}, {}]", v.x, v.y, v.z),
                     "[0, 0, 0]",
                 )
-                .map(|s| (Type::Vec3, s))
             })
             .or_else(|| {
                 get_field_as::<Vec4>(
@@ -145,12 +143,8 @@ fn get_input_field(f: &facet::Field) -> ShapeInput {
                     |v| format!("[{}, {}, {}, {}]", v.x, v.y, v.z, v.w),
                     "[0, 0, 0, 0]",
                 )
-                .map(|s| (Type::Vec4, s))
             })
-            .or_else(|| {
-                get_field_as::<f64>(f, |v| v.to_string(), "0")
-                    .map(|s| (Type::Float, s))
-            })
+            .or_else(|| get_field_as::<f64>(f, |v| v.to_string(), "0"))
             .or_else(|| {
                 get_field_as::<fidget::context::Tree>(
                     f,
@@ -160,7 +154,6 @@ fn get_input_field(f: &facet::Field) -> ShapeInput {
                     },
                     "",
                 )
-                .map(|s| (Type::Tree, s))
             })
             .or_else(|| {
                 get_field_as::<Vec<fidget::context::Tree>>(
@@ -171,7 +164,17 @@ fn get_input_field(f: &facet::Field) -> ShapeInput {
                     },
                     "[]",
                 )
-                .map(|s| (Type::VecTree, s))
+            })
+            .or_else(|| {
+                get_field_as::<fidget::shapes::types::Plane>(
+                    f,
+                    |d| {
+                        println!("{d:?}");
+                        warn!("can't format Plane yet");
+                        "".to_owned()
+                    },
+                    "plane(\"yz\")",
+                )
             });
     if s.is_none() {
         warn!("unknown field type '{}'", f.shape().type_identifier);
@@ -187,19 +190,22 @@ fn get_field_as<T: Facet<'static>>(
     field: &facet::Field,
     formatter: fn(T) -> String,
     default: &str,
-) -> Option<String> {
+) -> Option<(facet::ConstTypeId, String)> {
     if field.shape().id == T::SHAPE.id {
-        Some(if let Some(df) = field.vtable.default_fn {
-            let mut v = std::mem::MaybeUninit::<T>::uninit();
-            let ptr = facet::PtrUninit::new(&mut v);
-            // SAFETY: `df` must be a builder for type `T`
-            unsafe { df(ptr) };
-            // SAFETY: `v` is initialized by `f`
-            let v = unsafe { v.assume_init() };
-            formatter(v)
-        } else {
-            default.to_owned()
-        })
+        Some((
+            T::SHAPE.id,
+            if let Some(df) = field.vtable.default_fn {
+                let mut v = std::mem::MaybeUninit::<T>::uninit();
+                let ptr = facet::PtrUninit::new(&mut v);
+                // SAFETY: `df` must be a builder for type `T`
+                unsafe { df(ptr) };
+                // SAFETY: `v` is initialized by `f`
+                let v = unsafe { v.assume_init() };
+                formatter(v)
+            } else {
+                default.to_owned()
+            },
+        ))
     } else {
         None
     }
@@ -215,10 +221,10 @@ mod test {
         let sphere = s.shapes.iter().find(|s| s.name == "Sphere").unwrap();
         assert_eq!(sphere.name, "Sphere");
         let r = &sphere.inputs["radius"];
-        assert_eq!(r.ty, Some(Type::Float));
+        assert_eq!(r.ty, Some(f64::SHAPE.id));
         assert_eq!(r.text, "1");
         let center = &sphere.inputs["center"];
-        assert_eq!(center.ty, Some(Type::Vec3));
+        assert_eq!(center.ty, Some(Vec3::SHAPE.id));
         assert_eq!(center.text, "[0, 0, 0]");
     }
 
@@ -228,10 +234,10 @@ mod test {
         let scale = s.shapes.iter().find(|s| s.name == "Scale").unwrap();
         assert_eq!(scale.name, "Scale");
         let shape = &scale.inputs["shape"];
-        assert_eq!(shape.ty, Some(Type::Tree));
+        assert_eq!(shape.ty, Some(fidget::context::Tree::SHAPE.id));
         assert_eq!(shape.text, "");
         let scale = &scale.inputs["scale"];
-        assert_eq!(scale.ty, Some(Type::Vec3));
+        assert_eq!(scale.ty, Some(Vec3::SHAPE.id));
         assert_eq!(scale.text, "[1, 1, 1]");
     }
 }

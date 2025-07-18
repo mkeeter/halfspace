@@ -7,6 +7,7 @@ use fidget::context::Tree;
 
 pub use crate::state::BlockIndex;
 use crate::state::{BlockState, WorldState};
+use facet::Facet;
 use heck::ToSnakeCase;
 
 mod scene;
@@ -217,13 +218,9 @@ impl World {
         // Special casing: if the shape has a single tree input and our last
         // block has a single tree output, then we pre-populate the input.
         let mut iter = s.inputs.iter().filter(|(_name, i)| {
-            matches!(
-                i.ty,
-                Some(
-                    fidget::shapes::types::Type::Tree
-                        | fidget::shapes::types::Type::VecTree
-                )
-            ) && i.text.is_empty()
+            i.ty.is_some_and(|ty| {
+                ty == Tree::SHAPE.id || ty == Vec::<Tree>::SHAPE.id
+            }) && i.text.is_empty()
         });
         let tree_input = iter.next().filter(|_| iter.next().is_none());
         let mut last_tree = None;
