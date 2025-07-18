@@ -6,7 +6,7 @@ use fidget::shapes::{
     types::{Vec2, Vec3, Vec4},
     visit_shapes,
 };
-use heck::ToSnakeCase;
+use heck::{ToSnakeCase, ToTitleCase};
 use log::warn;
 use std::collections::{HashMap, HashSet};
 
@@ -114,7 +114,7 @@ impl ShapeVisitor for Visitor {
             &format!("\nlet out = {}({obj});\n", shape_name.to_snake_case());
         script += "output(\"out\", out);";
         self.lib.shapes.push(ShapeDefinition {
-            name: shape_name.to_owned(),
+            name: shape_name.to_title_case(),
             script,
             inputs,
             category: ShapeCategory::Fidget,
