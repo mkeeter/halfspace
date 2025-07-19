@@ -1,5 +1,6 @@
 //! Image rendering
 use crate::{
+    BlockIndex, Message, MessageSender,
     view::{
         BitfieldImageData, BitfieldViewImage, DebugImageData, DebugViewImage,
         HeightmapImageData, HeightmapViewImage, SdfImageData, SdfViewImage,
@@ -7,7 +8,6 @@ use crate::{
         ViewMode3,
     },
     world::{Color, Scene},
-    BlockIndex, Message, MessageSender,
 };
 
 use fidget::{

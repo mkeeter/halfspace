@@ -387,7 +387,7 @@ impl<'a> WorldView<'a> {
                                 "rhai",
                                 self.syntax,
                             );
-                        layout_job.wrap.max_width = wrap_width;
+                        layout_job.wrap.max_width = f32::INFINITY;
                         ui.fonts(|f| f.layout_job(layout_job))
                     };
                 let r = ui.add(

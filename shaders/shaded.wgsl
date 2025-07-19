@@ -64,7 +64,10 @@ struct RgbaDepth {
 
 // Fragment shader
 @fragment
-fn fs_main(@location(0) tex_coords: vec2<f32>) -> RgbaDepth {
+fn fs_main(
+    @location(0) tex_coords: vec2<f32>,
+    @builtin(position) position: vec4<f32>
+) -> RgbaDepth {
     var ssao = textureSample(t_ssao, s_ssao, tex_coords);
     var pixel = textureSample(t_pixel, s_pixel, tex_coords);
     var depth = bitcast<u32>(pixel.r);
@@ -72,6 +75,8 @@ fn fs_main(@location(0) tex_coords: vec2<f32>) -> RgbaDepth {
     // If depth is 0, this pixel is transparent
     if (depth == 0u) {
         discard;
+    } else if (depth == uniforms.max_depth) {
+        return RgbaDepth(vec4(1.0, 1.0, 1.0, 1.0), 0.0);
     }
 
     // Pixel position (for lighting calculations)
