@@ -6,8 +6,7 @@ use crate::{
     BlockResponse, MessageSender, ViewResponse,
     view::{self, ViewCanvas, ViewData, ViewImage, ViewMode2, ViewMode3},
     world::{
-        Block, BlockError, BlockIndex, IoValue, NameError, ScriptBlock,
-        ValueBlock, World,
+        Block, BlockError, BlockIndex, IoValue, ScriptBlock, ValueBlock, World,
     },
 };
 use fidget::shapes::types::{Vec2, Vec3};
@@ -416,9 +415,11 @@ impl<'a> WorldView<'a> {
                         .desired_width(f32::INFINITY),
                 );
             }
-            if let Some(BlockError::EvalError(e)) = &block_data.error {
+            if let Some(e) = &block_data.error
+                && matches!(e, BlockError::Parse(..) | BlockError::Eval(..))
+            {
                 ui.label("Errors");
-                let mut text = e.message.clone();
+                let mut text = e.print_chain();
                 ui.scope(|ui| {
                     let vis = ui.visuals_mut();
                     vis.widgets.inactive = vis.widgets.active;
@@ -464,12 +465,10 @@ fn draw_line_numbers(
     let width = max_indent as f32
         * ui.text_style_height(&egui::TextStyle::Monospace)
         * 0.5;
-    let err_line = if let Some(BlockError::EvalError(e)) =
-        block.data.as_ref().and_then(|e| e.error.as_ref())
-    {
-        e.line
-    } else {
-        None
+    let err_line = match block.data.as_ref().and_then(|e| e.error.as_ref()) {
+        Some(BlockError::Eval(e)) => Some(e.position()),
+        Some(BlockError::Parse(e)) => Some(e.position()),
+        _ => None,
     };
 
     // cached LayoutJob computation for line numbers
@@ -479,7 +478,7 @@ fn draw_line_numbers(
         egui::cache::ComputerMut<
             (
                 &str,
-                Option<usize>,
+                Option<rhai::Position>,
                 egui::Color32,
                 egui::Color32,
                 &egui::FontId,
@@ -491,16 +490,16 @@ fn draw_line_numbers(
             &mut self,
             key: (
                 &str,
-                Option<usize>,
+                Option<rhai::Position>,
                 egui::Color32,
                 egui::Color32,
                 &egui::FontId,
             ),
         ) -> egui::text::LayoutJob {
             let mut layout_job = egui::text::LayoutJob::default();
-            let (buf, err_line, text_color, error_color, font_id) = key;
+            let (buf, err_pos, text_color, error_color, font_id) = key;
             for (i, t) in buf.lines().enumerate() {
-                if Some(i + 1) == err_line {
+                if Some(i + 1) == err_pos.and_then(|e| e.line()) {
                     layout_job.append(
                         t,
                         0.0,
@@ -764,43 +763,41 @@ fn draggable_script_block_header(
             }
         }
         if let Some(block_data) = &block.data {
-            match &block_data.error {
-                Some(BlockError::NameError(e)) => {
-                    let err = match e {
-                        NameError::DuplicateName => "duplicate name",
-                        NameError::InvalidIdentifier => "invalid identifier",
-                    };
-                    ui.label(
-                        egui::RichText::new(WARN)
-                            .color(ui.style().visuals.error_fg_color),
+            let e = match block_data.error.as_ref() {
+                Some(e) => {
+                    let clickable = matches!(
+                        e,
+                        BlockError::Parse(..) | BlockError::Eval(..)
+                    );
+                    Some((e.print_chain(), clickable))
+                }
+                None => None,
+            };
+            if let Some((err_text, clickable)) = e {
+                let r = ui
+                    .add(
+                        egui::Label::new(
+                            egui::RichText::new(WARN)
+                                .color(ui.style().visuals.error_fg_color),
+                        )
+                        .sense(if clickable {
+                            egui::Sense::click()
+                        } else {
+                            egui::Sense::empty()
+                        }),
                     )
                     .on_hover_ui(|ui| {
-                        ui.label(err);
+                        ui.label(err_text);
                     });
+                if r.clicked() {
+                    response |= BlockResponse::FOCUS_ERR;
                 }
-                Some(BlockError::EvalError(_)) => {
-                    let r = ui
-                        .add(
-                            egui::Label::new(
-                                egui::RichText::new(WARN)
-                                    .color(ui.style().visuals.error_fg_color),
-                            )
-                            .sense(egui::Sense::click()),
-                        )
-                        .on_hover_ui(|ui| {
-                            ui.label("script contains error");
-                        });
-                    if r.clicked() {
-                        response |= BlockResponse::FOCUS_ERR;
-                    }
-                }
-                None => (),
             }
         }
         ui.with_layout(
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
-                if block_name(ui, index, &mut block.name) {
+                if block_name(ui, index, &mut block.name).changed {
                     response |= BlockResponse::CHANGED;
                 }
             },
@@ -836,25 +833,27 @@ fn draggable_value_block(
         ui.with_layout(
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
-                if block_name(ui, index, &mut block.name) {
+                let r = block_name(ui, index, &mut block.name);
+                if r.changed {
                     response |= BlockResponse::CHANGED;
                 }
-                if block_io_input(
-                    ui,
-                    index,
-                    &mut block.input,
-                    "",
-                    block
-                        .data
-                        .as_ref()
-                        .and_then(|d| {
-                            d.output.as_ref().err().map(|e| {
-                                format!("{:#}", anyhow::Error::from(e.clone()))
+                // Only show input editor if the name isn't being edited
+                if !r.open
+                    && block_io_input(
+                        ui,
+                        index,
+                        &mut block.input,
+                        "",
+                        block
+                            .data
+                            .as_ref()
+                            .and_then(|d| {
+                                d.output.as_ref().err().map(|e| e.print_chain())
                             })
-                        })
-                        .as_deref(),
-                    mat,
-                ) {
+                            .as_deref(),
+                        mat,
+                    )
+                {
                     response |= BlockResponse::CHANGED;
                 }
             },
@@ -863,12 +862,22 @@ fn draggable_value_block(
     response
 }
 
+struct NameResult {
+    changed: bool,
+    open: bool,
+}
+
 /// Draws the name of a block, editable with a double-click
 ///
 /// Returns `true` if the name has changed, `false` otherwise
-fn block_name(ui: &mut egui::Ui, index: BlockIndex, name: &mut String) -> bool {
+fn block_name(
+    ui: &mut egui::Ui,
+    index: BlockIndex,
+    name: &mut String,
+) -> NameResult {
     let id = index.id();
     let mut changed = false;
+    let mut open = false;
     match ui.memory(|mem| mem.data.get_temp(id)) {
         Some(NameEdit { needs_focus }) => {
             let text_edit_id = egui::Id::new(index).with("name_edit");
@@ -900,6 +909,7 @@ fn block_name(ui: &mut egui::Ui, index: BlockIndex, name: &mut String) -> bool {
                     mem.data.remove_temp::<NameEdit>(id);
                 }
             });
+            open = !lost_focus;
         }
         None => {
             let response = if !name.is_empty() {
@@ -924,7 +934,7 @@ fn block_name(ui: &mut egui::Ui, index: BlockIndex, name: &mut String) -> bool {
             }
         }
     }
-    changed
+    NameResult { changed, open }
 }
 
 enum DraggableInputValue {

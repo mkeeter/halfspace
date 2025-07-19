@@ -129,20 +129,27 @@ impl std::ops::IndexMut<BlockIndex> for World {
     }
 }
 
-#[derive(Clone, Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum BlockError {
-    #[error("name error")]
-    NameError(#[from] NameError),
-    #[error("evaluation error")]
-    EvalError(#[from] EvalError),
+    #[error(transparent)]
+    Name(#[from] NameError),
+    #[error(transparent)]
+    Parse(#[from] rhai::ParseError),
+    #[error(transparent)]
+    Eval(#[from] Box<rhai::EvalAltResult>),
 }
 
-#[derive(Clone, Debug, thiserror::Error)]
-#[error("evaluation error at line {line:?}: {message}")]
-pub struct EvalError {
-    #[allow(unused)] // TODO
-    pub line: Option<usize>,
-    pub message: String,
+impl BlockError {
+    /// Prints the error chain
+    pub fn print_chain(&self) -> String {
+        let mut e = self as &dyn std::error::Error;
+        let mut chain = format!("{e}");
+        while let Some(source) = e.source() {
+            chain += &format!(": {source}");
+            e = source;
+        }
+        chain
+    }
 }
 
 #[derive(Copy, Clone, Debug, thiserror::Error)]
@@ -407,10 +414,7 @@ impl World {
         let ast = match engine.compile(&block.script) {
             Ok(ast) => ast,
             Err(e) => {
-                data.error = Some(BlockError::EvalError(EvalError {
-                    message: e.to_string(),
-                    line: e.position().line(),
-                }));
+                data.error = Some(BlockError::Parse(e));
                 return input_scope;
             }
         };
@@ -435,10 +439,7 @@ impl World {
         block.inputs = eval_data.inputs;
 
         if let Err(e) = r {
-            data.error = Some(BlockError::EvalError(EvalError {
-                message: e.to_string(),
-                line: e.position().line(),
-            }));
+            data.error = Some(BlockError::Eval(e));
         } else {
             // If the script evaluated successfully, filter out any input
             // fields which haven't been used in the script.
@@ -452,7 +453,7 @@ impl World {
         if !rhai::is_valid_identifier(&block.name) {
             if data.error.is_none() {
                 data.error =
-                    Some(BlockError::NameError(NameError::InvalidIdentifier));
+                    Some(BlockError::Name(NameError::InvalidIdentifier));
             }
             return input_scope;
         }
@@ -462,7 +463,7 @@ impl World {
             std::collections::hash_map::Entry::Occupied(..) => {
                 if data.error.is_none() {
                     data.error =
-                        Some(BlockError::NameError(NameError::DuplicateName));
+                        Some(BlockError::Name(NameError::DuplicateName));
                 }
                 return input_scope;
             }
@@ -523,10 +524,7 @@ impl World {
             Ok(ast) => ast,
             Err(e) => {
                 block.data = Some(ValueData {
-                    output: Err(BlockError::EvalError(EvalError {
-                        message: e.to_string(),
-                        line: e.position().line(),
-                    })),
+                    output: Err(BlockError::Parse(e)),
                     view: None,
                 });
                 return input_scope;
@@ -547,12 +545,7 @@ impl World {
         // Update block state based on actions taken by the script
         let eval_data = std::mem::take(&mut *eval_data.write().unwrap());
         block.data = Some(ValueData {
-            output: r.map_err(|e| {
-                BlockError::EvalError(EvalError {
-                    message: e.to_string(),
-                    line: e.position().line(),
-                })
-            }),
+            output: r.map_err(BlockError::Eval),
             view: eval_data.view.map(|scene| BlockView { scene }),
         });
 
@@ -564,7 +557,7 @@ impl World {
         if !rhai::is_valid_identifier(&block.name) {
             if data.output.is_ok() {
                 data.output =
-                    Err(BlockError::NameError(NameError::InvalidIdentifier));
+                    Err(BlockError::Name(NameError::InvalidIdentifier));
             }
             return input_scope;
         }
@@ -574,7 +567,7 @@ impl World {
             std::collections::hash_map::Entry::Occupied(..) => {
                 if data.output.is_ok() {
                     data.output =
-                        Err(BlockError::NameError(NameError::DuplicateName));
+                        Err(BlockError::Name(NameError::DuplicateName));
                 }
                 return input_scope;
             }
