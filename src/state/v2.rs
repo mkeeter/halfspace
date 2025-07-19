@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub const MAJOR_VERSION: usize = 2;
-pub const MINOR_VERSION: usize = 0;
+pub const MINOR_VERSION: usize = 1;
 
 pub struct Reader;
 impl super::Reader for Reader {
@@ -158,14 +158,22 @@ pub struct WorldState {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum BlockState {
     Script(ScriptState),
+    Value(ValueState),
 }
 
-/// Serialization-friendly subset of block state
+/// Serialization-friendly subset of block script state
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ScriptState {
     pub name: String,
     pub script: String,
     pub inputs: HashMap<String, String>,
+}
+
+/// Serialization-friendly subset of block value state
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ValueState {
+    pub name: String,
+    pub input: String,
 }
 
 /// Serialization-friendly state associated with a view in the GUI

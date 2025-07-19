@@ -28,8 +28,17 @@ impl ShapeLibrary {
         v.names.insert("Script".to_owned());
         v.lib.shapes.push(ShapeDefinition {
             name: "Script".to_owned(),
-            script: "".to_owned(),
-            inputs: HashMap::new(),
+            kind: ShapeKind::Script {
+                script: "".to_owned(),
+                inputs: HashMap::new(),
+            },
+            category: ShapeCategory::Halfspace,
+        });
+        v.lib.shapes.push(ShapeDefinition {
+            name: "Value".to_owned(),
+            kind: ShapeKind::Value {
+                input: "".to_owned(),
+            },
             category: ShapeCategory::Halfspace,
         });
         visit_shapes(&mut v);
@@ -52,16 +61,27 @@ pub struct ShapeDefinition {
     /// Name of the shape type (typically capitalized)
     pub name: String,
 
-    /// Script to use when building this shape as a block
-    pub script: String,
-
-    /// Inputs to populate when building this shape as a block
-    pub inputs: HashMap<String, ShapeInput>,
+    /// Shape kind
+    pub kind: ShapeKind,
 
     /// Category of shape
     ///
     /// The UI adds separator between categories in the selection menu
     pub category: ShapeCategory,
+}
+
+pub enum ShapeKind {
+    Script {
+        /// Script to use when building this shape as a block
+        script: String,
+
+        /// Inputs to populate when building this shape as a block
+        inputs: HashMap<String, ShapeInput>,
+    },
+    Value {
+        /// Input to populate when building this shape as a block
+        input: String,
+    },
 }
 
 impl ShapeVisitor for Visitor {
@@ -115,8 +135,7 @@ impl ShapeVisitor for Visitor {
         script += "output(\"out\", out);";
         self.lib.shapes.push(ShapeDefinition {
             name: shape_name.to_title_case(),
-            script,
-            inputs,
+            kind: ShapeKind::Script { script, inputs },
             category: ShapeCategory::Fidget,
         });
     }
@@ -220,10 +239,13 @@ mod test {
         let s = ShapeLibrary::build();
         let sphere = s.shapes.iter().find(|s| s.name == "Sphere").unwrap();
         assert_eq!(sphere.name, "Sphere");
-        let r = &sphere.inputs["radius"];
+        let ShapeKind::Script { inputs, .. } = &sphere.kind else {
+            panic!()
+        };
+        let r = &inputs["radius"];
         assert_eq!(r.ty, Some(f64::SHAPE.id));
         assert_eq!(r.text, "1");
-        let center = &sphere.inputs["center"];
+        let center = &inputs["center"];
         assert_eq!(center.ty, Some(Vec3::SHAPE.id));
         assert_eq!(center.text, "[0, 0, 0]");
     }
@@ -233,10 +255,13 @@ mod test {
         let s = ShapeLibrary::build();
         let scale = s.shapes.iter().find(|s| s.name == "Scale").unwrap();
         assert_eq!(scale.name, "Scale");
-        let shape = &scale.inputs["shape"];
+        let ShapeKind::Script { inputs, .. } = &scale.kind else {
+            panic!()
+        };
+        let shape = &inputs["shape"];
         assert_eq!(shape.ty, Some(fidget::context::Tree::SHAPE.id));
         assert_eq!(shape.text, "");
-        let scale = &scale.inputs["scale"];
+        let scale = &inputs["scale"];
         assert_eq!(scale.ty, Some(Vec3::SHAPE.id));
         assert_eq!(scale.text, "[1, 1, 1]");
     }

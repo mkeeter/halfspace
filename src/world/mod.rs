@@ -1,3 +1,4 @@
+use log::warn;
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, RwLock},
@@ -6,31 +7,51 @@ use std::{
 use fidget::context::Tree;
 
 pub use crate::state::BlockIndex;
-use crate::state::{BlockState, ScriptState, WorldState};
+use crate::state::{BlockState, ScriptState, ValueState, WorldState};
 use facet::Facet;
 use heck::ToSnakeCase;
 
 mod scene;
 mod shapes;
 pub use scene::{Color, Drawable, Scene};
-pub use shapes::ShapeLibrary;
+pub use shapes::{ShapeKind, ShapeLibrary};
 
 pub enum Block {
     Script(ScriptBlock),
+    Value(ValueBlock),
 }
 
 impl Block {
     pub fn name(&self) -> &str {
         match self {
             Block::Script(s) => s.name.as_str(),
+            Block::Value(s) => s.name.as_str(),
         }
     }
 
     pub fn has_view(&self) -> bool {
+        self.get_view().is_some()
+    }
+
+    /// Checks whether the block is error-free
+    ///
+    /// A block with no state is _invalid_, i.e. returns `false`
+    pub fn is_valid(&self) -> bool {
         match self {
             Block::Script(s) => {
-                s.data.as_ref().is_some_and(|s| s.view.is_some())
+                s.data.as_ref().is_some_and(|s| s.error.is_none())
             }
+            Block::Value(s) => {
+                s.data.as_ref().is_some_and(|s| s.output.is_ok())
+            }
+        }
+    }
+
+    /// Gets the `BlockView`, if the block is free of errors
+    pub fn get_view(&self) -> Option<&BlockView> {
+        match self {
+            Block::Script(s) => s.data.as_ref().and_then(|s| s.view.as_ref()),
+            Block::Value(s) => s.data.as_ref().and_then(|s| s.view.as_ref()),
         }
     }
 }
@@ -48,13 +69,24 @@ pub struct ScriptBlock {
     pub inputs: HashMap<String, String>,
 }
 
+pub struct ValueBlock {
+    pub name: String,
+    pub input: String,
+    pub data: Option<ValueData>,
+}
+
 impl From<BlockState> for Block {
-    fn from(value: BlockState) -> Self {
-        match value {
-            BlockState::Script(value) => Self::Script(ScriptBlock {
-                name: value.name,
-                script: value.script,
-                inputs: value.inputs,
+    fn from(b: BlockState) -> Self {
+        match b {
+            BlockState::Script(b) => Self::Script(ScriptBlock {
+                name: b.name,
+                script: b.script,
+                inputs: b.inputs,
+                data: None,
+            }),
+            BlockState::Value(b) => Self::Value(ValueBlock {
+                name: b.name,
+                input: b.input,
                 data: None,
             }),
         }
@@ -69,26 +101,10 @@ impl From<&Block> for BlockState {
                 script: b.script.clone(),
                 inputs: b.inputs.clone(),
             }),
-        }
-    }
-}
-
-impl Block {
-    /// Checks whether the block is error-free
-    ///
-    /// A block with no state is _invalid_, i.e. returns `false`
-    pub fn is_valid(&self) -> bool {
-        match self {
-            Block::Script(s) => {
-                s.data.as_ref().is_some_and(|s| s.error.is_none())
-            }
-        }
-    }
-
-    /// Gets the `BlockView`, if the block is free of errors
-    pub fn get_view(&self) -> Option<&BlockView> {
-        match self {
-            Block::Script(s) => s.data.as_ref().and_then(|s| s.view.as_ref()),
+            Block::Value(b) => BlockState::Value(ValueState {
+                name: b.name.clone(),
+                input: b.input.clone(),
+            }),
         }
     }
 }
@@ -113,22 +129,27 @@ impl std::ops::IndexMut<BlockIndex> for World {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, thiserror::Error)]
 pub enum BlockError {
-    NameError(NameError),
-    EvalError(EvalError),
+    #[error("name error")]
+    NameError(#[from] NameError),
+    #[error("evaluation error")]
+    EvalError(#[from] EvalError),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, thiserror::Error)]
+#[error("evaluation error at line {line:?}: {message}")]
 pub struct EvalError {
     #[allow(unused)] // TODO
     pub line: Option<usize>,
     pub message: String,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug, thiserror::Error)]
 pub enum NameError {
+    #[error("invalid identifier")]
     InvalidIdentifier,
+    #[error("duplicate name")]
     DuplicateName,
 }
 
@@ -155,6 +176,17 @@ pub struct ScriptData {
     pub error: Option<BlockError>,
     /// Values defined with `input(..)` or `output(..)` calls in the script
     pub io_values: Vec<(String, IoValue)>,
+    /// Value exported to a view
+    pub view: Option<BlockView>,
+}
+
+/// Transient value data (e.g. evaluation results)
+///
+/// This data is _not_ saved or serialized; it can be recalculated on-demand
+/// from the world's state.
+pub struct ValueData {
+    /// Single output value
+    pub output: Result<rhai::Dynamic, BlockError>,
     /// Value exported to a view
     pub view: Option<BlockView>,
 }
@@ -204,6 +236,10 @@ impl PartialEq<WorldState> for World {
                             && b.script == other.script
                             && b.inputs == other.inputs
                     }
+                    (Block::Value(b), BlockState::Value(other)) => {
+                        b.name == other.name && b.input == other.input
+                    }
+                    _ => false,
                 }
             })
     }
@@ -249,61 +285,71 @@ impl World {
         self.next_index += 1;
         let name = self.next_name_with_prefix(&s.name.to_snake_case());
 
-        // Special casing: if the shape has a single tree input and our last
-        // block has a single tree output, then we pre-populate the input.
-        let mut iter = s.inputs.iter().filter(|(_name, i)| {
-            i.ty.is_some_and(|ty| {
-                ty == Tree::SHAPE.id || ty == Vec::<Tree>::SHAPE.id
-            }) && i.text.is_empty()
-        });
-        let tree_input = iter.next().filter(|_| iter.next().is_none());
-        let mut last_tree = None;
-        if let Some(i) = self.order.last()
-            && let Block::Script(ScriptBlock {
-                name,
-                data: Some(data),
-                ..
-            }) = &self.blocks[i]
-        {
-            let mut output_count = 0;
-            let mut has_tree = false;
-            for v in data.io_values.iter().flat_map(|(_name, i)| {
-                if let IoValue::Output { value, .. } = i {
-                    Some(value)
-                } else {
-                    None
+        let b = match &s.kind {
+            ShapeKind::Script { inputs, script } => {
+                // Special casing: if the shape has a single tree input and our last
+                // block has a single tree output, then we pre-populate the input.
+                let mut iter = inputs.iter().filter(|(_name, i)| {
+                    i.ty.is_some_and(|ty| {
+                        ty == Tree::SHAPE.id || ty == Vec::<Tree>::SHAPE.id
+                    }) && i.text.is_empty()
+                });
+                let tree_input = iter.next().filter(|_| iter.next().is_none());
+                let mut last_tree = None;
+                if let Some(i) = self.order.last()
+                    && let Block::Script(ScriptBlock {
+                        name,
+                        data: Some(data),
+                        ..
+                    }) = &self.blocks[i]
+                {
+                    let mut output_count = 0;
+                    let mut has_tree = false;
+                    for v in data.io_values.iter().flat_map(|(_name, i)| {
+                        if let IoValue::Output { value, .. } = i {
+                            Some(value)
+                        } else {
+                            None
+                        }
+                    }) {
+                        output_count += 1;
+                        if v.clone()
+                            .try_cast::<fidget::context::Tree>()
+                            .is_some()
+                        {
+                            has_tree = true;
+                        }
+                    }
+                    if has_tree && output_count == 1 {
+                        last_tree = Some(name);
+                    }
                 }
-            }) {
-                output_count += 1;
-                if v.clone().try_cast::<fidget::context::Tree>().is_some() {
-                    has_tree = true;
+                let mut inputs = inputs
+                    .iter()
+                    .map(|(name, v)| (name.clone(), v.text.clone()))
+                    .collect::<HashMap<_, _>>();
+                if let Some(tree_input) = tree_input
+                    && let Some(last_tree) = last_tree
+                {
+                    *inputs.get_mut(tree_input.0).unwrap() =
+                        last_tree.to_owned();
                 }
-            }
-            if has_tree && output_count == 1 {
-                last_tree = Some(name);
-            }
-        }
-        let mut inputs = s
-            .inputs
-            .iter()
-            .map(|(name, v)| (name.clone(), v.text.clone()))
-            .collect::<HashMap<_, _>>();
-        if let Some(tree_input) = tree_input
-            && let Some(last_tree) = last_tree
-        {
-            *inputs.get_mut(tree_input.0).unwrap() = last_tree.to_owned();
-        }
 
-        self.blocks.insert(
-            index,
-            Block::Script(ScriptBlock {
+                Block::Script(ScriptBlock {
+                    name,
+                    script: script.clone(),
+                    inputs,
+                    data: None,
+                })
+            }
+            ShapeKind::Value { input } => Block::Value(ValueBlock {
                 name,
-                script: s.script.clone(),
-                inputs,
+                input: input.clone(),
                 data: None,
             }),
-        );
+        };
 
+        self.blocks.insert(index, b);
         self.order.push(index);
         true
     }
@@ -334,6 +380,9 @@ impl World {
         match block {
             Block::Script(s) => {
                 Self::rebuild_script_block(i, s, input_scope, name_map)
+            }
+            Block::Value(s) => {
+                Self::rebuild_value_block(i, s, input_scope, name_map)
             }
         }
     }
@@ -462,6 +511,96 @@ impl World {
         input_scope
     }
 
+    fn rebuild_value_block(
+        i: BlockIndex,
+        block: &mut ValueBlock,
+        input_scope: rhai::Scope<'static>,
+        name_map: &mut HashMap<String, BlockIndex>,
+    ) -> rhai::Scope<'static> {
+        let mut engine = fidget::rhai::engine();
+        scene::register_types(&mut engine); // add scene and drawable types
+        let ast = match engine.compile(&block.input) {
+            Ok(ast) => ast,
+            Err(e) => {
+                block.data = Some(ValueData {
+                    output: Err(BlockError::EvalError(EvalError {
+                        message: e.to_string(),
+                        line: e.position().line(),
+                    })),
+                    view: None,
+                });
+                return input_scope;
+            }
+        };
+
+        // Build the data used during block evaluation
+        let eval_data = Arc::new(RwLock::new(BlockEvalData::new(
+            HashMap::new(), // no inputs for value blocks
+            input_scope,
+        )));
+        // Note that we don't call `BlockEvalData::bind` here, because we're
+        // only evaluating a single expression.
+
+        // TODO check for single expression?
+        let r = engine.eval_ast::<rhai::Dynamic>(&ast);
+
+        // Update block state based on actions taken by the script
+        let eval_data = std::mem::take(&mut *eval_data.write().unwrap());
+        block.data = Some(ValueData {
+            output: r.map_err(|e| {
+                BlockError::EvalError(EvalError {
+                    message: e.to_string(),
+                    line: e.position().line(),
+                })
+            }),
+            view: eval_data.view.map(|scene| BlockView { scene }),
+        });
+
+        // Then, check whether we can bind outputs to the block name.  We'll
+        // first check that the name is valid.  We prioritize script errors over
+        // name errors, so will not replace an existing value in `data.error`
+        let mut input_scope = eval_data.scope;
+        let data = block.data.as_mut().unwrap();
+        if !rhai::is_valid_identifier(&block.name) {
+            if data.output.is_ok() {
+                data.output =
+                    Err(BlockError::NameError(NameError::InvalidIdentifier));
+            }
+            return input_scope;
+        }
+
+        // Next, bind from the name to a block index (if available)
+        match name_map.entry(block.name.clone()) {
+            std::collections::hash_map::Entry::Occupied(..) => {
+                if data.output.is_ok() {
+                    data.output =
+                        Err(BlockError::NameError(NameError::DuplicateName));
+                }
+                return input_scope;
+            }
+            std::collections::hash_map::Entry::Vacant(v) => {
+                v.insert(i);
+            }
+        }
+
+        if let Ok(value) = &data.output {
+            input_scope.push(&block.name, value.clone());
+            // If there's a single view-compatible output, then treat it as the
+            // view.
+            if data.view.is_none() {
+                if let Some(tree) = value.clone().try_cast::<Tree>() {
+                    data.view = Some(BlockView { scene: tree.into() })
+                } else if let Some(d) = value.clone().try_cast::<Drawable>() {
+                    data.view = Some(BlockView { scene: d.into() })
+                } else if let Some(scene) = value.clone().try_cast::<Scene>() {
+                    data.view = Some(BlockView { scene })
+                }
+            }
+        }
+
+        input_scope
+    }
+
     pub fn import_data(&mut self, mut other: World) {
         for (i, b) in self.blocks.iter_mut() {
             let Some(ob) = other.blocks.remove(i) else {
@@ -475,6 +614,10 @@ impl World {
                         b.inputs.entry(k).or_insert(i);
                     }
                 }
+                (Block::Value(b), Block::Value(ob)) => {
+                    b.data = ob.data;
+                }
+                _ => warn!("cannot import data from different block types"),
             }
         }
     }

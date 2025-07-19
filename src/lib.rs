@@ -317,6 +317,9 @@ pub struct App {
     /// Show debug options and menu items in native build
     debug: bool,
 
+    /// Shows the inspection UI (debug mode only)
+    show_inspection_ui: bool,
+
     modal: Option<Modal>,
     quit_confirmed: bool,
     request_repaint: bool,
@@ -509,6 +512,7 @@ impl App {
             platform,
             rx,
             debug,
+            show_inspection_ui: false,
             modal: None,
             quit_confirmed: false,
             request_repaint: false,
@@ -689,6 +693,9 @@ impl App {
                 if ui.button("\u{eb32} About").clicked() {
                     self.on_about();
                     ui.close_menu();
+                }
+                if self.debug {
+                    ui.checkbox(&mut self.show_inspection_ui, "Debug");
                 }
             });
             if cfg!(target_arch = "wasm32") || self.debug {
@@ -1230,6 +1237,12 @@ impl App {
 
         // Draw optional modals
         self.draw_modal(ctx, size);
+
+        if self.show_inspection_ui {
+            egui::Window::new("Debug").show(ctx, |ui| {
+                ctx.style_ui(ui, egui::Theme::Light);
+            });
+        }
 
         changed
     }

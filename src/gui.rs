@@ -6,7 +6,8 @@ use crate::{
     BlockResponse, MessageSender, ViewResponse,
     view::{self, ViewCanvas, ViewData, ViewImage, ViewMode2, ViewMode3},
     world::{
-        Block, BlockError, BlockIndex, IoValue, NameError, ScriptBlock, World,
+        Block, BlockError, BlockIndex, IoValue, NameError, ScriptBlock,
+        ValueBlock, World,
     },
 };
 use fidget::shapes::types::{Vec2, Vec3};
@@ -366,7 +367,9 @@ impl<'a> WorldView<'a> {
         ui: &mut egui::Ui,
         index: BlockIndex,
     ) -> ViewResponse {
-        let Block::Script(block) = &mut self.world[index];
+        let Block::Script(block) = &mut self.world[index] else {
+            panic!("can't show script UI for non-script block");
+        };
         let mut out = ViewResponse::empty();
         let theme =
             egui_extras::syntax_highlighting::CodeTheme::from_style(ui.style());
@@ -568,29 +571,41 @@ pub fn draggable_block(
     match block {
         Block::Script(block) => {
             if block.data.as_ref().is_some_and(|s| !s.io_values.is_empty()) {
-                egui::collapsing_header::CollapsingState::load_with_default_open(
-            ui.ctx(),
-            index.id(),
-            true,
-        )
-        .show_header(ui, |ui| {
-            response = draggable_block_header(ui, index, block, flags, handle)
-        })
-        .body_unindented(|ui| {
-            if script_block_body(ui, index, block, mat) {
-                response |= BlockResponse::CHANGED;
-            }
-            if !flags.is_last {
-                ui.separator();
-            }
-        });
+                use egui::collapsing_header::CollapsingState;
+                CollapsingState::load_with_default_open(
+                    ui.ctx(),
+                    index.id(),
+                    true,
+                )
+                .show_header(ui, |ui| {
+                    response = draggable_script_block_header(
+                        ui, index, block, flags, handle,
+                    )
+                })
+                .body_unindented(|ui| {
+                    if script_block_body(ui, index, block, mat) {
+                        response |= BlockResponse::CHANGED;
+                    }
+                    if !flags.is_last {
+                        ui.separator();
+                    }
+                });
             } else {
                 ui.horizontal(|ui| {
                     ui.add_space(padding);
-                    response =
-                        draggable_block_header(ui, index, block, flags, handle)
+                    response = draggable_script_block_header(
+                        ui, index, block, flags, handle,
+                    )
                 });
             }
+            response
+        }
+        Block::Value(block) => {
+            ui.horizontal(|ui| {
+                ui.add_space(padding);
+                response =
+                    draggable_value_block(ui, index, block, flags, handle, mat);
+            });
             response
         }
     }
@@ -641,7 +656,14 @@ fn script_block_io(
         }
         IoValue::Input(value) => {
             let s = block.inputs.get_mut(name).unwrap();
-            block_io_input(ui, index, s, name, value, mat)
+            block_io_input(
+                ui,
+                index,
+                s,
+                name,
+                value.as_ref().err().map(|e| e.as_str()),
+                mat,
+            )
         }
     }
 }
@@ -672,12 +694,12 @@ fn block_io_input(
     index: BlockIndex,
     s: &mut String,
     name: &str,
-    value: &Result<rhai::Dynamic, String>,
+    err: Option<&str>,
     mat: nalgebra::Matrix4<f32>,
 ) -> bool {
     let input_id = index.id().with("input_edit").with(name);
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        if let Err(err) = &value {
+        if let Some(err) = err {
             ui.colored_label(ui.style().visuals.error_fg_color, WARN)
                 .on_hover_ui(|ui| {
                     ui.label(err);
@@ -712,7 +734,7 @@ fn block_io_input(
     .inner
 }
 
-fn draggable_block_header(
+fn draggable_script_block_header(
     ui: &mut egui::Ui,
     index: BlockIndex,
     block: &mut ScriptBlock,
@@ -787,6 +809,60 @@ fn draggable_block_header(
     response
 }
 
+fn draggable_value_block(
+    ui: &mut egui::Ui,
+    index: BlockIndex,
+    block: &mut ValueBlock,
+    flags: BlockUiFlags,
+    handle: egui_dnd::Handle,
+    mat: nalgebra::Matrix4<f32>,
+) -> BlockResponse {
+    // Editable object name
+    let mut response = BlockResponse::empty();
+    // Buttons on the right side
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        ui.add_space(5.0);
+        handle.show_drag_cursor_on_hover(false).ui(ui, |ui| {
+            ui.add(egui::Button::new(DRAG_UP_DOWN).selected(flags.is_dragged));
+        });
+        if ui.button(TRASH).clicked() {
+            response |= BlockResponse::DELETE;
+        }
+        if let Some(view) = flags.is_view_open {
+            if ui.add(egui::Button::new(EYE).selected(view)).clicked() {
+                response = BlockResponse::TOGGLE_VIEW;
+            }
+        }
+        ui.with_layout(
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                if block_name(ui, index, &mut block.name) {
+                    response |= BlockResponse::CHANGED;
+                }
+                if block_io_input(
+                    ui,
+                    index,
+                    &mut block.input,
+                    "",
+                    block
+                        .data
+                        .as_ref()
+                        .and_then(|d| {
+                            d.output.as_ref().err().map(|e| {
+                                format!("{:#}", anyhow::Error::from(e.clone()))
+                            })
+                        })
+                        .as_deref(),
+                    mat,
+                ) {
+                    response |= BlockResponse::CHANGED;
+                }
+            },
+        );
+    });
+    response
+}
+
 /// Draws the name of a block, editable with a double-click
 ///
 /// Returns `true` if the name has changed, `false` otherwise
@@ -826,15 +902,21 @@ fn block_name(ui: &mut egui::Ui, index: BlockIndex, name: &mut String) -> bool {
             });
         }
         None => {
-            let (enabled, name) = if name.is_empty() {
-                (false, "[empty]")
+            let response = if !name.is_empty() {
+                ui.add(
+                    egui::Label::new(name.as_str()).sense(egui::Sense::click()),
+                )
             } else {
-                (true, name.as_str())
+                ui.scope(|ui| {
+                    let vis = ui.visuals_mut();
+                    vis.override_text_color =
+                        Some(vis.widgets.inactive.fg_stroke.color);
+                    ui.add(
+                        egui::Label::new("[empty]").sense(egui::Sense::click()),
+                    )
+                })
+                .inner
             };
-            let response = ui.add_enabled(
-                enabled,
-                egui::Label::new(name).sense(egui::Sense::click()),
-            );
             if response.double_clicked() {
                 ui.memory_mut(|mem| {
                     mem.data.insert_temp(id, NameEdit { needs_focus: true })
