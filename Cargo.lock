@@ -1595,7 +1595,7 @@ dependencies = [
 [[package]]
 name = "fidget"
 version = "0.3.9"
-source = "git+https://github.com/mkeeter/fidget#867fef4dcf51f10d1e9aac6fa0b68d1c97b15597"
+source = "git+https://github.com/mkeeter/fidget#5d44d844c6d9645261db32468ad7beff604d906d"
 dependencies = [
  "arrayvec",
  "bimap",
@@ -5311,7 +5311,7 @@ dependencies = [
 [[package]]
 name = "workspace-hack"
 version = "0.1.0"
-source = "git+https://github.com/mkeeter/fidget#867fef4dcf51f10d1e9aac6fa0b68d1c97b15597"
+source = "git+https://github.com/mkeeter/fidget#5d44d844c6d9645261db32468ad7beff604d906d"
 dependencies = [
  "ahash",
  "anstream",

@@ -70,42 +70,43 @@ fn fs_main(
 ) -> RgbaDepth {
     var ssao = textureSample(t_ssao, s_ssao, tex_coords);
     var pixel = textureSample(t_pixel, s_pixel, tex_coords);
+    let color_tex = textureSample(t_color, s_color, tex_coords).rgb;
     var depth = bitcast<u32>(pixel.r);
 
     // If depth is 0, this pixel is transparent
+    var out = RgbaDepth(vec4(1.0, 1.0, 1.0, 1.0), 0.0);
     if (depth == 0u) {
         discard;
-    } else if (depth == uniforms.max_depth) {
-        return RgbaDepth(vec4(1.0, 1.0, 1.0, 1.0), 0.0);
-    }
+    } else if (depth < uniforms.max_depth) {
+        // Pixel position (for lighting calculations)
+        let p = vec3<f32>(
+            (tex_coords.xy - 0.5) * 2.0,
+            2.0 * (f32(depth) / f32(uniforms.max_depth) - 0.5)
+        );
 
-    // Pixel position (for lighting calculations)
-    let p = vec3<f32>(
-        (tex_coords.xy - 0.5) * 2.0,
-        2.0 * (f32(depth) / f32(uniforms.max_depth) - 0.5)
-    );
-
-    let normal = vec3<f32>(pixel.yzw);
-    let n = normalize(normal);
-    const LIGHTS = array<Light, 3>(
-        Light(vec3<f32>(5.0, -5.0, 10.0), 0.5),
-        Light(vec3<f32>(-5.0, 0.0, 10.0), 0.15),
-        Light(vec3<f32>(0.0, -5.0, 10.0), 0.15)
-    );
-    var accum: f32 = 0.2;
-    for (var i = 0u; i < 3u; i = i + 1u) {
-        let light = LIGHTS[i];
-        let light_dir = normalize(light.position - p);
-        accum = accum + max(dot(light_dir, n), 0.0) * light.intensity;
+        let normal = vec3<f32>(pixel.yzw);
+        let n = normalize(normal);
+        const LIGHTS = array<Light, 3>(
+            Light(vec3<f32>(5.0, -5.0, 10.0), 0.5),
+            Light(vec3<f32>(-5.0, 0.0, 10.0), 0.15),
+            Light(vec3<f32>(0.0, -5.0, 10.0), 0.15)
+        );
+        var accum: f32 = 0.2;
+        for (var i = 0u; i < 3u; i = i + 1u) {
+            let light = LIGHTS[i];
+            let light_dir = normalize(light.position - p);
+            accum = accum + max(dot(light_dir, n), 0.0) * light.intensity;
+        }
+        accum = clamp(accum * (ssao.r * 0.6 + 0.4), 0.0, 1.0);
+        var color = vec3<f32>(1.0);
+        if (uniforms.has_color != 0) {
+            color = color_tex;
+        }
+        let c = vec3<f32>(accum * color);
+        out = RgbaDepth(
+            vec4<f32>(c, 1.0),
+            1.0 - f32(depth) / f32(uniforms.max_depth)
+        );
     }
-    accum = clamp(accum * (ssao.r * 0.6 + 0.4), 0.0, 1.0);
-    var color = vec3<f32>(1.0);
-    if (uniforms.has_color != 0) {
-        color = textureSample(t_color, s_color, tex_coords).rgb;
-    }
-    let c = vec3<f32>(accum * color);
-    return RgbaDepth(
-        vec4<f32>(c, 1.0),
-        1.0 - f32(depth) / f32(uniforms.max_depth)
-    );
+    return out;
 }

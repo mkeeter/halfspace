@@ -12,7 +12,7 @@ use crate::{
 
 use fidget::{
     eval::{BulkEvaluator, Function, MathFunction},
-    render::effects,
+    render::{GeometryPixel, effects},
 };
 
 use rayon::prelude::*;
@@ -114,7 +114,7 @@ impl RenderTask {
                 );
                 let cfg = fidget::render::ImageRenderConfig {
                     image_size,
-                    view: *view,
+                    world_to_model: view.world_to_model(),
                     cancel,
                     pixel_perfect: matches!(mode, ViewMode2::Sdf),
                     ..Default::default()
@@ -187,14 +187,22 @@ impl RenderTask {
                 view,
                 size,
             } => {
+                // If this is our final rendering level, then do oversampling in
+                // the Z direction for better rendering of edges.  XXX if you
+                // change this, then you also need to edit `shaded.rs` to adjust
+                // the `max_depth` passed into the shader.
+                let bonus_z = if level == 0 { 2 } else { 1 };
                 let image_size = fidget::render::VoxelSize::new(
                     (size.width() / scale).max(1),
                     (size.height() / scale).max(1),
-                    (size.depth() / scale).max(1),
+                    (size.depth() / scale).max(1) * bonus_z,
                 );
+                let world_to_model = view.world_to_model();
+                let z_scale = 2.0 / bonus_z as f32;
+                let scale = nalgebra::Scale3::new(1.0, 1.0, z_scale);
                 let cfg = fidget::render::VoxelRenderConfig {
                     image_size,
-                    view: *view,
+                    world_to_model: world_to_model * scale.to_homogeneous(),
                     cancel,
                     ..Default::default()
                 };
@@ -204,6 +212,14 @@ impl RenderTask {
                     .map(|shape| {
                         let rs = RenderShape::from(shape.tree.clone());
                         let data = cfg.run(rs)?;
+                        let data = data.map(|p| GeometryPixel {
+                            depth: p.depth,
+                            normal: [
+                                p.normal[0],
+                                p.normal[1],
+                                p.normal[2] / z_scale,
+                            ],
+                        });
                         Some((data, shape.color.clone()))
                     })
                     .collect::<Option<_>>()?;

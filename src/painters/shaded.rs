@@ -1,4 +1,4 @@
-use super::{blit::BlitData, WgpuResources};
+use super::{WgpuResources, blit::BlitData};
 use crate::{view::ShadedViewImage, world::BlockIndex};
 use eframe::{
     egui,
@@ -87,16 +87,10 @@ impl egui_wgpu::CallbackTrait for WgpuShadedPainter {
             },
         );
 
-        // TODO compute this off-thread?
-        let max_depth = self
-            .image
-            .data
-            .iter()
-            .flat_map(|i| i.pixels.iter())
-            .map(|p| p.depth)
-            .max()
-            .unwrap_or(0)
-            .max(1);
+        // XXX this should be somewhere more central, instead of hacked here
+        let max_depth = (self.image.size.depth() / (1 << self.image.level))
+            .max(1)
+            * if self.image.level == 0 { 2 } else { 1 };
         for image in self.image.data.iter() {
             let data = gr.shaded.get_data(device, texture_size);
 
