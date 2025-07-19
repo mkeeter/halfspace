@@ -377,7 +377,7 @@ impl<'a> WorldView<'a> {
                 draw_line_numbers(ui, index, block);
 
                 let mut layouter =
-                    |ui: &egui::Ui, buf: &str, wrap_width: f32| {
+                    |ui: &egui::Ui, buf: &str, _wrap_width: f32| {
                         let mut layout_job =
                             egui_extras::syntax_highlighting::highlight_with(
                                 ui.ctx(),
