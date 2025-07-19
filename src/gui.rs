@@ -257,6 +257,7 @@ impl<'a> WorldView<'a> {
                 ViewCanvas::Canvas3 {
                     mode: ViewMode3::Heightmap,
                     canvas,
+                    ..
                 },
             ) => {
                 ui.painter().add(egui_wgpu::Callback::new_paint_callback(
@@ -274,6 +275,7 @@ impl<'a> WorldView<'a> {
                 ViewCanvas::Canvas3 {
                     mode: ViewMode3::Shaded,
                     canvas,
+                    ..
                 },
             ) => {
                 ui.painter().add(egui_wgpu::Callback::new_paint_callback(

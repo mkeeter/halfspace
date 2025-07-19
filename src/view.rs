@@ -1,10 +1,10 @@
 use crate::{
+    BlockIndex, MessageSender, ViewResponse,
     gui::{CAMERA, WARN},
     render::{RenderSettings, RenderTask},
     state,
     state::ViewState,
     world::Scene,
-    BlockIndex, MessageSender, ViewResponse,
 };
 
 pub use state::{ViewMode2, ViewMode3};
@@ -82,6 +82,7 @@ pub enum ViewCanvas {
     },
     Canvas3 {
         canvas: fidget::gui::Canvas3,
+        perspective: bool,
         mode: ViewMode3,
     },
 }
@@ -100,7 +101,11 @@ impl From<&ViewCanvas> for state::ViewState {
                     height: size.height(),
                 }
             }
-            ViewCanvas::Canvas3 { canvas, mode } => {
+            ViewCanvas::Canvas3 {
+                canvas,
+                perspective,
+                mode,
+            } => {
                 let (view, size) = canvas.components();
                 let (center, scale, yaw, pitch) = view.components();
                 ViewState::View3 {
@@ -112,6 +117,7 @@ impl From<&ViewCanvas> for state::ViewState {
                     width: size.width(),
                     height: size.height(),
                     depth: size.depth(),
+                    perspective: *perspective,
                 }
             }
         }
@@ -145,6 +151,7 @@ impl From<ViewState> for ViewCanvas {
                 width,
                 height,
                 depth,
+                perspective,
             } => {
                 let canvas = fidget::gui::Canvas3::from_components(
                     fidget::render::View3::from_components(
@@ -152,7 +159,11 @@ impl From<ViewState> for ViewCanvas {
                     ),
                     fidget::render::VoxelSize::new(width, height, depth),
                 );
-                Self::Canvas3 { canvas, mode }
+                Self::Canvas3 {
+                    canvas,
+                    mode,
+                    perspective,
+                }
             }
         }
     }
@@ -467,6 +478,12 @@ pub fn edit_button(
     };
     let mut tag = initial_tag;
     let mut reset_camera = false;
+    let perspective =
+        if let ViewCanvas::Canvas3 { perspective, .. } = &mut entry.canvas {
+            Some(perspective)
+        } else {
+            None
+        };
     egui::ComboBox::from_id_salt(index.id().with("view_editor"))
         .selected_text(CAMERA)
         .width(0.0)
@@ -490,6 +507,10 @@ pub fn edit_button(
             );
             ui.selectable_value(&mut tag, ViewCanvasType::Shaded, "3D shaded");
             ui.separator();
+            if let Some(p) = perspective {
+                ui.checkbox(p, "Perspective");
+                ui.separator();
+            }
             if ui.button("Reset camera").clicked() {
                 reset_camera = true;
             }
@@ -522,6 +543,7 @@ pub fn edit_button(
                         ViewCanvasType::Shaded => ViewMode3::Shaded,
                         _ => unreachable!(),
                     },
+                    perspective: false,
                 }
             }
         };
@@ -539,13 +561,18 @@ pub fn edit_button(
             (
                 ViewCanvas::Canvas3 {
                     canvas: next_canvas,
+                    perspective: next_perspective,
                     ..
                 },
                 ViewCanvas::Canvas3 {
                     canvas: prev_canvas,
+                    perspective: prev_perspective,
                     ..
                 },
-            ) => std::mem::swap(next_canvas, prev_canvas),
+            ) => {
+                std::mem::swap(next_canvas, prev_canvas);
+                std::mem::swap(next_perspective, prev_perspective);
+            }
             _ => (), // TODO do some swapping if we do 2D <-> 3D?
         }
         entry.canvas = next_canvas;

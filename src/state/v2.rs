@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub const MAJOR_VERSION: usize = 2;
-pub const MINOR_VERSION: usize = 1;
+pub const MINOR_VERSION: usize = 2;
 
 pub struct Reader;
 impl super::Reader for Reader {
@@ -95,6 +95,7 @@ impl From<v1::ViewState> for ViewState {
                 pitch,
                 yaw,
                 depth,
+                perspective: false,
             },
         }
     }
@@ -195,6 +196,8 @@ pub enum ViewState {
         width: u32,
         height: u32,
         depth: u32,
+        #[serde(default)]
+        perspective: bool,
     },
 }
 

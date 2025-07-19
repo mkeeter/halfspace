@@ -186,6 +186,7 @@ impl RenderTask {
                 mode,
                 view,
                 size,
+                perspective,
             } => {
                 // If this is our final rendering level, then do oversampling in
                 // the Z direction for better rendering of edges.  XXX if you
@@ -197,12 +198,17 @@ impl RenderTask {
                     (size.height() / scale).max(1),
                     (size.depth() / scale).max(1) * bonus_z,
                 );
-                let world_to_model = view.world_to_model();
                 let z_scale = 2.0 / bonus_z as f32;
                 let scale = nalgebra::Scale3::new(1.0, 1.0, z_scale);
+                let mut world_to_model =
+                    view.world_to_model() * scale.to_homogeneous();
+                if *perspective {
+                    *world_to_model.get_mut((3, 2)).unwrap() =
+                        0.3 / bonus_z as f32;
+                }
                 let cfg = fidget::render::VoxelRenderConfig {
                     image_size,
-                    world_to_model: world_to_model * scale.to_homogeneous(),
+                    world_to_model,
                     cancel,
                     ..Default::default()
                 };
@@ -272,6 +278,7 @@ pub enum RenderSettings {
     Render3 {
         scene: Scene,
         mode: ViewMode3,
+        perspective: bool,
         view: fidget::render::View3,
         size: fidget::render::VoxelSize,
     },
@@ -286,11 +293,16 @@ impl RenderSettings {
                 size: canvas.image_size(),
                 mode: *mode,
             },
-            ViewCanvas::Canvas3 { canvas, mode } => {
+            ViewCanvas::Canvas3 {
+                canvas,
+                mode,
+                perspective,
+            } => {
                 let size = canvas.image_size();
                 RenderSettings::Render3 {
                     scene,
                     view: canvas.view(),
+                    perspective: *perspective,
                     size: fidget::render::VoxelSize::new(
                         size.width(),
                         size.height(),
@@ -337,17 +349,20 @@ impl std::cmp::PartialEq for RenderSettings {
                     mode: mode_a,
                     view: view_a,
                     size: size_a,
+                    perspective: perspective_a,
                 },
                 Self::Render3 {
                     scene: scene_b,
                     mode: mode_b,
                     view: view_b,
                     size: size_b,
+                    perspective: perspective_b,
                 },
             ) => {
                 mode_a == mode_b
                     && view_a == view_b
                     && size_a == size_b
+                    && perspective_a == perspective_b
                     && scene_a.shapes.len() == scene_b.shapes.len()
                     && scene_a
                         .shapes
