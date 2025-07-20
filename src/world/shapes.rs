@@ -187,8 +187,7 @@ fn get_input_field(f: &facet::Field) -> ShapeInput {
             .or_else(|| {
                 get_field_as::<fidget::shapes::types::Plane>(
                     f,
-                    |d| {
-                        println!("{d:?}");
+                    |_| {
                         warn!("can't format Plane yet");
                         "".to_owned()
                     },
