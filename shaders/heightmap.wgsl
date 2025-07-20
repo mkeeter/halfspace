@@ -64,7 +64,9 @@ fn fs_main(@location(0) tex_coords: vec2<f32>) -> RgbaDepth {
         discard;
     }
 
-    let d = (depth - uniforms.min_depth) / (uniforms.max_depth - uniforms.min_depth);
+    // Scale based on height, but not all the way to black
+    let d = (depth - uniforms.min_depth) /
+        (uniforms.max_depth - uniforms.min_depth) * 0.7 + 0.3;
     var color = vec3<f32>(1.0, 1.0, 1.0);
     if (uniforms.has_color != 0) {
         color = textureSample(t_color, s_color, tex_coords).rgb;
