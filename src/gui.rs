@@ -655,7 +655,7 @@ fn script_block_io(
             );
             false
         }
-        IoValue::Input(value) => {
+        IoValue::Input { value, .. } => {
             let s = block.inputs.get_mut(name).unwrap();
             block_io_input(
                 ui,

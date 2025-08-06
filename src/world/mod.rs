@@ -162,8 +162,23 @@ pub enum NameError {
 
 #[derive(Clone)]
 pub enum IoValue {
-    Input(Result<rhai::Dynamic, String>),
-    Output { value: rhai::Dynamic, text: String },
+    Input {
+        pos: rhai::Position,
+        value: Result<rhai::Dynamic, String>,
+    },
+    Output {
+        pos: rhai::Position,
+        value: rhai::Dynamic,
+        text: String,
+    },
+}
+
+impl IoValue {
+    fn pos(&self) -> rhai::Position {
+        match self {
+            IoValue::Input { pos, .. } | IoValue::Output { pos, .. } => *pos,
+        }
+    }
 }
 
 pub struct BlockView {
@@ -483,10 +498,10 @@ impl World {
                 IoValue::Output { value, .. } => {
                     output_values.push((name.into(), value.clone()));
                 }
-                IoValue::Input(Ok(value)) => {
-                    input_values.push((name.into(), value.clone()))
-                }
-                IoValue::Input(Err(..)) => (),
+                IoValue::Input {
+                    value: Ok(value), ..
+                } => input_values.push((name.into(), value.clone())),
+                IoValue::Input { value: Err(..), .. } => (),
             }
         }
         if output_values.len() == 1 {
@@ -639,13 +654,43 @@ impl World {
                         for (s, v) in io_values.iter_mut() {
                             if let Some(n) = nv.remove(s) {
                                 *v = n;
-                            } else if let IoValue::Output { value, text } = v {
+                            } else if let IoValue::Output {
+                                value, text, ..
+                            } = v
+                            {
                                 // Previous outputs are marked as invalid but
                                 // stay in the GUI, to avoid jitter
                                 *value = rhai::Dynamic::from(());
                                 *text = "[evaluation failed]".to_string();
                             }
                         }
+
+                        // Merge remaining IO values based on textual position
+                        let mut nv = nv.into_iter().collect::<Vec<_>>();
+                        nv.sort_by_key(|(_name, v)| v.pos());
+                        let mut ia =
+                            std::mem::take(io_values).into_iter().peekable();
+                        let mut ib = nv.into_iter().peekable();
+                        let mut new_order: Vec<(String, IoValue)> = vec![];
+                        loop {
+                            match (ia.peek(), ib.peek()) {
+                                (Some(va), Some(vb)) => {
+                                    if va.1.pos() < vb.1.pos() {
+                                        new_order.push(ia.next().unwrap());
+                                    } else {
+                                        new_order.push(ib.next().unwrap());
+                                    }
+                                }
+                                (Some(..), None) => {
+                                    new_order.push(ia.next().unwrap())
+                                }
+                                (None, Some(..)) => {
+                                    new_order.push(ib.next().unwrap())
+                                }
+                                (None, None) => break,
+                            }
+                        }
+                        *io_values = new_order;
 
                         // Create new inputs, but do not delete old ones or edit
                         // text for pre-existing shared inputs.
@@ -747,8 +792,14 @@ impl BlockEvalData {
         let mut scope = rhai::Scope::new();
         scope.push("v", v.clone());
         let text = e.eval_with_scope(&mut scope, "to_string(v)").unwrap();
-        self.values
-            .push((name.to_owned(), IoValue::Output { value: v, text }));
+        self.values.push((
+            name.to_owned(),
+            IoValue::Output {
+                value: v,
+                text,
+                pos: ctx.position(),
+            },
+        ));
         Ok(())
     }
 
@@ -773,7 +824,13 @@ impl BlockEvalData {
             Ok(value) => Ok(value.clone()),
             Err(e) => Err(e.to_string()),
         };
-        self.values.push((name.to_owned(), IoValue::Input(i)));
+        self.values.push((
+            name.to_owned(),
+            IoValue::Input {
+                value: i,
+                pos: ctx.position(),
+            },
+        ));
         v.map_err(|_| "error in input expression".into())
     }
 
