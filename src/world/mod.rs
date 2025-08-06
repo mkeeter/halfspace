@@ -617,20 +617,31 @@ impl World {
                         }
                     } else if let Some(prev_data) = b.data.as_mut() {
                         // We have pre-existing old data, so create new outputs
-                        // and update values, but do not delete old ones
-                        prev_data.stdout = new_data.stdout;
-                        prev_data.debug = new_data.debug;
-                        prev_data.error = new_data.error;
-                        prev_data.view = new_data.view;
+                        // and update their values, but do not delete old ones.
+                        // n.b. we manually unpack the ScriptData object here,
+                        // so we get a compiler error when it changes
+                        let ScriptData {
+                            stdout,
+                            debug,
+                            error,
+                            view,
+                            io_values,
+                        } = prev_data;
+                        *stdout = new_data.stdout;
+                        *debug = new_data.debug;
+                        *error = new_data.error;
+                        *view = new_data.view;
+
                         let mut nv = new_data
                             .io_values
                             .into_iter()
                             .collect::<HashMap<_, _>>();
-                        for (s, v) in prev_data.io_values.iter_mut() {
+                        for (s, v) in io_values.iter_mut() {
                             if let Some(n) = nv.remove(s) {
                                 *v = n;
                             } else if let IoValue::Output { value, text } = v {
-                                // Previous outputs are marked as invalid
+                                // Previous outputs are marked as invalid but
+                                // stay in the GUI, to avoid jitter
                                 *value = rhai::Dynamic::from(());
                                 *text = "[evaluation failed]".to_string();
                             }
