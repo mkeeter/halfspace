@@ -672,12 +672,22 @@ impl World {
     }
 }
 
+enum ExportRequest {
+    Mesh {
+        tree: fidget::context::Tree,
+        min: fidget::shapes::types::Vec3,
+        max: fidget::shapes::types::Vec3,
+        feature_size: f32,
+    },
+}
+
 /// Handle to intermediate block data during evaluation
 #[derive(Default)]
 struct BlockEvalData {
     names: HashSet<String>,
     values: Vec<(String, IoValue)>,
     view: Option<scene::Scene>,
+    export: Option<ExportRequest>,
 
     stdout: Vec<String>,
     debug: HashMap<usize, Vec<String>>,
@@ -695,6 +705,7 @@ impl BlockEvalData {
             names: HashSet::new(),
             values: vec![],
             view: None,
+            export: None,
             stdout: vec![],
             debug: HashMap::new(),
             inputs,
@@ -847,6 +858,33 @@ impl BlockEvalData {
                   -> Result<(), Box<rhai::EvalAltResult>> {
                 let mut eval_data = eval_data_.write().unwrap();
                 eval_data.view(ctx, draw)
+            },
+        );
+
+        let eval_data_ = eval_data.clone();
+        engine.register_fn(
+            "export_mesh",
+            move |ctx: rhai::NativeCallContext,
+                  tree: fidget::context::Tree,
+                  min: fidget::shapes::types::Vec3,
+                  max: fidget::shapes::types::Vec3,
+                  feature_size: f32|
+                  -> Result<(), Box<rhai::EvalAltResult>> {
+                let mut eval_data = eval_data_.write().unwrap();
+                if eval_data.export.is_some() {
+                    return Err(rhai::EvalAltResult::ErrorRuntime(
+                        "cannot have multiple exports in a single block".into(),
+                        ctx.position(),
+                    )
+                    .into());
+                }
+                eval_data.export = Some(ExportRequest::Mesh {
+                    tree,
+                    min,
+                    max,
+                    feature_size,
+                });
+                Ok(())
             },
         );
     }
