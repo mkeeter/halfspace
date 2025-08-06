@@ -45,7 +45,7 @@
       "6": {
         "Script": {
           "name": "three",
-          "script": "let shapes = input(\"shapes\");\nlet out = [];\nlet offset = input(\"offset\");\n\nlet PI = 3.14159;\nfor s in shapes {\n\tlet three = [];\n    for i in 0..3 {\n        let angle = i / 3.0 * 2 * PI;\n        let shifted = move(s, [\n            offset * cos(angle),\n            offset * sin(angle)]);\n\t\tthree.push(shifted);\n    }\n\tout.push(union(three));\n}\noutput(\"out\", out);",
+          "script": "let shapes = input(\"shapes\");\nlet out = [];\nlet offset = input(\"offset\");\n\nfor s in shapes {\n\tlet three = [];\n    for i in 0..3 {\n        let angle = i / 3.0 * 2 * PI;\n        let shifted = move(s, [\n            offset * cos(angle),\n            offset * sin(angle)]);\n\t\tthree.push(shifted);\n    }\n\tout.push(union(three));\n}\noutput(\"out\", out);",
           "inputs": {
             "shapes": "[puck, cutout]",
             "offset": "2 * r_outer + r_inner"
