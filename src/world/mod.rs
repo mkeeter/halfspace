@@ -601,10 +601,55 @@ impl World {
             };
             match (b, ob) {
                 (Block::Script(b), Block::Script(ob)) => {
-                    b.data = ob.data;
-                    b.inputs.retain(|k, _| ob.inputs.contains_key(k));
-                    for (k, i) in ob.inputs {
-                        b.inputs.entry(k).or_insert(i);
+                    let new_data = ob.data.unwrap();
+                    if new_data.error.is_none() {
+                        // If the new block evaluated successfully, then we
+                        // replace everything.
+                        b.data = Some(new_data);
+
+                        // Delete old inputs; create new inputs (but do not edit
+                        // text for pre-existing shared inputs, because it may
+                        // have been changed while the world was evaluated
+                        // off-thread)
+                        b.inputs.retain(|k, _| ob.inputs.contains_key(k));
+                        for (k, i) in ob.inputs {
+                            b.inputs.entry(k).or_insert(i);
+                        }
+                    } else if let Some(prev_data) = b.data.as_mut() {
+                        // We have pre-existing old data, so create new outputs
+                        // and update values, but do not delete old ones
+                        prev_data.stdout = new_data.stdout;
+                        prev_data.debug = new_data.debug;
+                        prev_data.error = new_data.error;
+                        prev_data.view = new_data.view;
+                        let mut nv = new_data
+                            .io_values
+                            .into_iter()
+                            .collect::<HashMap<_, _>>();
+                        for (s, v) in prev_data.io_values.iter_mut() {
+                            if let Some(n) = nv.remove(s) {
+                                *v = n;
+                            } else if let IoValue::Output { value, text } = v {
+                                // Previous outputs are marked as invalid
+                                *value = rhai::Dynamic::from(());
+                                *text = "[evaluation failed]".to_string();
+                            }
+                        }
+
+                        // Create new inputs, but do not delete old ones or edit
+                        // text for pre-existing shared inputs.
+                        for (k, i) in ob.inputs {
+                            b.inputs.entry(k).or_insert(i);
+                        }
+                    } else {
+                        // If we have no old data, then replace everything
+                        b.data = Some(new_data);
+
+                        // Create new inputs, but do not delete old ones or edit
+                        // text for pre-existing shared inputs.
+                        for (k, i) in ob.inputs {
+                            b.inputs.entry(k).or_insert(i);
+                        }
                     }
                 }
                 (Block::Value(b), Block::Value(ob)) => {
