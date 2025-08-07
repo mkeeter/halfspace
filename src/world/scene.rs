@@ -66,18 +66,17 @@ impl rhai::CustomType for Color {
                     let b = fidget::context::Tree::from_dynamic(&ctx, b, None)?;
                     let rgb = [r, g, b];
                     for c in rgb.iter() {
-                        if let fidget::context::TreeOp::Const(c) = c.deref() {
-                            if !(0.0..=1.0).contains(c) {
-                                return Err(
-                                    rhai::EvalAltResult::ErrorMismatchDataType(
-                                        "float in the 0.0 - 1.0 range"
-                                            .to_owned(),
-                                        format!("float with value {c}"),
-                                        ctx.position(),
-                                    )
-                                    .into(),
-                                );
-                            }
+                        if let fidget::context::TreeOp::Const(c) = c.deref()
+                            && !(0.0..=1.0).contains(c)
+                        {
+                            return Err(
+                                rhai::EvalAltResult::ErrorMismatchDataType(
+                                    "float in the 0.0 - 1.0 range".to_owned(),
+                                    format!("float with value {c}"),
+                                    ctx.position(),
+                                )
+                                .into(),
+                            );
                         }
                     }
                     Ok(Color::Rgb(rgb))
@@ -99,18 +98,17 @@ impl rhai::CustomType for Color {
                     let l = fidget::context::Tree::from_dynamic(&ctx, b, None)?;
                     let hsl = [h, s, l];
                     for c in &hsl[1..] {
-                        if let fidget::context::TreeOp::Const(c) = c.deref() {
-                            if !(0.0..=1.0).contains(c) {
-                                return Err(
-                                    rhai::EvalAltResult::ErrorMismatchDataType(
-                                        "float in the 0.0 - 1.0 range"
-                                            .to_owned(),
-                                        format!("float with value {c}"),
-                                        ctx.position(),
-                                    )
-                                    .into(),
-                                );
-                            }
+                        if let fidget::context::TreeOp::Const(c) = c.deref()
+                            && !(0.0..=1.0).contains(c)
+                        {
+                            return Err(
+                                rhai::EvalAltResult::ErrorMismatchDataType(
+                                    "float in the 0.0 - 1.0 range".to_owned(),
+                                    format!("float with value {c}"),
+                                    ctx.position(),
+                                )
+                                .into(),
+                            );
                         }
                     }
                     Ok(Color::Hsl(hsl))

@@ -1,4 +1,4 @@
-use crate::{state, wgpu_setup, App, AppState, Message, MessageSender, Modal};
+use crate::{App, AppState, Message, MessageSender, Modal, state, wgpu_setup};
 use log::{info, warn};
 use std::io::{Read, Write};
 
@@ -106,10 +106,10 @@ pub fn run() -> anyhow::Result<()> {
         native_options,
         Box::new(|cc| {
             let (mut app, mut notify_rx) = App::new(cc, args.debug);
-            if let Some(example) = args.example {
-                if !app.load_example(&format!("{example}.half")) {
-                    warn!("could not find example '{example}'");
-                }
+            if let Some(example) = args.example
+                && !app.load_example(&format!("{example}.half"))
+            {
+                warn!("could not find example '{example}'");
             }
 
             // Worker thread to request repaints based on notifications
@@ -133,7 +133,9 @@ pub fn run() -> anyhow::Result<()> {
                         if e.kind() == std::io::ErrorKind::NotFound =>
                     {
                         // We can specify a filename to create
-                        info!("file {filename:?} is not yet present; treating it as empty");
+                        info!(
+                            "file {filename:?} is not yet present; treating it as empty"
+                        );
                         app.file = Some(filename);
                     }
                     Err(e) => return Err(e.into()),

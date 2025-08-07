@@ -412,11 +412,11 @@ impl ViewData {
         // us to reinitialize it below).  Skip clearing the task if it's a
         // max-level (i.e. lowest-resolution) render, to preserve responsiveness
         let settings = RenderSettings::from_canvas(&self.canvas, scene);
-        if let Some(prev) = &self.task {
-            if prev.should_cancel(&settings, self.start_level) {
-                self.task = None;
-                self.pending = None;
-            }
+        if let Some(prev) = &self.task
+            && prev.should_cancel(&settings, self.start_level)
+        {
+            self.task = None;
+            self.pending = None;
         }
         if self.task.is_none() {
             self.generation += 1;

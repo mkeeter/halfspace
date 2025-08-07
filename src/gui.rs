@@ -718,16 +718,13 @@ fn block_io_input(
         if shift_down && r.hovered() {
             ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::Move);
         }
-        if let Some(dv) = dv {
-            if shift_down {
-                // Extend sense over the same rect as TextEdit
-                let drag_response =
-                    ui.interact(r.rect, r.id, egui::Sense::drag());
+        if shift_down && let Some(dv) = dv {
+            // Extend sense over the same rect as TextEdit
+            let drag_response = ui.interact(r.rect, r.id, egui::Sense::drag());
 
-                if drag_response.dragged() {
-                    *s = dv.interact(drag_response.drag_motion(), mat);
-                    changed = true;
-                }
+            if drag_response.dragged() {
+                *s = dv.interact(drag_response.drag_motion(), mat);
+                changed = true;
             }
         }
         changed | r.changed()
@@ -759,10 +756,10 @@ fn draggable_script_block_header(
         {
             response = BlockResponse::TOGGLE_EDIT;
         }
-        if let Some(view) = flags.is_view_open {
-            if ui.add(egui::Button::new(EYE).selected(view)).clicked() {
-                response = BlockResponse::TOGGLE_VIEW;
-            }
+        if let Some(view) = flags.is_view_open
+            && ui.add(egui::Button::new(EYE).selected(view)).clicked()
+        {
+            response = BlockResponse::TOGGLE_VIEW;
         }
         if let Some(block_data) = &block.data {
             let e = match block_data.error.as_ref() {
@@ -827,10 +824,10 @@ fn draggable_value_block(
         if ui.button(TRASH).clicked() {
             response |= BlockResponse::DELETE;
         }
-        if let Some(view) = flags.is_view_open {
-            if ui.add(egui::Button::new(EYE).selected(view)).clicked() {
-                response = BlockResponse::TOGGLE_VIEW;
-            }
+        if let Some(view) = flags.is_view_open
+            && ui.add(egui::Button::new(EYE).selected(view)).clicked()
+        {
+            response = BlockResponse::TOGGLE_VIEW;
         }
         ui.with_layout(
             egui::Layout::left_to_right(egui::Align::Center),
