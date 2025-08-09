@@ -1,4 +1,4 @@
-use crate::{state, wgpu_setup, App, AppState, Message, MessageSender, Modal};
+use crate::{App, AppState, Message, MessageSender, Modal, state, wgpu_setup};
 use log::{error, info, warn};
 use wasm_bindgen::prelude::*;
 
@@ -129,6 +129,17 @@ impl App {
             error!("could not send Open to dialog thread");
         }
     }
+
+    pub(crate) fn platform_select_download(
+        &self,
+        ext: &str,
+    ) -> Option<ExportTarget> {
+        if let Some(name) = &self.meta.name {
+            Some(ExportTarget(format!("{name}.{ext}")))
+        } else {
+            Some(ExportTarget(format!("halfspace_export.{ext}")))
+        }
+    }
 }
 
 pub struct Data {
@@ -192,9 +203,9 @@ impl Data {
     pub(crate) fn download_file(
         &self,
         filename: &str,
-        text: &str,
+        data: &[u8],
     ) -> Option<Modal> {
-        match Self::download_file_inner(filename, text) {
+        match Self::download_file_inner(filename, data) {
             Ok(()) => None,
             Err(e) => Some(Modal::Error {
                 title: "Download failed".to_owned(),
@@ -206,17 +217,21 @@ impl Data {
     /// Downloads the given file
     pub fn download_file_inner(
         filename: &str,
-        text: &str,
+        data: &[u8],
     ) -> Result<(), JsValue> {
-        // Create a Blob from the text
-        let blob_parts = js_sys::Array::new();
-        blob_parts.push(&JsValue::from_str(text));
+        let uint8_array =
+            js_sys::Uint8Array::new_with_length(data.len() as u32);
+        uint8_array.copy_from(data);
+
+        let array = js_sys::Array::new();
+        array.push(&uint8_array);
 
         let blob_options = web_sys::BlobPropertyBag::new();
         blob_options.set_type("text/plain");
 
-        let blob = web_sys::Blob::new_with_str_sequence_and_options(
-            &blob_parts,
+        // Create and return the Blob
+        let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(
+            &array,
             &blob_options,
         )?;
 
@@ -249,6 +264,17 @@ impl Data {
         a.remove();
 
         Ok(())
+    }
+}
+
+/// Platform-specific export target (downloads to a file)
+#[derive(Debug)]
+pub struct ExportTarget(String);
+
+impl ExportTarget {
+    pub fn save(&self, data: &[u8]) -> Result<(), std::io::Error> {
+        Data::download_file_inner(&self.0, data)
+            .map_err(|e| std::io::Error::other(format!("{e:?}")))
     }
 }
 

@@ -19,12 +19,12 @@ use rayon::prelude::*;
 use web_time::Instant;
 
 #[cfg(all(feature = "jit", not(target_arch = "wasm32")))]
-type RenderFunction = fidget::jit::JitFunction;
+pub(crate) type RenderFunction = fidget::jit::JitFunction;
 
 #[cfg(any(target_arch = "wasm32", not(feature = "jit")))]
-type RenderFunction = fidget::vm::VmFunction;
+pub(crate) type RenderFunction = fidget::vm::VmFunction;
 
-type RenderShape = fidget::shape::Shape<RenderFunction>;
+pub(crate) type RenderShape = fidget::shape::Shape<RenderFunction>;
 
 /// State representing an in-progress render
 pub struct RenderTask {

@@ -732,6 +732,7 @@ impl World {
     }
 }
 
+#[derive(Clone)]
 pub enum ExportRequest {
     Mesh {
         tree: fidget::context::Tree,

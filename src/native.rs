@@ -54,7 +54,7 @@ impl Data {
     pub(crate) fn download_file(
         &self,
         filename: &str,
-        _text: &str,
+        _data: &[u8],
     ) -> Option<Modal> {
         Some(Modal::Error {
             title: "Download failed".to_owned(),
@@ -63,6 +63,16 @@ impl Data {
                 implemented in the native platform"
             ),
         })
+    }
+}
+
+/// Platform-specific export target
+#[derive(Debug)]
+pub struct ExportTarget(std::path::PathBuf);
+
+impl ExportTarget {
+    pub fn save(&self, data: &[u8]) -> Result<(), std::io::Error> {
+        std::fs::File::create(&self.0)?.write_all(data)
     }
 }
 
@@ -209,6 +219,16 @@ impl App {
         } else {
             self.rx.sender().send(Message::CancelLoad);
         }
+    }
+
+    pub(crate) fn platform_select_download(
+        &self,
+        ext: &str,
+    ) -> Option<ExportTarget> {
+        rfd::FileDialog::new()
+            .add_filter("STL", &[ext])
+            .save_file()
+            .map(ExportTarget)
     }
 }
 

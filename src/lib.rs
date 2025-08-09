@@ -4,6 +4,7 @@ use log::{debug, error, info, warn};
 use std::collections::{HashMap, HashSet};
 use web_time::Instant;
 
+mod export;
 mod gui;
 mod painters;
 mod render;
@@ -219,6 +220,7 @@ enum Message {
         message: String,
     },
     CancelLoad,
+    ExportComplete(Result<Vec<u8>, export::ExportError>),
 }
 
 #[derive(Clone)]
@@ -357,7 +359,6 @@ impl std::fmt::Debug for NextAction {
     }
 }
 
-#[derive(Clone)]
 #[must_use]
 #[allow(clippy::large_enum_variant)]
 enum Modal {
@@ -380,6 +381,10 @@ enum Modal {
     OpenLocal {
         files: Vec<String>,
         name: String,
+    },
+    ExportInProgress {
+        target: platform::ExportTarget,
+        cancel: fidget::render::CancelToken,
     },
     WaitForLoad,
     About,
@@ -411,6 +416,10 @@ impl std::fmt::Debug for Modal {
                 .field("files", &"..")
                 .finish(),
             Modal::WaitForLoad => f.debug_struct("WaitForLoad").finish(),
+            Modal::ExportInProgress { target, .. } => f
+                .debug_struct("ExportInProgress")
+                .field("target", &format!("{target:?}"))
+                .finish(),
             Modal::About => f.debug_struct("About").finish(),
         }
     }
@@ -1107,6 +1116,17 @@ impl App {
             Modal::WaitForLoad => {
                 // Nothing to do here, just block the screen
             }
+            Modal::ExportInProgress { cancel, .. } => {
+                let r = draw_modal_window(
+                    ctx,
+                    "Export in progress",
+                    dialog_size,
+                    |ui| ui.button("Cancel").clicked(),
+                );
+                if r {
+                    cancel.cancel();
+                }
+            }
             Modal::About => {
                 egui::Window::new("About")
                     .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
@@ -1266,7 +1286,7 @@ impl App {
 
     fn download_file(&mut self, f: &str, state: AppState) {
         let json_str = state.serialize();
-        match self.platform.download_file(f, &json_str) {
+        match self.platform.download_file(f, json_str.as_bytes()) {
             None => self.undo.mark_saved(state.world),
             Some(d) => self.modal = Some(d),
         }
@@ -1303,7 +1323,8 @@ impl App {
 
     fn on_open(&mut self) {
         // "Open" is a local load for WASM32 builds, and a native load otherwise
-        self.on_load(cfg!(target_arch = "wasm32"));
+        let is_local = cfg!(target_arch = "wasm32");
+        self.on_load(is_local);
     }
 
     fn on_load(&mut self, local: bool) {
@@ -1485,6 +1506,7 @@ impl App {
         // Draw blocks
         let mut to_delete = HashSet::new();
         let mut changed = false;
+        let mut to_export = None;
         let last = self.data.order.last().cloned();
 
         let block_mats = self.characteristic_matrices();
@@ -1537,7 +1559,20 @@ impl App {
                     tree.toggle_script();
                 }
                 if r.contains(BlockResponse::EXPORT) {
-                    info!("trying to export block");
+                    let world::Block::Script(s) = block else {
+                        panic!("can't export from non-script block");
+                    };
+                    let Some(data) = &s.data else {
+                        panic!("can't export without data");
+                    };
+                    let Some(e) = &data.export else {
+                        panic!("can't export without export request");
+                    };
+                    if to_export.is_some() {
+                        error!("multiple export requests found");
+                    } else {
+                        to_export = Some(e.clone());
+                    }
                 }
                 changed |= r.contains(BlockResponse::CHANGED);
             },
@@ -1549,6 +1584,36 @@ impl App {
         // Post-processing: edit blocks based on button presses
         changed |= self.data.retain(|index| !to_delete.contains(index));
         self.views.retain(|index, _| !to_delete.contains(index));
+
+        match to_export {
+            Some(world::ExportRequest::Mesh {
+                tree,
+                min,
+                max,
+                feature_size,
+            }) => {
+                if self.modal.is_none()
+                    && let Some(target) = self.platform_select_download("stl")
+                {
+                    let cancel = fidget::render::CancelToken::new();
+                    let cancel_ = cancel.clone();
+                    let tx = self.rx.sender();
+                    rayon::spawn(move || {
+                        let r = export::build_stl(
+                            tree,
+                            min,
+                            max,
+                            feature_size,
+                            cancel_,
+                        );
+                        tx.send(Message::ExportComplete(r))
+                    });
+                    self.modal =
+                        Some(Modal::ExportInProgress { target, cancel });
+                }
+            }
+            None => (),
+        }
 
         changed
     }
@@ -1648,6 +1713,33 @@ impl App {
                 _ => warn!(
                     "received Loadfailed with unexpected modal {:?}",
                     self.modal
+                ),
+            },
+            Message::ExportComplete(r) => match &self.modal {
+                Some(Modal::ExportInProgress { target, .. }) => match r {
+                    Err(export::ExportError::Cancelled) => self.modal = None,
+                    Err(e) => {
+                        self.modal = Some(Modal::Error {
+                            title: "Export failed".to_owned(),
+                            message: format!("{:#}", anyhow::Error::from(e)),
+                        });
+                    }
+                    Ok(data) => match target.save(&data) {
+                        Ok(()) => self.modal = None,
+                        Err(e) => {
+                            self.modal = Some(Modal::Error {
+                                title: "Export failed".to_owned(),
+                                message: format!(
+                                    "{:#}",
+                                    anyhow::Error::from(e)
+                                ),
+                            })
+                        }
+                    },
+                },
+                _ => warn!(
+                    "received ExportComplete with unexpected modal {:?}",
+                    self.modal,
                 ),
             },
         }

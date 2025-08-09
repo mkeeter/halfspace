@@ -1458,7 +1458,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "778e2ac28f6c47af28e4907f13ffd1e1ddbd400980a9abd7c8df189bf578a5ad"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1586,7 +1586,7 @@ dependencies = [
 [[package]]
 name = "fidget"
 version = "0.3.9"
-source = "git+https://github.com/mkeeter/fidget#ff58cc1751fcc37143d398975f50e865a36f44bb"
+source = "git+https://github.com/mkeeter/fidget#f68b847cd68b68ca5ff134808164fa11810e78a4"
 dependencies = [
  "arrayvec",
  "bimap",
@@ -2426,7 +2426,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07033963ba89ebaf1584d767badaa2e8fcec21aedea6b8c0346d487d49c28667"
 dependencies = [
  "cfg-if",
- "windows-targets 0.53.3",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -3783,7 +3783,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.9.4",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5432,7 +5432,7 @@ dependencies = [
 [[package]]
 name = "workspace-hack"
 version = "0.1.0"
-source = "git+https://github.com/mkeeter/fidget#ff58cc1751fcc37143d398975f50e865a36f44bb"
+source = "git+https://github.com/mkeeter/fidget#f68b847cd68b68ca5ff134808164fa11810e78a4"
 dependencies = [
  "ahash",
  "anstream",
