@@ -133,6 +133,20 @@ impl ShapeVisitor for Visitor {
         script +=
             &format!("\nlet out = {}({obj});\n", shape_name.to_snake_case());
         script += "output(\"out\", out);";
+
+        // Heuristics to nicely print out shape names
+        // TODO: maybe this should be provided by the shape library itself?
+        let name_tc = shape_name.to_title_case();
+        let words = name_tc.split_whitespace().collect::<Vec<_>>();
+        let name = if words.len() == 2 {
+            if words[1].len() > 1 {
+                format!("{} ({})", words[0], words[1].to_lowercase())
+            } else {
+                format!("{} ({})", words[0], words[1])
+            }
+        } else {
+            name_tc
+        };
         self.lib.shapes.push(ShapeDefinition {
             name: shape_name.to_title_case(),
             kind: ShapeKind::Script { script, inputs },
