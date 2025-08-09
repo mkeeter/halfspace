@@ -41,10 +41,57 @@ impl ShapeLibrary {
             },
             category: ShapeCategory::Halfspace,
         });
+        v.lib.shapes.push(ShapeDefinition {
+            name: "Export (mesh)".to_owned(),
+            kind: ShapeKind::Script {
+                script: EXPORT_MESH_SCRIPT.to_owned(),
+                inputs: [
+                    (
+                        "shape",
+                        ShapeInput {
+                            ty: Some(fidget::context::Tree::SHAPE.id),
+                            text: "".to_owned(),
+                        },
+                    ),
+                    (
+                        "lower",
+                        ShapeInput {
+                            ty: Some(Vec3::SHAPE.id),
+                            text: "[-1, -1, -1]".to_owned(),
+                        },
+                    ),
+                    (
+                        "upper",
+                        ShapeInput {
+                            ty: Some(Vec3::SHAPE.id),
+                            text: "[1, 1, 1]".to_owned(),
+                        },
+                    ),
+                    (
+                        "min_feature",
+                        ShapeInput {
+                            ty: Some(f64::SHAPE.id),
+                            text: "0.1".to_owned(),
+                        },
+                    ),
+                ]
+                .into_iter()
+                .map(|(a, b)| (a.to_string(), b))
+                .collect(),
+            },
+            category: ShapeCategory::Halfspace,
+        });
         visit_shapes(&mut v);
         v.lib
     }
 }
+
+const EXPORT_MESH_SCRIPT: &str = r#"// Script to export a mesh
+let shape = input("shape");
+let lower = input("lower");
+let upper = input("upper");
+let min_feature = input("min_feature");
+export_mesh(shape, vec3(lower), vec3(upper), min_feature.to_float());"#;
 
 #[derive(Copy, Clone, PartialEq)]
 pub enum ShapeCategory {
@@ -148,7 +195,7 @@ impl ShapeVisitor for Visitor {
             name_tc
         };
         self.lib.shapes.push(ShapeDefinition {
-            name: shape_name.to_title_case(),
+            name,
             kind: ShapeKind::Script { script, inputs },
             category: ShapeCategory::Fidget,
         });

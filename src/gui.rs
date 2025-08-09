@@ -571,7 +571,11 @@ pub fn draggable_block(
     let padding = ui.spacing().icon_width + ui.spacing().icon_spacing;
     match block {
         Block::Script(block) => {
-            if block.data.as_ref().is_some_and(|s| !s.io_values.is_empty()) {
+            if block
+                .data
+                .as_ref()
+                .is_some_and(|s| !s.io_values.is_empty() || s.export.is_some())
+            {
                 use egui::collapsing_header::CollapsingState;
                 CollapsingState::load_with_default_open(
                     ui.ctx(),
@@ -627,6 +631,22 @@ fn script_block_body(
             ui.add_space(padding);
             changed |= script_block_io(ui, index, block, name, value, mat);
         });
+    }
+    if let Some(e) = block_data.export.as_ref() {
+        let enabled = block_data.error.is_none();
+        let r = ui.horizontal(|ui| {
+            ui.add_space(padding);
+            ui.add_enabled_ui(enabled, |ui| {
+                ui.add_sized(
+                    [ui.available_width(), 25.0],
+                    egui::Button::new("Export"),
+                )
+            })
+            .inner
+        });
+        if r.inner.clicked() {
+            log::info!("EXPORT");
+        }
     }
     block.data = Some(block_data);
     changed

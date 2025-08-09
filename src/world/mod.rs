@@ -200,6 +200,8 @@ pub struct ScriptData {
     pub io_values: Vec<(String, IoValue)>,
     /// Value exported to a view
     pub view: Option<BlockView>,
+    /// Export request from the script
+    pub export: Option<ExportRequest>,
 }
 
 /// Transient value data (e.g. evaluation results)
@@ -421,6 +423,7 @@ impl World {
             debug: HashMap::new(),
             io_values: vec![],
             view: None,
+            export: None,
         });
         let data = block.data.as_mut().unwrap();
 
@@ -443,18 +446,28 @@ impl World {
 
         let r = engine.eval_ast::<rhai::Dynamic>(&ast);
 
-        // Update block state based on actions taken by the script
+        // Update block state based on actions taken by the script.  We manually
+        // unpack `data` here to produce a compiler error if it changes.
         let eval_data = std::mem::take(&mut *eval_data.write().unwrap());
-        data.stdout = eval_data.stdout.join("\n");
-        data.debug = eval_data.debug;
-        data.io_values = eval_data.values;
-        data.view = eval_data.view.map(|scene| BlockView { scene });
+        let ScriptData {
+            stdout,
+            debug,
+            io_values,
+            view,
+            error,
+            export,
+        } = data;
+        *stdout = eval_data.stdout.join("\n");
+        *debug = eval_data.debug;
+        *io_values = eval_data.values;
+        *view = eval_data.view.map(|scene| BlockView { scene });
+        *export = eval_data.export;
 
         // Update inputs, which may have been modified
         block.inputs = eval_data.inputs;
 
         if let Err(e) = r {
-            data.error = Some(BlockError::Eval(e));
+            *error = Some(BlockError::Eval(e));
         } else {
             // If the script evaluated successfully, filter out any input
             // fields which haven't been used in the script.
@@ -641,11 +654,13 @@ impl World {
                             error,
                             view,
                             io_values,
+                            export,
                         } = prev_data;
                         *stdout = new_data.stdout;
                         *debug = new_data.debug;
                         *error = new_data.error;
                         *view = new_data.view;
+                        *export = new_data.export;
 
                         let mut nv = new_data
                             .io_values
@@ -717,12 +732,12 @@ impl World {
     }
 }
 
-enum ExportRequest {
+pub enum ExportRequest {
     Mesh {
         tree: fidget::context::Tree,
         min: fidget::shapes::types::Vec3,
         max: fidget::shapes::types::Vec3,
-        feature_size: f32,
+        feature_size: f64,
     },
 }
 
@@ -925,7 +940,7 @@ impl BlockEvalData {
                   tree: fidget::context::Tree,
                   min: fidget::shapes::types::Vec3,
                   max: fidget::shapes::types::Vec3,
-                  feature_size: f32|
+                  feature_size: f64|
                   -> Result<(), Box<rhai::EvalAltResult>> {
                 let mut eval_data = eval_data_.write().unwrap();
                 if eval_data.export.is_some() {
