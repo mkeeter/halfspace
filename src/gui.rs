@@ -588,9 +588,7 @@ pub fn draggable_block(
                     )
                 })
                 .body_unindented(|ui| {
-                    if script_block_body(ui, index, block, mat) {
-                        response |= BlockResponse::CHANGED;
-                    }
+                    response |= script_block_body(ui, index, block, mat);
                     if !flags.is_last {
                         ui.separator();
                     }
@@ -616,23 +614,24 @@ pub fn draggable_block(
     }
 }
 
-#[must_use]
 fn script_block_body(
     ui: &mut egui::Ui,
     index: BlockIndex,
     block: &mut ScriptBlock,
     mat: nalgebra::Matrix4<f32>,
-) -> bool {
-    let mut changed = false;
+) -> BlockResponse {
+    let mut response = BlockResponse::empty();
     let block_data = block.data.take().unwrap();
     let padding = ui.spacing().icon_width + ui.spacing().icon_spacing;
     for (name, value) in &block_data.io_values {
         ui.horizontal(|ui| {
             ui.add_space(padding);
-            changed |= script_block_io(ui, index, block, name, value, mat);
+            if script_block_io(ui, index, block, name, value, mat) {
+                response |= BlockResponse::CHANGED;
+            }
         });
     }
-    if let Some(e) = block_data.export.as_ref() {
+    if block_data.export.is_some() {
         let enabled = block_data.error.is_none();
         let r = ui.horizontal(|ui| {
             ui.add_space(padding);
@@ -645,11 +644,11 @@ fn script_block_body(
             .inner
         });
         if r.inner.clicked() {
-            log::info!("EXPORT");
+            response |= BlockResponse::EXPORT;
         }
     }
     block.data = Some(block_data);
-    changed
+    response
 }
 
 /// Draws a field for a block input or output

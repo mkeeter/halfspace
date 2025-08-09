@@ -1536,6 +1536,9 @@ impl App {
                 if r.contains(BlockResponse::FOCUS_ERR) {
                     tree.toggle_script();
                 }
+                if r.contains(BlockResponse::EXPORT) {
+                    info!("trying to export block");
+                }
                 changed |= r.contains(BlockResponse::CHANGED);
             },
         );
@@ -1722,7 +1725,7 @@ impl App {
 
 bitflags::bitflags! {
     /// Represents a set of flags.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, )]
     #[must_use]
     struct BlockResponse: u32 {
         /// Request to delete the block
@@ -1735,6 +1738,8 @@ bitflags::bitflags! {
         const FOCUS_ERR     = (1 << 3);
         /// The block has changed
         const CHANGED       = (1 << 4);
+        /// Export this block
+        const EXPORT        = (1 << 5);
     }
 }
 
