@@ -59,6 +59,8 @@
             <p>Loading...</p>
         </div>
         <canvas id="the_canvas_id"></canvas>
+
+        <!-- These divs are shown conditionally -->
         <div id="wgpu-fail" hidden>
             <p>WebGPU initialization failed: <b id="wgpu-error"></b></p>
             <p>Try
@@ -69,6 +71,15 @@
             <p>When using Chrome on Linux, WebGPU must be enabled with<br>
             <code>chrome://flags/#unsafe-webgpu-support</code> and<br>
             <code>chrome://flags/#enable-vulkan</code>.
+        </div>
+        <div id="wasm-panic" hidden>
+            <p>Panic caught in WebAssembly:</p>
+            <code id="panic-message"></code>
+            <p>We apologize for the inconvenience.</p>
+        </div>
+
+        <!-- This div is always present, but is usually hidden by the canvas -->
+        <div>
             <p><a href="https://github.com/mkeeter/halfspace">Github</a></p>
         </div>
     </body>

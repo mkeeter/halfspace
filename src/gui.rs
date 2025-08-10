@@ -648,14 +648,17 @@ fn script_block_body(
                 ui.add_enabled_ui(enabled, |ui| {
                     ui.add_sized(
                         [ui.available_width(), 25.0],
-                        egui::Button::new("Export"),
+                        egui::Button::new("Export mesh"),
                     )
                 })
                 .inner
             });
             match s {
                 Ok(s) => {
-                    ui.label(format!("Octree depth: {}", s.depth));
+                    ui.horizontal(|ui| {
+                        ui.add_space(padding);
+                        ui.label(format!("Octree depth: {}", s.depth));
+                    });
                 }
                 Err(e) => {
                     ui.horizontal(|ui| {

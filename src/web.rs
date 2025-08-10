@@ -13,6 +13,29 @@ unsafe impl Send for crate::painters::WgpuResources {}
 unsafe impl Send for crate::WgpuError {}
 unsafe impl Sync for crate::WgpuError {}
 
+fn get_canvas() -> web_sys::HtmlCanvasElement {
+    let window = web_sys::window().expect("No window");
+    let document = window.document().expect("No document");
+
+    document
+        .get_element_by_id("the_canvas_id")
+        .expect("Failed to find the_canvas_id")
+        .dyn_into::<web_sys::HtmlCanvasElement>()
+        .expect("the_canvas_id was not a HtmlCanvasElement")
+}
+
+fn custom_panic_handler(info: &std::panic::PanicHookInfo) {
+    let window = web_sys::window().expect("No window");
+    let document = window.document().expect("No document");
+    let p = document.get_element_by_id("panic-message").unwrap();
+    p.set_text_content(Some(&format!("{info}")));
+
+    let div = document.get_element_by_id("wasm-panic").unwrap();
+    div.remove_attribute("hidden").unwrap();
+
+    get_canvas().remove();
+}
+
 #[wasm_bindgen]
 pub fn run() {
     let window = web_sys::window().expect("No window");
@@ -57,12 +80,7 @@ pub fn run() {
 
     let example = params.and_then(|p| p.get("example"));
     wasm_bindgen_futures::spawn_local(async move {
-        let canvas = document
-            .get_element_by_id("the_canvas_id")
-            .expect("Failed to find the_canvas_id")
-            .dyn_into::<web_sys::HtmlCanvasElement>()
-            .expect("the_canvas_id was not a HtmlCanvasElement");
-
+        let canvas = get_canvas();
         let mut web_options = eframe::WebOptions::default();
         web_options.wgpu_options.wgpu_setup = match wgpu_setup().await {
             Ok(w) => w.into(),
@@ -75,9 +93,12 @@ pub fn run() {
                 let div = document.get_element_by_id("wgpu-fail").unwrap();
                 div.remove_attribute("hidden").unwrap();
                 canvas.remove();
-                panic!();
+                panic!("wgpu initialization failed");
             }
         };
+
+        // Add a custom panic handler for subsequent panics
+        std::panic::set_hook(Box::new(custom_panic_handler));
 
         eframe::WebRunner::new()
             .start(
