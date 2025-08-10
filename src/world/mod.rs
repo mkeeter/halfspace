@@ -16,6 +16,7 @@ mod shapes;
 pub use scene::{Color, Drawable, Scene};
 pub use shapes::{ShapeKind, ShapeLibrary};
 
+#[allow(clippy::large_enum_variant)]
 pub enum Block {
     Script(ScriptBlock),
     Value(ValueBlock),
@@ -311,8 +312,9 @@ impl World {
 
         let b = match &s.kind {
             ShapeKind::Script { inputs, script } => {
-                // Special casing: if the shape has a single tree input and our last
-                // block has a single tree output, then we pre-populate the input.
+                // Special casing: if the shape has a single tree input and our
+                // last block has a single tree output or input, then we
+                // pre-populate the input.
                 let mut iter = inputs.iter().filter(|(_name, i)| {
                     i.ty.is_some_and(|ty| {
                         ty == Tree::SHAPE.id || ty == Vec::<Tree>::SHAPE.id
@@ -328,23 +330,28 @@ impl World {
                     }) = &self.blocks[i]
                 {
                     let mut output_count = 0;
+                    let mut input_count = 0;
                     let mut has_tree = false;
-                    for v in data.io_values.iter().flat_map(|(_name, i)| {
-                        if let IoValue::Output { value, .. } = i {
-                            Some(value)
-                        } else {
-                            None
-                        }
-                    }) {
-                        output_count += 1;
-                        if v.clone()
-                            .try_cast::<fidget::context::Tree>()
-                            .is_some()
-                        {
-                            has_tree = true;
+                    for (_name, i) in data.io_values.iter() {
+                        has_tree |= match i {
+                            IoValue::Output { value, .. } => {
+                                output_count += 1;
+                                value
+                                    .clone()
+                                    .try_cast::<fidget::context::Tree>()
+                                    .is_some()
+                            }
+                            IoValue::Input { value, .. } => {
+                                input_count += 1;
+                                value.as_ref().is_ok_and(|v| {
+                                    v.clone()
+                                        .try_cast::<fidget::context::Tree>()
+                                        .is_some()
+                                })
+                            }
                         }
                     }
-                    if has_tree && output_count == 1 {
+                    if has_tree && ((output_count == 1) ^ (input_count == 1)) {
                         last_tree = Some(name);
                     }
                 }
@@ -502,7 +509,8 @@ impl World {
 
         // Write IO values into the shared input scope.  The value which is
         // written depends on a few heuristics:
-        // - If there is a single output, then write it with the object name
+        // - If there is a single output or input, then write it with the object
+        //   name
         // - Otherwise, write both outputs and inputs as an object map
         let mut output_values = vec![];
         let mut input_values = vec![];
@@ -517,8 +525,21 @@ impl World {
                 IoValue::Input { value: Err(..), .. } => (),
             }
         }
-        if output_values.len() == 1 {
+        let mut single_value = if output_values.len() == 1 {
             let (_name, value) = output_values.pop().unwrap();
+            Some(value)
+        } else if input_values.len() == 1 && output_values.is_empty() {
+            let (_name, value) = input_values.pop().unwrap();
+            Some(value)
+        } else {
+            let obj: rhai::Map =
+                output_values.into_iter().chain(input_values).collect();
+            input_scope.push(&block.name, obj);
+            None
+        };
+
+        // Handle the special case of a single input (or output) value
+        if let Some(value) = single_value.take() {
             input_scope.push(&block.name, value.clone());
             // If there's no view but there's a single view-compatible output,
             // then treat it as the view.
@@ -531,10 +552,6 @@ impl World {
                     data.view = Some(BlockView { scene })
                 }
             }
-        } else {
-            let obj: rhai::Map =
-                output_values.into_iter().chain(input_values).collect();
-            input_scope.push(&block.name, obj);
         }
 
         input_scope
