@@ -47,28 +47,28 @@ impl ShapeLibrary {
                 script: EXPORT_MESH_SCRIPT.to_owned(),
                 inputs: [
                     (
-                        "shape",
+                        "shape".to_string(),
                         ShapeInput {
                             ty: Some(fidget::context::Tree::SHAPE.id),
                             text: "".to_owned(),
                         },
                     ),
                     (
-                        "lower",
+                        "lower".to_string(),
                         ShapeInput {
                             ty: Some(Vec3::SHAPE.id),
                             text: "[-1, -1, -1]".to_owned(),
                         },
                     ),
                     (
-                        "upper",
+                        "upper".to_string(),
                         ShapeInput {
                             ty: Some(Vec3::SHAPE.id),
                             text: "[1, 1, 1]".to_owned(),
                         },
                     ),
                     (
-                        "min_feature",
+                        "min_feature".to_string(),
                         ShapeInput {
                             ty: Some(f64::SHAPE.id),
                             text: "0.1".to_owned(),
@@ -76,7 +76,47 @@ impl ShapeLibrary {
                     ),
                 ]
                 .into_iter()
-                .map(|(a, b)| (a.to_string(), b))
+                .collect(),
+            },
+            category: ShapeCategory::Halfspace,
+        });
+        v.lib.shapes.push(ShapeDefinition {
+            name: "Export (image)".to_owned(),
+            kind: ShapeKind::Script {
+                script: EXPORT_IMAGE_SCRIPT.to_owned(),
+                inputs: [
+                    (
+                        "scene".to_string(),
+                        ShapeInput {
+                            // This accepts Tree, Drawable, or Scene types, but
+                            // it's convenient to automatically pick trees
+                            ty: Some(fidget::context::Tree::SHAPE.id),
+                            text: "".to_owned(),
+                        },
+                    ),
+                    (
+                        "lower".to_string(),
+                        ShapeInput {
+                            ty: Some(Vec2::SHAPE.id),
+                            text: "[-1, -1]".to_owned(),
+                        },
+                    ),
+                    (
+                        "upper".to_string(),
+                        ShapeInput {
+                            ty: Some(Vec2::SHAPE.id),
+                            text: "[1, 1]".to_owned(),
+                        },
+                    ),
+                    (
+                        "resolution".to_string(),
+                        ShapeInput {
+                            ty: Some(f64::SHAPE.id),
+                            text: "256".to_owned(),
+                        },
+                    ),
+                ]
+                .into_iter()
                 .collect(),
             },
             category: ShapeCategory::Halfspace,
@@ -92,6 +132,13 @@ let lower = input("lower");
 let upper = input("upper");
 let min_feature = input("min_feature");
 export_mesh(shape, vec3(lower), vec3(upper), min_feature.to_float());"#;
+
+const EXPORT_IMAGE_SCRIPT: &str = r#"// Script to export a mesh
+let scene = input("scene");
+let lower = input("lower");
+let upper = input("upper");
+let resolution = input("resolution");
+export_image(scene(scene), vec2(lower), vec2(upper), resolution.to_float());"#;
 
 #[derive(Copy, Clone, PartialEq)]
 pub enum ShapeCategory {

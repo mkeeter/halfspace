@@ -382,7 +382,7 @@ fn image_to_sdf(
 ) -> SdfImageData {
     let color = color.map(|c| {
         match c {
-            Color::Rgb(rgb) => render_rgb_2d(&image, view, rgb),
+            Color::Rgb(rgb) => render_colors_2d(&image, view, rgb),
             Color::Hsl(hsl) => render_hsl_2d(&image, view, hsl),
         }
         .take()
@@ -403,7 +403,7 @@ fn image_to_sdf(
     SdfImageData { distance, color }
 }
 
-fn image_to_bitfield(
+pub(crate) fn image_to_bitfield(
     image: fidget::render::Image<fidget::render::DistancePixel>,
     view: fidget::render::View2,
     color: Option<Color>,
@@ -411,7 +411,7 @@ fn image_to_bitfield(
     let threads = Some(&fidget::render::ThreadPool::Global);
     let color = color.map(|c| {
         match c {
-            Color::Rgb(rgb) => render_rgb_2d(&image, view, rgb),
+            Color::Rgb(rgb) => render_colors_2d(&image, view, rgb),
             Color::Hsl(hsl) => render_hsl_2d(&image, view, hsl),
         }
         .take()
@@ -431,7 +431,7 @@ fn image_to_heightmap(
 ) -> HeightmapImageData {
     let color = color.map(|c| {
         match c {
-            Color::Rgb(rgb) => render_rgb_3d(&image, view, rgb),
+            Color::Rgb(rgb) => render_colors_3d(&image, view, rgb),
             Color::Hsl(hsl) => render_hsl_3d(&image, view, hsl),
         }
         .take()
@@ -453,7 +453,7 @@ fn image_to_shaded(
 
     let color = color.map(|c| {
         match c {
-            Color::Rgb(rgb) => render_rgb_3d(&image, view, rgb),
+            Color::Rgb(rgb) => render_colors_3d(&image, view, rgb),
             Color::Hsl(hsl) => render_hsl_3d(&image, view, hsl),
         }
         .take()
@@ -473,7 +473,7 @@ fn image_to_shaded(
     }
 }
 
-fn hsl_to_rgb(hsl: [u8; 4]) -> [u8; 4] {
+pub(crate) fn hsl_to_rgb(hsl: [u8; 4]) -> [u8; 4] {
     use palette::{FromColor, Hsl, Srgb};
 
     let hue_deg = (hsl[0] as f32 / 255.0) * 360.0;
@@ -496,7 +496,7 @@ fn render_hsl_2d(
     view: fidget::render::View2,
     hsl: [fidget::context::Tree; 3],
 ) -> fidget::render::Image<[u8; 4]> {
-    let image = render_rgb_2d(image, view, hsl);
+    let image = render_colors_2d(image, view, hsl);
     let mut out = fidget::render::Image::new(image.size());
     out.apply_effect(
         |x, y| {
@@ -508,18 +508,18 @@ fn render_hsl_2d(
     out
 }
 
-fn render_rgb_2d(
+pub(crate) fn render_colors_2d(
     image: &fidget::render::Image<fidget::render::DistancePixel>,
     view: fidget::render::View2,
-    rgb: [fidget::context::Tree; 3],
+    colors: [fidget::context::Tree; 3],
 ) -> fidget::render::Image<[u8; 4]> {
     let mat = view.world_to_model() * image.size().screen_to_world();
 
     let image_size = image.size();
     let mut ctx = fidget::Context::new();
-    let rgb = rgb.map(|x| ctx.import(&x));
+    let colors = colors.map(|x| ctx.import(&x));
 
-    let f = RenderFunction::new(&ctx, &rgb).unwrap();
+    let f = RenderFunction::new(&ctx, &colors).unwrap();
     let vars = f.vars();
 
     let mut tiles = vec![];
@@ -626,7 +626,7 @@ fn render_hsl_3d(
     view: fidget::render::View3,
     hsl: [fidget::context::Tree; 3],
 ) -> fidget::render::Image<[u8; 4], fidget::render::VoxelSize> {
-    let image = render_rgb_3d(image, view, hsl);
+    let image = render_colors_3d(image, view, hsl);
     let mut out = fidget::render::Image::new(image.size());
     out.apply_effect(
         |x, y| {
@@ -638,21 +638,21 @@ fn render_hsl_3d(
     out
 }
 
-fn render_rgb_3d(
+fn render_colors_3d(
     image: &fidget::render::Image<
         fidget::render::GeometryPixel,
         fidget::render::VoxelSize,
     >,
     view: fidget::render::View3,
-    rgb: [fidget::context::Tree; 3],
+    colors: [fidget::context::Tree; 3],
 ) -> fidget::render::Image<[u8; 4], fidget::render::VoxelSize> {
     let mat = view.world_to_model() * image.size().screen_to_world();
 
     let image_size = image.size();
     let mut ctx = fidget::Context::new();
-    let rgb = rgb.map(|x| ctx.import(&x));
+    let colors = colors.map(|x| ctx.import(&x));
 
-    let f = RenderFunction::new(&ctx, &rgb).unwrap();
+    let f = RenderFunction::new(&ctx, &colors).unwrap();
     let vars = f.vars();
 
     let mut tiles = vec![];

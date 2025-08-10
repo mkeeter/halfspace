@@ -141,6 +141,7 @@ impl rhai::CustomType for Scene {
         builder
             .with_name("Scene")
             .on_print(|_t| "scene(..)".to_owned())
+            .with_fn("scene", |scene: Scene| scene) // idempotent
             .with_fn("scene", build_scene1)
             .with_fn("scene", build_scene2)
             .with_fn("scene", build_scene3)

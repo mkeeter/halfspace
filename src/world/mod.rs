@@ -757,6 +757,12 @@ pub enum ExportRequest {
         max: fidget::shapes::types::Vec3,
         feature_size: f64,
     },
+    Image {
+        scene: Scene,
+        min: fidget::shapes::types::Vec2,
+        max: fidget::shapes::types::Vec2,
+        resolution: f64,
+    },
 }
 
 /// Handle to intermediate block data during evaluation
@@ -973,6 +979,32 @@ impl BlockEvalData {
                     min,
                     max,
                     feature_size,
+                });
+                Ok(())
+            },
+        );
+        let eval_data_ = eval_data.clone();
+        engine.register_fn(
+            "export_image",
+            move |ctx: rhai::NativeCallContext,
+                  scene: Scene,
+                  min: fidget::shapes::types::Vec2,
+                  max: fidget::shapes::types::Vec2,
+                  resolution: f64|
+                  -> Result<(), Box<rhai::EvalAltResult>> {
+                let mut eval_data = eval_data_.write().unwrap();
+                if eval_data.export.is_some() {
+                    return Err(rhai::EvalAltResult::ErrorRuntime(
+                        "cannot have multiple exports in a single block".into(),
+                        ctx.position(),
+                    )
+                    .into());
+                }
+                eval_data.export = Some(ExportRequest::Image {
+                    scene,
+                    min,
+                    max,
+                    resolution,
                 });
                 Ok(())
             },

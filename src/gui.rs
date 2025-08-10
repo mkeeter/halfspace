@@ -675,6 +675,49 @@ fn script_block_body(
                 response |= BlockResponse::EXPORT;
             }
         }
+        Some(crate::world::ExportRequest::Image {
+            min,
+            max,
+            resolution,
+            ..
+        }) => {
+            // Calculate settings here in the UI, so that we can disable the
+            // button and show immediate feedback if they're invalid.  We'll
+            // also check them in the actual mesh export function.
+            let s = export::image_settings(*min, *max, *resolution);
+            let enabled = block_data.error.is_none() && s.is_ok();
+            let r = ui.horizontal(|ui| {
+                ui.add_space(padding);
+                ui.add_enabled_ui(enabled, |ui| {
+                    ui.add_sized(
+                        [ui.available_width(), 25.0],
+                        egui::Button::new("Export image"),
+                    )
+                })
+                .inner
+            });
+            match s {
+                Ok(s) => {
+                    ui.horizontal(|ui| {
+                        ui.add_space(padding);
+                        ui.label(format!("Image size: {} × {}", s.image_size.width(), s.image_size.height()));
+                    });
+                }
+                Err(e) => {
+                    ui.horizontal(|ui| {
+                        ui.add_space(padding);
+                        ui.add(egui::Label::new(
+                            egui::RichText::new(WARN)
+                                .color(ui.style().visuals.error_fg_color),
+                        ));
+                        ui.label(format!("{:#}", anyhow::Error::from(e)))
+                    });
+                }
+            };
+            if r.inner.clicked() {
+                response |= BlockResponse::EXPORT;
+            }
+        }
         None => (),
     }
     block.data = Some(block_data);

@@ -1612,6 +1612,28 @@ impl App {
                         Some(Modal::ExportInProgress { target, cancel });
                 }
             }
+            Some(world::ExportRequest::Image {
+                scene,
+                min,
+                max,
+                resolution,
+            }) => {
+                if self.modal.is_none()
+                    && let Some(target) = self.platform_select_download("png")
+                {
+                    let cancel = fidget::render::CancelToken::new();
+                    let cancel_ = cancel.clone();
+                    let tx = self.rx.sender();
+                    rayon::spawn(move || {
+                        let r = export::build_image(
+                            scene, min, max, resolution, cancel_,
+                        );
+                        tx.send(Message::ExportComplete(r))
+                    });
+                    self.modal =
+                        Some(Modal::ExportInProgress { target, cancel });
+                }
+            }
             None => (),
         }
 

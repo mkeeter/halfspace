@@ -7,18 +7,34 @@
     "name": "utopian.half"
   },
   "world": {
-    "next_index": 4,
+    "next_index": 5,
     "order": [
       0,
       3,
-      1
+      1,
+      4
     ],
     "blocks": {
-      "3": {
+      "1": {
         "Script": {
-          "name": "exhaust",
-          "script": "let top = y*10 + square(x * 10);\nlet out = difference(\n\ttop,\n\ttop.remap(x / 2.1, y + 10, z)\n);\noutput(\"out\", out.scale_uniform(0.1));",
-          "inputs": {}
+          "name": "flag",
+          "script": "let r = 1.0;\nlet ship = input(\"ship\");\nlet exhaust = input(\"exhaust\").move([0, r]);\n\nlet earth = circle(r) * rgb(0.0, 0.37, 0.71);\nlet offset = r * 1.3;\nlet moon = circle(r * 0.8, [-offset, 0]);\nlet mars = circle(r * 0.8, [offset, 0]) * rgb(0.78, 0.06, 0.18);\nlet s = ship.move([0, r * 1.6]);\nlet ships = union(s,\n\ts.remap(y, x, z).move([r, 0]),\n\ts.remap(y, x, z).move([r, 0]).remap(-x, y, z)\n);\nlet e = exhaust.scale([0.7, 1, 1]).remap(y, x, z).move([r * 1.3, 0]);\nlet exhausts = union(\n\texhaust.scale([0.8, 1.4, 1]), e, e.remap(-x, y, z)\n);\nlet corner = vec2(r * 3, r * 2);\nlet backdrop = rectangle(-corner, corner) * rgb(0,0,0);\nlet out = scene(\n\tbackdrop,\n\tmoon, mars, earth,\n\texhausts * rgb(1, 0.95, 0),\n\tships,\n);\n\noutput(\"min\", -corner);\noutput(\"max\", corner);\noutput(\"scene\", out);\n\nview(out);",
+          "inputs": {
+            "ship": "rocket",
+            "exhaust": "exhaust"
+          }
+        }
+      },
+      "4": {
+        "Script": {
+          "name": "export_image",
+          "script": "// Script to export a mesh\nlet scene = input(\"scene\");\nlet lower = input(\"lower\");\nlet upper = input(\"upper\");\nlet resolution = input(\"resolution\");\nexport_image(scene(scene), vec2(lower), vec2(upper), resolution.to_float());",
+          "inputs": {
+            "scene": "flag.scene",
+            "lower": "flag.min",
+            "upper": "flag.max",
+            "resolution": "256"
+          }
         }
       },
       "0": {
@@ -28,14 +44,11 @@
           "inputs": {}
         }
       },
-      "1": {
+      "3": {
         "Script": {
-          "name": "flag",
-          "script": "let r = 1.0;\nlet ship = input(\"ship\");\nlet exhaust = input(\"exhaust\").move([0, r]);\n\nlet earth = circle(r) * rgb(0.0, 0.37, 0.71);\nlet offset = r * 1.3;\nlet moon = circle(r * 0.8, [-offset, 0]);\nlet mars = circle(r * 0.8, [offset, 0]) * rgb(0.78, 0.06, 0.18);\nlet s = ship.move([0, r * 1.6]);\nlet ships = union(s,\n\ts.remap(y, x, z).move([r, 0]),\n\ts.remap(y, x, z).move([r, 0]).remap(-x, y, z)\n);\nlet e = exhaust.scale([0.7, 1, 1]).remap(y, x, z).move([r * 1.3, 0]);\nlet exhausts = union(\n\texhaust.scale([0.8, 1.4, 1]), e, e.remap(-x, y, z)\n);\nlet corner = vec2(r * 3, r * 2);\nlet backdrop = rectangle(-corner, corner) * rgb(0,0,0);\nlet out = scene(\n\tbackdrop,\n\tmoon, mars, earth, ships,\n\texhausts * rgb(1, 0.95, 0),\n);\n\noutput(\"min\", -corner);\noutput(\"max\", corner);\noutput(\"scene\", out);\n\nview(out);",
-          "inputs": {
-            "ship": "rocket",
-            "exhaust": "exhaust"
-          }
+          "name": "exhaust",
+          "script": "let top = y*10 + square(x * 10);\nlet out = difference(\n\ttop,\n\ttop.remap(x / 2.1, y + 10, z)\n);\noutput(\"out\", out.scale_uniform(0.1));",
+          "inputs": {}
         }
       }
     }
@@ -155,7 +168,7 @@
               }
             }
           ],
-          "focused_node": 1,
+          "focused_node": 2,
           "collapsed": false,
           "collapsed_leaf_count": 0
         }
