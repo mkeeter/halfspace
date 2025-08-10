@@ -525,7 +525,7 @@ impl World {
                 IoValue::Input { value: Err(..), .. } => (),
             }
         }
-        let mut single_value = if output_values.len() == 1 {
+        let single_value = if output_values.len() == 1 {
             let (_name, value) = output_values.pop().unwrap();
             Some(value)
         } else if input_values.len() == 1 && output_values.is_empty() {
@@ -539,7 +539,9 @@ impl World {
         };
 
         // Handle the special case of a single input (or output) value
-        if let Some(value) = single_value.take() {
+        if data.error.is_none()
+            && let Some(value) = single_value
+        {
             input_scope.push(&block.name, value.clone());
             // If there's no view but there's a single view-compatible output,
             // then treat it as the view.
