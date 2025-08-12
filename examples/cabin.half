@@ -1,0 +1,332 @@
+{
+  "tag": "halfspace",
+  "major": 2,
+  "minor": 2,
+  "meta": {
+    "description": "Log cabin",
+    "name": null
+  },
+  "world": {
+    "next_index": 10,
+    "order": [
+      0,
+      2,
+      9,
+      8,
+      1
+    ],
+    "blocks": {
+      "8": {
+        "Script": {
+          "name": "roof",
+          "script": "let a = input(\"angle\");\nlet height = input(\"height\");\nlet overhang = input(\"overhang\");\nlet width = input(\"width\");\nlet shingles = input(\"shingles\");\n\nlet nx = x * cos(a) + y * sin(a);\nlet ny = x * -sin(a) + y * cos(a);\n\nlet tri = abs(x) * cos(a) + y * sin(a);\nlet dh = (width + overhang) * cos(a) / sin(a) + height;\n\nlet shingles = shingles.remap(-ny, nx, z);\nlet shingles = intersection(shingles, shingles.reflect_x());\noutput(\"out\",\n\ttri.move([0, dh, 0])\n\t\t.union(shingles.move([0, dh + overhang, 0]))\n\t\t.extrude_z(-width - overhang, width + overhang)\n\t\t.intersection(-y + height)\n\t\t.difference(\n\t\t\tintersection(tri.move([0, dh - overhang, 0]), -abs(z) + width - overhang)));\n\n",
+          "inputs": {
+            "angle": "1.076",
+            "overhang": "0.102",
+            "width": "logs.size",
+            "height": "logs.height",
+            "shingles": "shingles"
+          }
+        }
+      },
+      "2": {
+        "Script": {
+          "name": "door",
+          "script": "let w = input(\"width\");\nlet h = input(\"height\");\nlet t = input(\"thickness\");\nlet off = input(\"offset\");\n\nlet rect = rectangle([-w, 0], [w, h]);\n\nlet out = rect.extrude_z(-t/2, t/2).remap(x, y, z * 4);\n\nlet handle_pos = vec2(w * 0.7, h * 0.45);\nlet handle_offset = t * 0.28;\nlet door = union(out,\n\tdifference(out - off, rect).intersection(-y),\n\tcircle(w  / 20, handle_pos).extrude_z(0, handle_offset),\n\tsphere([handle_pos.x, handle_pos.y, handle_offset], w / 8)\n);\noutput(\"out\", door);\nview(door);\noutput(\"cutout\", rect - off);",
+          "inputs": {
+            "height": "1.7",
+            "width": "0.4",
+            "offset": "0.2",
+            "thickness": "0.65"
+          }
+        }
+      },
+      "9": {
+        "Script": {
+          "name": "shingles",
+          "script": "let a = input(\"angle\");\nlet scale = input(\"scale\");\nlet line = x * sin(a) + y * cos(a);\nlet offset = scale * tan(a);\n\nlet out = union(\n\tintersection(line.move([0, -offset]), x),\n    line.move([0, offset]),\n);\noutput(\"out\",\n\tout.move([scale, 0]).remap(x % (2 * scale), y + offset, z)\n);\n",
+          "inputs": {
+            "angle": "-0.215",
+            "scale": "0.113"
+          }
+        }
+      },
+      "1": {
+        "Script": {
+          "name": "cabin",
+          "script": "let logs = input(\"logs\").remap(x, z, y);\nlet height = input(\"height\");\nlet size = input(\"size\");\nlet door = input(\"door\").remap(-x, z, y);\nlet door_cutout = input(\"door_cutout\").remap(x, z, y);\nlet roof = input(\"roof\").remap(x, z, y);\n\nlet cube = intersection(\n\tlogs.remap(x, y, z),\n\tlogs.remap(-x, y, z),\n\tlogs.remap(y, x, z),\n\tlogs.remap(-y, x, z),\n);\n\nview(union(\n\tdifference(cube, door_cutout.intersection(-y)),\n\tdoor.move([0, size, 0]),\n\troof,\n));",
+          "inputs": {
+            "height": "logs.height",
+            "door_cutout": "door.cutout",
+            "logs": "logs.out",
+            "door": "door.out",
+            "size": "logs.size",
+            "roof": "roof"
+          }
+        }
+      },
+      "0": {
+        "Script": {
+          "name": "logs",
+          "script": "let size = input(\"size\");\nlet spacing = 0.15;\nlet radius = 0.2;\nlet log = circle(0.2, [0, spacing]);\nlet count = 5;\nlet logs = log.remap(x, y % 0.3, z);\n\nlet ymax = spacing * 2 * 10;\nlet out = intersection(logs.union(-x), -y, y - ymax);\n\noutput(\"out\", out.move([-size + radius, 0]));\noutput(\"height\", ymax);",
+          "inputs": {
+            "size": "1.940"
+          }
+        }
+      }
+    }
+  },
+  "views": {
+    "0": {
+      "View2": {
+        "mode": "Sdf",
+        "center": [
+          2.0277185,
+          1.2727995
+        ],
+        "scale": 2.75108,
+        "width": 1261,
+        "height": 1726
+      }
+    },
+    "9": {
+      "View2": {
+        "mode": "Sdf",
+        "center": [
+          0.047260113,
+          0.0053110346
+        ],
+        "scale": 1.305133,
+        "width": 1669,
+        "height": 949
+      }
+    },
+    "1": {
+      "View3": {
+        "mode": "Shaded",
+        "center": [
+          -0.30408168,
+          0.60012126,
+          2.3859537
+        ],
+        "scale": 4.237463,
+        "pitch": 1.3567017,
+        "yaw": 2.574152,
+        "width": 1669,
+        "height": 1948,
+        "depth": 1948,
+        "perspective": true
+      }
+    },
+    "8": {
+      "View2": {
+        "mode": "Sdf",
+        "center": [
+          0.46970707,
+          -4.616296
+        ],
+        "scale": 3.4285095,
+        "width": 1669,
+        "height": 949
+      }
+    },
+    "2": {
+      "View3": {
+        "mode": "Shaded",
+        "center": [
+          0.17933483,
+          0.14548326,
+          -0.1282711
+        ],
+        "scale": 0.7120244,
+        "pitch": 0.6348449,
+        "yaw": -0.38663447,
+        "width": 1261,
+        "height": 1726,
+        "depth": 1726,
+        "perspective": false
+      }
+    }
+  },
+  "dock": {
+    "surfaces": [
+      {
+        "Main": {
+          "nodes": [
+            {
+              "Horizontal": {
+                "rect": {
+                  "min": {
+                    "x": 250.0,
+                    "y": 29.0
+                  },
+                  "max": {
+                    "x": 1920.0,
+                    "y": 1027.0
+                  }
+                },
+                "fraction": 0.5,
+                "fully_collapsed": false,
+                "collapsed_leaf_count": 0
+              }
+            },
+            {
+              "Vertical": {
+                "rect": {
+                  "min": {
+                    "x": 250.0,
+                    "y": 29.0
+                  },
+                  "max": {
+                    "x": 1084.5,
+                    "y": 1027.0
+                  }
+                },
+                "fraction": 0.5,
+                "fully_collapsed": false,
+                "collapsed_leaf_count": 0
+              }
+            },
+            {
+              "Leaf": {
+                "rect": {
+                  "min": {
+                    "x": 1085.5,
+                    "y": 29.0
+                  },
+                  "max": {
+                    "x": 1920.0,
+                    "y": 1027.0
+                  }
+                },
+                "viewport": {
+                  "min": {
+                    "x": 1085.5,
+                    "y": 53.0
+                  },
+                  "max": {
+                    "x": 1920.0,
+                    "y": 1027.0
+                  }
+                },
+                "tabs": [
+                  {
+                    "index": 2,
+                    "mode": "View"
+                  },
+                  {
+                    "index": 1,
+                    "mode": "View"
+                  }
+                ],
+                "active": 1,
+                "scroll": 0.0,
+                "collapsed": false
+              }
+            },
+            {
+              "Leaf": {
+                "rect": {
+                  "min": {
+                    "x": 250.0,
+                    "y": 29.0
+                  },
+                  "max": {
+                    "x": 1084.5,
+                    "y": 527.5
+                  }
+                },
+                "viewport": {
+                  "min": {
+                    "x": 250.0,
+                    "y": 53.0
+                  },
+                  "max": {
+                    "x": 1084.5,
+                    "y": 527.5
+                  }
+                },
+                "tabs": [
+                  {
+                    "index": 8,
+                    "mode": "Script"
+                  },
+                  {
+                    "index": 9,
+                    "mode": "Script"
+                  }
+                ],
+                "active": 0,
+                "scroll": 0.0,
+                "collapsed": false
+              }
+            },
+            {
+              "Leaf": {
+                "rect": {
+                  "min": {
+                    "x": 250.0,
+                    "y": 528.5
+                  },
+                  "max": {
+                    "x": 1084.5,
+                    "y": 1027.0
+                  }
+                },
+                "viewport": {
+                  "min": {
+                    "x": 250.0,
+                    "y": 552.5
+                  },
+                  "max": {
+                    "x": 1084.5,
+                    "y": 1027.0
+                  }
+                },
+                "tabs": [
+                  {
+                    "index": 0,
+                    "mode": "Script"
+                  },
+                  {
+                    "index": 1,
+                    "mode": "Script"
+                  },
+                  {
+                    "index": 9,
+                    "mode": "View"
+                  }
+                ],
+                "active": 2,
+                "scroll": 0.0,
+                "collapsed": false
+              }
+            }
+          ],
+          "focused_node": 2,
+          "collapsed": false,
+          "collapsed_leaf_count": 0
+        }
+      }
+    ],
+    "focused_surface": 0,
+    "translations": {
+      "tab_context_menu": {
+        "close_button": "Close",
+        "eject_button": "Eject"
+      },
+      "leaf": {
+        "close_button_disabled_tooltip": "This leaf contains non-closable tabs.",
+        "close_all_button": "Close window",
+        "close_all_button_menu_hint": "Right click to close this window.",
+        "close_all_button_modifier_hint": "Press modifier keys (Shift by default) to close this window.",
+        "close_all_button_modifier_menu_hint": "Press modifier keys (Shift by default) or right click to close this window.",
+        "close_all_button_disabled_tooltip": "This window contains non-closable tabs.",
+        "minimize_button": "Minimize window",
+        "minimize_button_menu_hint": "Right click to minimize this window.",
+        "minimize_button_modifier_hint": "Press modifier keys (Shift by default) to minimize this window.",
+        "minimize_button_modifier_menu_hint": "Press modifier keys (Shift by default) or right click to minimize this window."
+      }
+    }
+  }
+}

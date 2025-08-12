@@ -700,7 +700,11 @@ fn script_block_body(
                 Ok(s) => {
                     ui.horizontal(|ui| {
                         ui.add_space(padding);
-                        ui.label(format!("Image size: {} × {}", s.image_size.width(), s.image_size.height()));
+                        ui.label(format!(
+                            "Image size: {} × {}",
+                            s.image_size.width(),
+                            s.image_size.height()
+                        ));
                     });
                 }
                 Err(e) => {
@@ -1115,8 +1119,17 @@ impl<'a> DockStateEditor<'a> {
         }
     }
     pub fn toggle_script(&mut self) {
-        if self.script.is_some() {
-            self.close_script();
+        if let Some((surface, node, tab)) = self.script {
+            let egui_dock::Node::Leaf { active, .. } =
+                &self.tree[surface][node]
+            else {
+                panic!("target node was not a leaf ")
+            };
+            if *active == tab {
+                self.close_script();
+            } else {
+                self.tree[surface].set_active_tab(node, tab);
+            }
         } else {
             self.tree.push_to_focused_leaf(self.script_index());
             self.update_script();
