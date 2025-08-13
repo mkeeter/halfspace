@@ -6,6 +6,7 @@ use crate::{
     state::ViewState,
     world::Scene,
 };
+use std::sync::Arc;
 
 pub use state::{ViewMode2, ViewMode3};
 use web_time::Duration;
@@ -181,8 +182,8 @@ pub struct SdfViewImage {
 /// Single SDF image to be drawn to the screen
 #[derive(Clone)]
 pub struct SdfImageData {
-    pub distance: Vec<f32>,
-    pub color: Option<Vec<[u8; 4]>>,
+    pub distance: Arc<[f32]>,
+    pub color: Option<Arc<[[u8; 4]]>>,
 }
 
 /// Set of bitfield images, along with their position and metadata
@@ -197,8 +198,8 @@ pub struct BitfieldViewImage {
 /// Single bitfield image to be drawn to the screen
 #[derive(Clone)]
 pub struct BitfieldImageData {
-    pub distance: Vec<f32>,
-    pub color: Option<Vec<[u8; 4]>>,
+    pub distance: Arc<[f32]>,
+    pub color: Option<Arc<[[u8; 4]]>>,
 }
 
 impl BitfieldViewImage {
@@ -289,7 +290,7 @@ pub struct DebugViewImage {
 /// Single debug image to be drawn to the screen
 #[derive(Clone)]
 pub struct DebugImageData {
-    pub pixels: Vec<[u8; 4]>,
+    pub pixels: Arc<[[u8; 4]]>,
     // No diffuse color here, this is just a debug view
 }
 
@@ -305,8 +306,8 @@ pub struct HeightmapViewImage {
 /// Single heightmap image to be drawn to the screen
 #[derive(Clone)]
 pub struct HeightmapImageData {
-    pub depth: Vec<f32>,
-    pub color: Option<Vec<[u8; 4]>>,
+    pub depth: Arc<[f32]>,
+    pub color: Option<Arc<[[u8; 4]]>>,
 }
 
 /// Set of shaded images, along with their position and metadata
@@ -321,9 +322,9 @@ pub struct ShadedViewImage {
 /// Single shaded image to be drawn to the screen
 #[derive(Clone)]
 pub struct ShadedImageData {
-    pub pixels: Vec<fidget::render::GeometryPixel>,
-    pub ssao: Vec<f32>,
-    pub color: Option<Vec<[u8; 4]>>,
+    pub pixels: Arc<[fidget::render::GeometryPixel]>,
+    pub ssao: Arc<[f32]>,
+    pub color: Option<Arc<[[u8; 4]]>>,
 }
 
 /// Rendered image(s) to be drawn, along with the settings that generated it

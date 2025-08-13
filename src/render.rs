@@ -171,7 +171,7 @@ impl RenderTask {
                                         image, threads,
                                     );
                                     DebugImageData {
-                                        pixels: image.take().0,
+                                        pixels: image.take().0.into(),
                                         // No color for debug images
                                     }
                                 })
@@ -387,6 +387,7 @@ fn image_to_sdf(
         }
         .take()
         .0
+        .into()
     });
     let distance = image
         .map(|d| {
@@ -398,7 +399,8 @@ fn image_to_sdf(
             }
         })
         .take()
-        .0;
+        .0
+        .into();
 
     SdfImageData { distance, color }
 }
@@ -416,8 +418,9 @@ pub(crate) fn image_to_bitfield(
         }
         .take()
         .0
+        .into()
     });
-    let distance = BitfieldViewImage::denoise(image, threads).take().0;
+    let distance = BitfieldViewImage::denoise(image, threads).take().0.into();
     BitfieldImageData { distance, color }
 }
 
@@ -436,8 +439,9 @@ fn image_to_heightmap(
         }
         .take()
         .0
+        .into()
     });
-    let depth = image.map(|v| v.depth as f32).take().0;
+    let depth = image.map(|v| v.depth as f32).take().0.into();
     HeightmapImageData { depth, color }
 }
 
@@ -458,14 +462,15 @@ fn image_to_shaded(
         }
         .take()
         .0
+        .into()
     });
 
     // XXX this should all happen on the GPU, probably!
     let image = effects::denoise_normals(&image, threads);
     let ssao =
         effects::blur_ssao(&effects::compute_ssao(&image, threads), threads);
-    let (pixels, _size) = image.take();
-    let (ssao, _size) = ssao.take();
+    let pixels = image.take().0.into();
+    let ssao = ssao.take().0.into();
     ShadedImageData {
         pixels,
         ssao,
