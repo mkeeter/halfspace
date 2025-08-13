@@ -455,15 +455,21 @@ fn image_to_shaded(
 ) -> ShadedImageData {
     let threads = Some(&fidget::render::ThreadPool::Global);
 
-    let color = color.map(|c| {
-        match c {
-            Color::Rgb(rgb) => render_colors_3d(&image, view, rgb),
-            Color::Hsl(hsl) => render_hsl_3d(&image, view, hsl),
-        }
-        .take()
-        .0
-        .into()
-    });
+    let color = color
+        .map(|c| {
+            match c {
+                Color::Rgb(rgb) => render_colors_3d(&image, view, rgb),
+                Color::Hsl(hsl) => render_hsl_3d(&image, view, hsl),
+            }
+            .take()
+            .0
+            .into()
+        })
+        .unwrap_or_else(|| {
+            let pixel_count =
+                image.size().width() as usize * image.size().height() as usize;
+            vec![[u8::MAX; 4]; pixel_count].into()
+        });
 
     // XXX this should all happen on the GPU, probably!
     let image = effects::denoise_normals(&image, threads);

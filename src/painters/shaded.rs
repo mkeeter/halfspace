@@ -30,8 +30,7 @@ pub struct WgpuShadedPainter {
 struct Uniforms {
     transform: [[f32; 4]; 4],
     max_depth: u32,
-    has_color: u32,
-    _padding: [u8; 8],
+    _padding: [u8; 12],
 }
 
 impl WgpuShadedPainter {
@@ -97,13 +96,11 @@ impl egui_wgpu::CallbackTrait for WgpuShadedPainter {
             * if self.image.level == 0 { 2 } else { 1 };
         for image in self.image.data.iter() {
             let data = gr.shaded.get_data(device, queue, texture_size, image);
-            let has_color = image.color.is_some();
 
             // Create the uniform
             let uniforms = Uniforms {
                 transform: transform.into(),
                 max_depth,
-                has_color: u32::from(has_color),
                 _padding: Default::default(),
             };
             {
@@ -336,11 +333,8 @@ impl ShadedResources {
                     .insert(i.ssao_image.as_ptr() as usize, i.ssao_texture);
                 self.textures
                     .insert(i.pixel_image.as_ptr() as usize, i.pixel_texture);
-                if let Some(p) = i.color_image {
-                    self.textures.insert(p.as_ptr() as usize, i.color_texture);
-                } else {
-                    self.textures.insert(0usize, i.color_texture);
-                }
+                self.textures
+                    .insert(i.color_image.as_ptr() as usize, i.color_texture);
             }
         }
     }
@@ -449,13 +443,7 @@ impl ShadedResources {
 
         let color_texture = self
             .textures
-            .remove(
-                &data
-                    .color
-                    .as_ref()
-                    .map(|c| c.as_ptr() as usize)
-                    .unwrap_or(0),
-            )
+            .remove(&(data.color.as_ptr() as usize))
             .unwrap_or_else(|| {
                 let tex = device.create_texture(&wgpu::TextureDescriptor {
                     label: Some("shaded color texture"),
@@ -468,23 +456,21 @@ impl ShadedResources {
                         | wgpu::TextureUsages::COPY_DST,
                     view_formats: &[],
                 });
-                if let Some(color) = &data.color {
-                    queue.write_texture(
-                        wgpu::TexelCopyTextureInfo {
-                            texture: &tex,
-                            mip_level: 0,
-                            origin: wgpu::Origin3d::ZERO,
-                            aspect: wgpu::TextureAspect::All,
-                        },
-                        color.as_bytes(),
-                        wgpu::TexelCopyBufferLayout {
-                            offset: 0,
-                            bytes_per_row: Some(4 * size.width),
-                            rows_per_image: Some(size.height),
-                        },
-                        size,
-                    );
-                }
+                queue.write_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &tex,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    data.color.as_bytes(),
+                    wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(4 * size.width),
+                        rows_per_image: Some(size.height),
+                    },
+                    size,
+                );
                 tex
             });
 
@@ -591,7 +577,7 @@ struct ShadedData {
     pixel_texture: wgpu::Texture,
 
     /// Image stored in the color texture
-    color_image: Option<Arc<[[u8; 4]]>>,
+    color_image: Arc<[[u8; 4]]>,
 
     /// `Rgba8Unorm` texture to render
     color_texture: wgpu::Texture,

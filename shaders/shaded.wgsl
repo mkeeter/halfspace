@@ -2,7 +2,6 @@
 struct Uniforms {
     transform: mat4x4<f32>,
     max_depth: u32,
-    has_color: u32,
 }
 
 struct Light {
@@ -70,7 +69,7 @@ fn fs_main(
 ) -> RgbaDepth {
     var ssao = textureSample(t_ssao, s_ssao, tex_coords);
     var pixel = textureSample(t_pixel, s_pixel, tex_coords);
-    let color_tex = textureSample(t_color, s_color, tex_coords).rgb;
+    let color = textureSample(t_color, s_color, tex_coords).rgb;
     var depth = bitcast<u32>(pixel.r);
 
     // If depth is 0, this pixel is transparent
@@ -98,10 +97,6 @@ fn fs_main(
             accum = accum + max(dot(light_dir, n), 0.0) * light.intensity;
         }
         accum = clamp(accum * (ssao.r * 0.6 + 0.4), 0.0, 1.0);
-        var color = vec3<f32>(1.0);
-        if (uniforms.has_color != 0) {
-            color = color_tex;
-        }
         let c = vec3<f32>(accum * color);
         out = RgbaDepth(
             vec4<f32>(c, 1.0),

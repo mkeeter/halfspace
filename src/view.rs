@@ -324,7 +324,7 @@ pub struct ShadedViewImage {
 pub struct ShadedImageData {
     pub pixels: Arc<[fidget::render::GeometryPixel]>,
     pub ssao: Arc<[f32]>,
-    pub color: Option<Arc<[[u8; 4]]>>,
+    pub color: Arc<[[u8; 4]]>,
 }
 
 /// Rendered image(s) to be drawn, along with the settings that generated it
