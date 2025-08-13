@@ -1,10 +1,14 @@
 use super::{WgpuResources, blit::BlitData};
-use crate::{view::ShadedViewImage, world::BlockIndex};
+use crate::{
+    view::{ShadedImageData, ShadedViewImage},
+    world::BlockIndex,
+};
 use eframe::{
     egui,
     egui_wgpu::{self, wgpu},
 };
-use std::collections::HashMap;
+use fidget::render::GeometryPixel;
+use std::{collections::HashMap, sync::Arc};
 use zerocopy::IntoBytes;
 
 /// GPU callback for painting shaded objects
@@ -92,60 +96,8 @@ impl egui_wgpu::CallbackTrait for WgpuShadedPainter {
             .max(1)
             * if self.image.level == 0 { 2 } else { 1 };
         for image in self.image.data.iter() {
-            let data = gr.shaded.get_data(device, texture_size);
-
-            // Upload SSAO texture data
-            queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &data.ssao_texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                image.ssao.as_bytes(),
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(4 * width),
-                    rows_per_image: Some(height),
-                },
-                texture_size,
-            );
-            // Upload geometry pixel texture data
-            queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &data.pixel_texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                image.pixels.as_bytes(),
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(16 * width),
-                    rows_per_image: Some(height),
-                },
-                texture_size,
-            );
-            let has_color = if let Some(color) = &image.color {
-                queue.write_texture(
-                    wgpu::TexelCopyTextureInfo {
-                        texture: &data.color_texture,
-                        mip_level: 0,
-                        origin: wgpu::Origin3d::ZERO,
-                        aspect: wgpu::TextureAspect::All,
-                    },
-                    color.as_bytes(),
-                    wgpu::TexelCopyBufferLayout {
-                        offset: 0,
-                        bytes_per_row: Some(4 * width),
-                        rows_per_image: Some(height),
-                    },
-                    texture_size,
-                );
-                true
-            } else {
-                false
-            };
+            let data = gr.shaded.get_data(device, queue, texture_size, image);
+            let has_color = image.color.is_some();
 
             // Create the uniform
             let uniforms = Uniforms {
@@ -207,6 +159,12 @@ pub(crate) struct ShadedResources {
     pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     bound_data: HashMap<BlockIndex, ShadedBundleData>,
+
+    /// Cache from image pointer (cast to a `usize`) to texture
+    ///
+    /// There could be problems here if an allocation is reused, but that seems
+    /// unlikely; we could add generational counters if it becomes a problem.
+    textures: HashMap<usize, wgpu::Texture>,
 }
 
 impl ShadedResources {
@@ -366,30 +324,67 @@ impl ShadedResources {
             pipeline,
             bind_group_layout,
             bound_data: HashMap::new(),
+            textures: HashMap::new(),
         }
     }
 
     pub fn reset(&mut self) {
-        self.bound_data.clear();
+        self.textures.clear();
+        for (_, b) in std::mem::take(&mut self.bound_data) {
+            for i in b.images {
+                self.textures
+                    .insert(i.ssao_image.as_ptr() as usize, i.ssao_texture);
+                self.textures
+                    .insert(i.pixel_image.as_ptr() as usize, i.pixel_texture);
+                if let Some(p) = i.color_image {
+                    self.textures.insert(p.as_ptr() as usize, i.color_texture);
+                } else {
+                    self.textures.insert(0usize, i.color_texture);
+                }
+            }
+        }
     }
 
     fn get_data(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         size: wgpu::Extent3d,
+        data: &ShadedImageData,
     ) -> ShadedData {
-        // Create the texture
-        let ssao_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("shaded ssao texture"),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R32Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        let ssao_texture = self
+            .textures
+            .remove(&(data.ssao.as_ptr() as usize))
+            .unwrap_or_else(|| {
+                let tex = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("shaded ssao texture"),
+                    size,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::R32Float,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING
+                        | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
+                });
+                queue.write_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &tex,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    data.ssao.as_bytes(),
+                    wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(4 * size.width),
+                        rows_per_image: Some(size.height),
+                    },
+                    size,
+                );
+                tex
+            });
+
         // Create the texture view
         let ssao_texture_view = ssao_texture.create_view(&Default::default());
 
@@ -406,17 +401,40 @@ impl ShadedResources {
         });
 
         // Create the texture
-        let pixel_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("shaded pixel texture"),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba32Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        let pixel_texture = self
+            .textures
+            .remove(&(data.pixels.as_ptr() as usize))
+            .unwrap_or_else(|| {
+                let tex = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("shaded pixel texture"),
+                    size,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba32Float,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING
+                        | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
+                });
+
+                queue.write_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &tex,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    data.pixels.as_bytes(),
+                    wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(16 * size.width),
+                        rows_per_image: Some(size.height),
+                    },
+                    size,
+                );
+                tex
+            });
+
         let pixel_texture_view = pixel_texture.create_view(&Default::default());
         let pixel_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("shaded pixel sampler"),
@@ -429,17 +447,47 @@ impl ShadedResources {
             ..Default::default()
         });
 
-        let color_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("shaded color texture"),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        let color_texture = self
+            .textures
+            .remove(
+                &data
+                    .color
+                    .as_ref()
+                    .map(|c| c.as_ptr() as usize)
+                    .unwrap_or(0),
+            )
+            .unwrap_or_else(|| {
+                let tex = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("shaded color texture"),
+                    size,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING
+                        | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
+                });
+                if let Some(color) = &data.color {
+                    queue.write_texture(
+                        wgpu::TexelCopyTextureInfo {
+                            texture: &tex,
+                            mip_level: 0,
+                            origin: wgpu::Origin3d::ZERO,
+                            aspect: wgpu::TextureAspect::All,
+                        },
+                        color.as_bytes(),
+                        wgpu::TexelCopyBufferLayout {
+                            offset: 0,
+                            bytes_per_row: Some(4 * size.width),
+                            rows_per_image: Some(size.height),
+                        },
+                        size,
+                    );
+                }
+                tex
+            });
+
         let color_texture_view = color_texture.create_view(&Default::default());
         let color_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("shaded color sampler"),
@@ -502,6 +550,9 @@ impl ShadedResources {
         });
 
         ShadedData {
+            color_image: data.color.clone(),
+            pixel_image: data.pixels.clone(),
+            ssao_image: data.ssao.clone(),
             ssao_texture,
             pixel_texture,
             color_texture,
@@ -527,11 +578,20 @@ struct ShadedBundleData {
 
 /// Resources used to render a single shaded image
 struct ShadedData {
+    /// Image stored in the SSAO texture
+    ssao_image: Arc<[f32]>,
+
     /// SSAO texture for shading
     ssao_texture: wgpu::Texture,
 
+    /// Image stored in the pixel texture
+    pixel_image: Arc<[GeometryPixel]>,
+
     /// GeometryPixel texture to render
     pixel_texture: wgpu::Texture,
+
+    /// Image stored in the color texture
+    color_image: Option<Arc<[[u8; 4]]>>,
 
     /// `Rgba8Unorm` texture to render
     color_texture: wgpu::Texture,

@@ -16,13 +16,52 @@
       1
     ],
     "blocks": {
+      "8": {
+        "Script": {
+          "name": "roof",
+          "script": "let a = input(\"angle\");\nlet height = input(\"height\");\nlet overhang = input(\"overhang\");\nlet width = input(\"width\");\nlet shingles = input(\"shingles\");\nlet thickness = input(\"thickness\");\n\nlet nx = x * cos(a) + y * sin(a);\nlet ny = x * -sin(a) + y * cos(a);\n\nlet tri = abs(x) * cos(a) + y * sin(a);\nlet dh = (width + overhang) * cos(a) / sin(a) + height;\n\nlet shingles = shingles.remap(-ny, nx, z);\nlet shingles = intersection(shingles, shingles.reflect_x());\nlet cutout = tri.move([0, dh - overhang - thickness, 0]);\noutput(\"out\",\n\tshingles.move([0, dh + overhang, 0])\n\t\t.extrude_z(-width - overhang, width + overhang)\n\t\t.intersection(-y + height - thickness)\n\t\t.difference(cutout));\noutput(\"cutout\", cutout);\n",
+          "inputs": {
+            "shingles": "shingles",
+            "width": "logs.size",
+            "angle": "0.885",
+            "height": "logs.height",
+            "overhang": "0.171",
+            "thickness": "-0.097"
+          }
+        }
+      },
+      "1": {
+        "Script": {
+          "name": "cabin",
+          "script": "let logs = input(\"logs\").remap(x, z, y);\nlet height = input(\"height\");\nlet size = input(\"size\");\nlet door = input(\"door\");\nlet roof = input(\"roof\");\n\nlet cube = intersection(\n\tlogs.remap(x, y, z),\n\tlogs.remap(-x, y, z),\n\tlogs.remap(y, x, z),\n\tlogs.remap(-y, x, z),\n\troof.cutout.remap(x, z, y)\n);\n\nfn door_pos(d, size) {\n\td.remap(-x, z, y).move([0, size, 0])\n}\n\nview(scene(\n\tdifference(cube, door.cutout.remap(x, z, y)) * hsl(0.4, 0.5, 0.5),\n\tdoor_pos(door.frame, size) * hsl(0.4, 0.9, 0.7),\n\tdoor_pos(door.door, size) * rgb(0.9, 0.2, 0),\n\tdoor_pos(door.knob, size) * rgb(1, 0.9, 0.5),\n\troof.out.remap(x, z, y) * rgb(0.3, 0.6, 0.4),\n));",
+          "inputs": {
+            "size": "logs.size",
+            "height": "logs.height",
+            "logs": "logs.out",
+            "roof": "roof",
+            "door": "door"
+          }
+        }
+      },
+      "2": {
+        "Script": {
+          "name": "door",
+          "script": "let w = input(\"width\");\nlet h = input(\"height\");\nlet t = input(\"thickness\");\nlet off = input(\"offset\");\n\nlet rect = rectangle([-w, 0], [w, h]);\n\nlet out = rect.extrude_z(-t/2, t/2).remap(x, y, z * 4);\n\nlet handle_pos = vec2(w * 0.7, h * 0.45);\nlet handle_offset = t * 0.28;\noutput(\"knob\", union(\n\tcircle(w  / 20, handle_pos).extrude_z(0, handle_offset),\n\tsphere([handle_pos.x, handle_pos.y, handle_offset], w / 8)\n));\noutput(\"door\", out);\noutput(\"frame\", difference(out - off, rect).intersection(-y));\noutput(\"cutout\", (rect - off).intersection(-z));",
+          "inputs": {
+            "height": "1.917",
+            "offset": "0.2",
+            "width": "0.546",
+            "thickness": "0.65"
+          }
+        }
+      },
       "0": {
         "Script": {
           "name": "logs",
           "script": "let size = input(\"size\");\nlet spacing = 0.15;\nlet radius = 0.2;\nlet log = circle(0.2, [0, spacing]);\nlet n = input(\"n\");\nlet logs = log.remap(x, y % 0.3, z);\n\nlet ymax = spacing * 2 * n;\nlet out = intersection(logs.union(-x), -y);\n\noutput(\"out\", out.move([-size + radius, 0]));\noutput(\"height\", ymax);",
           "inputs": {
-            "size": "1.880",
-            "n": "7.899"
+            "n": "7.899",
+            "size": "1.880"
           }
         }
       },
@@ -35,61 +74,10 @@
             "angle": "-0.215"
           }
         }
-      },
-      "1": {
-        "Script": {
-          "name": "cabin",
-          "script": "let logs = input(\"logs\").remap(x, z, y);\nlet height = input(\"height\");\nlet size = input(\"size\");\nlet door = input(\"door\");\nlet roof = input(\"roof\");\n\nlet cube = intersection(\n\tlogs.remap(x, y, z),\n\tlogs.remap(-x, y, z),\n\tlogs.remap(y, x, z),\n\tlogs.remap(-y, x, z),\n\troof.cutout.remap(x, z, y)\n);\n\nfn door_pos(d, size) {\n\td.remap(-x, z, y).move([0, size, 0])\n}\n\nview(scene(\n\tdifference(cube, door.cutout.remap(x, z, y)) * hsl(0.4, 0.5, 0.5),\n\tdoor_pos(door.frame, size) * hsl(0.4, 0.9, 0.7),\n\tdoor_pos(door.door, size) * rgb(0.9, 0.2, 0),\n\tdoor_pos(door.knob, size) * rgb(1, 0.9, 0.5),\n\troof.out.remap(x, z, y) * rgb(0.3, 0.6, 0.4),\n));",
-          "inputs": {
-            "logs": "logs.out",
-            "door": "door",
-            "roof": "roof",
-            "height": "logs.height",
-            "size": "logs.size"
-          }
-        }
-      },
-      "2": {
-        "Script": {
-          "name": "door",
-          "script": "let w = input(\"width\");\nlet h = input(\"height\");\nlet t = input(\"thickness\");\nlet off = input(\"offset\");\n\nlet rect = rectangle([-w, 0], [w, h]);\n\nlet out = rect.extrude_z(-t/2, t/2).remap(x, y, z * 4);\n\nlet handle_pos = vec2(w * 0.7, h * 0.45);\nlet handle_offset = t * 0.28;\noutput(\"knob\", union(\n\tcircle(w  / 20, handle_pos).extrude_z(0, handle_offset),\n\tsphere([handle_pos.x, handle_pos.y, handle_offset], w / 8)\n));\noutput(\"door\", out);\noutput(\"frame\", difference(out - off, rect).intersection(-y));\noutput(\"cutout\", rect - off);",
-          "inputs": {
-            "thickness": "0.65",
-            "height": "1.917",
-            "width": "0.546",
-            "offset": "0.2"
-          }
-        }
-      },
-      "8": {
-        "Script": {
-          "name": "roof",
-          "script": "let a = input(\"angle\");\nlet height = input(\"height\");\nlet overhang = input(\"overhang\");\nlet width = input(\"width\");\nlet shingles = input(\"shingles\");\nlet thickness = input(\"thickness\");\n\nlet nx = x * cos(a) + y * sin(a);\nlet ny = x * -sin(a) + y * cos(a);\n\nlet tri = abs(x) * cos(a) + y * sin(a);\nlet dh = (width + overhang) * cos(a) / sin(a) + height;\n\nlet shingles = shingles.remap(-ny, nx, z);\nlet shingles = intersection(shingles, shingles.reflect_x());\nlet cutout = tri.move([0, dh - overhang - thickness, 0]);\noutput(\"out\",\n\tshingles.move([0, dh + overhang, 0])\n\t\t.extrude_z(-width - overhang, width + overhang)\n\t\t.intersection(-y + height - thickness)\n\t\t.difference(cutout));\noutput(\"cutout\", cutout);\n",
-          "inputs": {
-            "thickness": "-0.097",
-            "angle": "0.885",
-            "overhang": "0.171",
-            "height": "logs.height",
-            "shingles": "shingles",
-            "width": "logs.size"
-          }
-        }
       }
     }
   },
   "views": {
-    "0": {
-      "View2": {
-        "mode": "Sdf",
-        "center": [
-          2.0277185,
-          1.2727995
-        ],
-        "scale": 2.75108,
-        "width": 1261,
-        "height": 1726
-      }
-    },
     "2": {
       "View3": {
         "mode": "Shaded",
@@ -107,18 +95,6 @@
         "perspective": false
       }
     },
-    "8": {
-      "View2": {
-        "mode": "Sdf",
-        "center": [
-          0.46970707,
-          -4.616296
-        ],
-        "scale": 3.4285095,
-        "width": 1669,
-        "height": 949
-      }
-    },
     "9": {
       "View2": {
         "mode": "Sdf",
@@ -131,17 +107,41 @@
         "height": 838
       }
     },
+    "0": {
+      "View2": {
+        "mode": "Sdf",
+        "center": [
+          2.0277185,
+          1.2727995
+        ],
+        "scale": 2.75108,
+        "width": 1261,
+        "height": 1726
+      }
+    },
+    "8": {
+      "View2": {
+        "mode": "Sdf",
+        "center": [
+          0.46970707,
+          -4.616296
+        ],
+        "scale": 3.4285095,
+        "width": 1669,
+        "height": 949
+      }
+    },
     "1": {
       "View3": {
         "mode": "Shaded",
         "center": [
-          -0.05503869,
-          -0.14011574,
-          1.8955443
+          0.618464,
+          -0.7966645,
+          2.2015264
         ],
-        "scale": 3.6130095,
-        "pitch": 1.324981,
-        "yaw": 3.68121,
+        "scale": 3.3710556,
+        "pitch": 1.1885815,
+        "yaw": 3.6780381,
         "width": 1261,
         "height": 1726,
         "depth": 1726,
@@ -304,7 +304,7 @@
               }
             }
           ],
-          "focused_node": 4,
+          "focused_node": 3,
           "collapsed": false,
           "collapsed_leaf_count": 0
         }
