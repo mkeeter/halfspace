@@ -314,6 +314,7 @@ pub struct HeightmapImageData {
 #[derive(Clone)]
 pub struct ShadedViewImage {
     pub data: Vec<ShadedImageData>,
+    pub ssao: Arc<[f32]>,
     pub view: fidget::render::View3,
     pub size: fidget::render::VoxelSize,
     pub level: usize,
@@ -323,7 +324,6 @@ pub struct ShadedViewImage {
 #[derive(Clone)]
 pub struct ShadedImageData {
     pub pixels: Arc<[fidget::render::GeometryPixel]>,
-    pub ssao: Arc<[f32]>,
     pub color: Arc<[[u8; 4]]>,
 }
 

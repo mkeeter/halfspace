@@ -214,7 +214,7 @@ impl RenderTask {
                 };
                 let images: Vec<_> = scene
                     .shapes
-                    .iter()
+                    .par_iter()
                     .map(|shape| {
                         let rs = RenderShape::from(shape.tree.clone());
                         let data = cfg.run(rs)?;
@@ -236,7 +236,7 @@ impl RenderTask {
                             size: *size,
                             level,
                             data: images
-                                .into_iter()
+                                .into_par_iter()
                                 .map(|(image, color)| {
                                     image_to_heightmap(image, *view, color)
                                 })
@@ -245,12 +245,14 @@ impl RenderTask {
                         ViewImage::Heightmap(image)
                     }
                     ViewMode3::Shaded => {
+                        let ssao = merged_ssao(&images);
                         let image = ShadedViewImage {
                             view: *view,
                             size: *size,
                             level,
+                            ssao,
                             data: images
-                                .into_iter()
+                                .into_par_iter()
                                 .map(|(image, color)| {
                                     image_to_shaded(image, *view, color)
                                 })
@@ -445,11 +447,31 @@ fn image_to_heightmap(
     HeightmapImageData { depth, color }
 }
 
+fn merged_ssao(
+    images: &[(fidget::render::GeometryBuffer, Option<Color>)],
+) -> std::sync::Arc<[f32]> {
+    let mut out = fidget::render::GeometryBuffer::new(images[0].0.size());
+    let threads = Some(&fidget::render::ThreadPool::Global);
+    out.apply_effect(
+        |x, y| {
+            images
+                .iter()
+                .map(|(i, _c)| i[(y, x)])
+                .max_by_key(|p| p.depth)
+                .unwrap_or(GeometryPixel {
+                    depth: 0,
+                    normal: [0.0; 3],
+                })
+        },
+        threads,
+    );
+    let ssao =
+        effects::blur_ssao(&effects::compute_ssao(&out, threads), threads);
+    ssao.take().0.into()
+}
+
 fn image_to_shaded(
-    image: fidget::render::Image<
-        fidget::render::GeometryPixel,
-        fidget::render::VoxelSize,
-    >,
+    image: fidget::render::GeometryBuffer,
     view: fidget::render::View3,
     color: Option<Color>,
 ) -> ShadedImageData {
@@ -473,15 +495,8 @@ fn image_to_shaded(
 
     // XXX this should all happen on the GPU, probably!
     let image = effects::denoise_normals(&image, threads);
-    let ssao =
-        effects::blur_ssao(&effects::compute_ssao(&image, threads), threads);
     let pixels = image.take().0.into();
-    let ssao = ssao.take().0.into();
-    ShadedImageData {
-        pixels,
-        ssao,
-        color,
-    }
+    ShadedImageData { pixels, color }
 }
 
 pub(crate) fn hsl_to_rgb(hsl: [u8; 4]) -> [u8; 4] {

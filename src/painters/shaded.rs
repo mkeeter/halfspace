@@ -82,39 +82,123 @@ impl egui_wgpu::CallbackTrait for WgpuShadedPainter {
 
         let blit =
             BlitData::new(device, &gr.blit.bind_group_layout, texture_size);
-        gr.shaded.bound_data.insert(
-            self.index,
-            ShadedBundleData {
-                blit,
-                images: vec![],
-            },
-        );
 
+        let ssao_texture = gr
+            .shaded
+            .textures
+            .remove(&(self.image.ssao.as_ptr() as usize))
+            .unwrap_or_else(|| {
+                let tex = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("shaded ssao texture"),
+                    size: texture_size,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::R32Float,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING
+                        | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
+                });
+                queue.write_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &tex,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    self.image.ssao.as_bytes(),
+                    wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(4 * texture_size.width),
+                        rows_per_image: Some(texture_size.height),
+                    },
+                    texture_size,
+                );
+                tex
+            });
+
+        // Create the texture view
+        let ssao_texture_view = ssao_texture.create_view(&Default::default());
+
+        // Create samplers
+        let ssao_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("shaded ssao sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+
+        // Create the buffer
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("uniform buffer"),
+            size: std::mem::size_of::<Uniforms>() as u64,
+            mapped_at_creation: false,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        // Create the uniform
         // XXX this should be somewhere more central, instead of hacked here
         let max_depth = (self.image.size.depth() / (1 << self.image.level))
             .max(1)
             * if self.image.level == 0 { 2 } else { 1 };
-        for image in self.image.data.iter() {
-            let data = gr.shaded.get_data(device, queue, texture_size, image);
+        let uniforms = Uniforms {
+            transform: transform.into(),
+            max_depth,
+            _padding: Default::default(),
+        };
+        {
+            let mut writer = queue
+                .write_buffer_with(
+                    &uniform_buffer,
+                    0,
+                    (std::mem::size_of_val(&uniforms) as u64)
+                        .try_into()
+                        .unwrap(),
+                )
+                .unwrap();
+            writer.copy_from_slice(uniforms.as_bytes());
+        }
 
-            // Create the uniform
-            let uniforms = Uniforms {
-                transform: transform.into(),
-                max_depth,
-                _padding: Default::default(),
-            };
-            {
-                let mut writer = queue
-                    .write_buffer_with(
-                        &data.uniform_buffer,
-                        0,
-                        (std::mem::size_of_val(&uniforms) as u64)
-                            .try_into()
-                            .unwrap(),
-                    )
-                    .unwrap();
-                writer.copy_from_slice(uniforms.as_bytes());
-            }
+        let common_bind_group =
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("shaded bind group"),
+                layout: &gr.shaded.common_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(
+                            &ssao_texture_view,
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&ssao_sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: uniform_buffer.as_entire_binding(),
+                    },
+                ],
+            });
+
+        gr.shaded.bound_data.insert(
+            self.index,
+            ShadedBundleData {
+                blit,
+                ssao_image: self.image.ssao.clone(),
+                ssao_texture,
+                images: vec![],
+            },
+        );
+
+        let mut image_bgs = vec![];
+        for image in self.image.data.iter() {
+            let (data, bg) =
+                gr.shaded.get_data(device, queue, texture_size, image);
 
             gr.shaded
                 .bound_data
@@ -122,12 +206,19 @@ impl egui_wgpu::CallbackTrait for WgpuShadedPainter {
                 .unwrap()
                 .images
                 .push(data);
+            image_bgs.push(bg);
         }
 
         // Do deferred painting (with depth buffer) in a separate render pass
         let data = &gr.shaded.bound_data[&self.index];
         let mut render_pass = data.blit.begin_render_pass(egui_encoder);
-        gr.shaded.paint(&mut render_pass, self.index);
+
+        render_pass.set_pipeline(&gr.shaded.pipeline);
+        render_pass.set_bind_group(0, &common_bind_group, &[]);
+        for b in image_bgs {
+            render_pass.set_bind_group(1, &b, &[]);
+            render_pass.draw(0..6, 0..1);
+        }
 
         Vec::new()
     }
@@ -154,7 +245,8 @@ impl egui_wgpu::CallbackTrait for WgpuShadedPainter {
 /// callback then just blits this texture to the screen.
 pub(crate) struct ShadedResources {
     pipeline: wgpu::RenderPipeline,
-    bind_group_layout: wgpu::BindGroupLayout,
+    common_bind_group_layout: wgpu::BindGroupLayout,
+    image_bind_group_layout: wgpu::BindGroupLayout,
     bound_data: HashMap<BlockIndex, ShadedBundleData>,
 
     /// Cache from image pointer (cast to a `usize`) to texture
@@ -179,7 +271,7 @@ impl ShadedResources {
             });
 
         // Create bind group layout
-        let bind_group_layout =
+        let common_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("shaded bind group layout"),
                 entries: &[
@@ -204,7 +296,45 @@ impl ShadedResources {
                         ),
                         count: None,
                     },
+                    // Uniforms
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+        let image_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("shaded image bind group layout"),
+                entries: &[
                     // GeometryPixel texture and sampler
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float {
+                                filterable: true,
+                            },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(
+                            wgpu::SamplerBindingType::Filtering,
+                        ),
+                        count: None,
+                    },
+                    // Color texture and sampler
                     wgpu::BindGroupLayoutEntry {
                         binding: 2,
                         visibility: wgpu::ShaderStages::FRAGMENT,
@@ -225,38 +355,6 @@ impl ShadedResources {
                         ),
                         count: None,
                     },
-                    // Color texture and sampler
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 4,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float {
-                                filterable: true,
-                            },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 5,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(
-                            wgpu::SamplerBindingType::Filtering,
-                        ),
-                        count: None,
-                    },
-                    // Uniforms
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 6,
-                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
                 ],
             });
 
@@ -264,7 +362,10 @@ impl ShadedResources {
         let pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("shaded render pipeline layout"),
-                bind_group_layouts: &[&bind_group_layout],
+                bind_group_layouts: &[
+                    &common_bind_group_layout,
+                    &image_bind_group_layout,
+                ],
                 push_constant_ranges: &[],
             });
 
@@ -319,7 +420,8 @@ impl ShadedResources {
 
         Self {
             pipeline,
-            bind_group_layout,
+            common_bind_group_layout,
+            image_bind_group_layout,
             bound_data: HashMap::new(),
             textures: HashMap::new(),
         }
@@ -328,9 +430,9 @@ impl ShadedResources {
     pub fn reset(&mut self) {
         self.textures.clear();
         for (_, b) in std::mem::take(&mut self.bound_data) {
+            self.textures
+                .insert(b.ssao_image.as_ptr() as usize, b.ssao_texture);
             for i in b.images {
-                self.textures
-                    .insert(i.ssao_image.as_ptr() as usize, i.ssao_texture);
                 self.textures
                     .insert(i.pixel_image.as_ptr() as usize, i.pixel_texture);
                 self.textures
@@ -345,55 +447,7 @@ impl ShadedResources {
         queue: &wgpu::Queue,
         size: wgpu::Extent3d,
         data: &ShadedImageData,
-    ) -> ShadedData {
-        let ssao_texture = self
-            .textures
-            .remove(&(data.ssao.as_ptr() as usize))
-            .unwrap_or_else(|| {
-                let tex = device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("shaded ssao texture"),
-                    size,
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::R32Float,
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING
-                        | wgpu::TextureUsages::COPY_DST,
-                    view_formats: &[],
-                });
-                queue.write_texture(
-                    wgpu::TexelCopyTextureInfo {
-                        texture: &tex,
-                        mip_level: 0,
-                        origin: wgpu::Origin3d::ZERO,
-                        aspect: wgpu::TextureAspect::All,
-                    },
-                    data.ssao.as_bytes(),
-                    wgpu::TexelCopyBufferLayout {
-                        offset: 0,
-                        bytes_per_row: Some(4 * size.width),
-                        rows_per_image: Some(size.height),
-                    },
-                    size,
-                );
-                tex
-            });
-
-        // Create the texture view
-        let ssao_texture_view = ssao_texture.create_view(&Default::default());
-
-        // Create samplers
-        let ssao_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("shaded ssao sampler"),
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Linear,
-            ..Default::default()
-        });
-
+    ) -> (ShadedData, wgpu::BindGroup) {
         // Create the texture
         let pixel_texture = self
             .textures
@@ -486,73 +540,47 @@ impl ShadedResources {
             ..Default::default()
         });
 
-        // Create the buffer
-        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("uniform buffer"),
-            size: std::mem::size_of::<Uniforms>() as u64,
-            mapped_at_creation: false,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let image_bind_group =
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("shaded image bind group"),
+                layout: &self.image_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(
+                            &pixel_texture_view,
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(
+                            &pixel_sampler,
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(
+                            &color_texture_view,
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Sampler(
+                            &color_sampler,
+                        ),
+                    },
+                ],
+            });
 
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("shaded bind group"),
-            layout: &self.bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(
-                        &ssao_texture_view,
-                    ),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&ssao_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(
-                        &pixel_texture_view,
-                    ),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::Sampler(&pixel_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: wgpu::BindingResource::TextureView(
-                        &color_texture_view,
-                    ),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 5,
-                    resource: wgpu::BindingResource::Sampler(&color_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 6,
-                    resource: uniform_buffer.as_entire_binding(),
-                },
-            ],
-        });
-
-        ShadedData {
-            color_image: data.color.clone(),
-            pixel_image: data.pixels.clone(),
-            ssao_image: data.ssao.clone(),
-            ssao_texture,
-            pixel_texture,
-            color_texture,
-            bind_group,
-            uniform_buffer,
-        }
-    }
-
-    pub fn paint(&self, render_pass: &mut wgpu::RenderPass, index: BlockIndex) {
-        render_pass.set_pipeline(&self.pipeline);
-        for b in &self.bound_data[&index].images {
-            render_pass.set_bind_group(0, &b.bind_group, &[]);
-            render_pass.draw(0..6, 0..1);
-        }
+        (
+            ShadedData {
+                color_image: data.color.clone(),
+                pixel_image: data.pixels.clone(),
+                pixel_texture,
+                color_texture,
+            },
+            image_bind_group,
+        )
     }
 }
 
@@ -560,16 +588,16 @@ impl ShadedResources {
 struct ShadedBundleData {
     blit: BlitData,
     images: Vec<ShadedData>,
-}
 
-/// Resources used to render a single shaded image
-struct ShadedData {
     /// Image stored in the SSAO texture
     ssao_image: Arc<[f32]>,
 
     /// SSAO texture for shading
     ssao_texture: wgpu::Texture,
+}
 
+/// Resources used to render a single shaded image
+struct ShadedData {
     /// Image stored in the pixel texture
     pixel_image: Arc<[GeometryPixel]>,
 
@@ -581,12 +609,4 @@ struct ShadedData {
 
     /// `Rgba8Unorm` texture to render
     color_texture: wgpu::Texture,
-
-    /// Uniform buffer
-    ///
-    /// The transform matrix is common to all images, but colors can vary
-    uniform_buffer: wgpu::Buffer,
-
-    /// Bind group for shaded rendering
-    bind_group: wgpu::BindGroup,
 }

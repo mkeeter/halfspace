@@ -9,13 +9,16 @@ struct Light {
     intensity: f32,
 }
 
+// Common data (shared with all images)
 @group(0) @binding(0) var t_ssao: texture_2d<f32>;
 @group(0) @binding(1) var s_ssao: sampler;
-@group(0) @binding(2) var t_pixel: texture_2d<f32>;
-@group(0) @binding(3) var s_pixel: sampler;
-@group(0) @binding(4) var t_color: texture_2d<f32>;
-@group(0) @binding(5) var s_color: sampler;
-@group(0) @binding(6) var<uniform> uniforms: Uniforms;
+@group(0) @binding(2) var<uniform> uniforms: Uniforms;
+
+// Per-image bind data
+@group(1) @binding(0) var t_pixel: texture_2d<f32>;
+@group(1) @binding(1) var s_pixel: sampler;
+@group(1) @binding(2) var t_color: texture_2d<f32>;
+@group(1) @binding(3) var s_color: sampler;
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
