@@ -1,9 +1,10 @@
 {
   "tag": "halfspace",
-  "major": 1,
+  "major": 2,
   "minor": 2,
   "meta": {
-    "description": "HSL color"
+    "description": "HSL color",
+    "name": null
   },
   "world": {
     "next_index": 1,
@@ -12,11 +13,13 @@
     ],
     "blocks": {
       "0": {
-        "name": "circle",
-        "script": "//  Center of the circle (in XY)\nlet center = input(\"center\");\n\n//  Circle radius\nlet radius = input(\"radius\");\n\nlet r = sqrt(x*x + y*y);\nview((r - radius) * hsl(atan2(y, x), r, 0.5));",
-        "inputs": {
-          "radius": "1",
-          "center": "[0, 0]"
+        "Script": {
+          "name": "circle",
+          "script": "//  Center of the circle (in XY)\nlet center = input(\"center\");\n\n//  Circle radius\nlet radius = input(\"radius\");\n\n// Colorful circle\nlet r = sqrt(x.square() + y.square());\nview(circle(center, radius) * hsl(atan2(y, x), r, 0.5));",
+          "inputs": {
+            "radius": "1",
+            "center": "[0, 0]"
+          }
         }
       }
     }
@@ -31,7 +34,7 @@
         ],
         "scale": 1.231145,
         "width": 1100,
-        "height": 551
+        "height": 522
       }
     }
   },
@@ -45,7 +48,7 @@
                 "rect": {
                   "min": {
                     "x": 250.0,
-                    "y": 0.0
+                    "y": 29.0
                   },
                   "max": {
                     "x": 800.0,
@@ -62,21 +65,21 @@
                 "rect": {
                   "min": {
                     "x": 250.0,
-                    "y": 0.0
+                    "y": 29.0
                   },
                   "max": {
                     "x": 800.0,
-                    "y": 299.5
+                    "y": 314.0
                   }
                 },
                 "viewport": {
                   "min": {
                     "x": 250.0,
-                    "y": 24.0
+                    "y": 53.0
                   },
                   "max": {
                     "x": 800.0,
-                    "y": 299.5
+                    "y": 314.0
                   }
                 },
                 "tabs": [
@@ -95,7 +98,7 @@
                 "rect": {
                   "min": {
                     "x": 250.0,
-                    "y": 300.5
+                    "y": 315.0
                   },
                   "max": {
                     "x": 800.0,
@@ -105,7 +108,7 @@
                 "viewport": {
                   "min": {
                     "x": 250.0,
-                    "y": 324.5
+                    "y": 339.0
                   },
                   "max": {
                     "x": 800.0,
