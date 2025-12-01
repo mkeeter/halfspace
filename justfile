@@ -38,6 +38,7 @@ clippy:
 naga:
     naga --bulk-validate shaders/*.wgsl
 
+# Deploy the demo to `mattkeeter.com/projects/halfspace/demo`
 deploy:
     just dist
     rsync -avz --delete -e ssh ./pkg/ mkeeter@mattkeeter.com:mattkeeter.com/projects/halfspace/demo

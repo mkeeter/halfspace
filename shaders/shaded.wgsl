@@ -73,7 +73,10 @@ fn fs_main(
     var ssao = textureSample(t_ssao, s_ssao, tex_coords);
     var pixel = textureSample(t_pixel, s_pixel, tex_coords);
     let color = textureSample(t_color, s_color, tex_coords).rgb;
-    var depth = bitcast<u32>(pixel.r);
+
+    // We twiddle the high two exponent bits to avoid being denormalized in
+    // Vulkan; see halfspace#1 for details
+    var depth = bitcast<u32>(pixel.r) ^ 0x60000000;
 
     // If depth is 0, this pixel is transparent
     var out = RgbaDepth(vec4(1.0, 1.0, 1.0, 1.0), 0.0);
