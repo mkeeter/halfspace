@@ -101,9 +101,9 @@ impl WgpuResources {
 
 /// Computes a transform matrix to put a 2D image in the right place on a canvas
 fn transform2(
-    image_view: fidget::render::View2,
+    image_view: fidget::gui::View2,
     image_size: fidget::render::ImageSize,
-    canvas_view: fidget::render::View2,
+    canvas_view: fidget::gui::View2,
     canvas_size: fidget::render::ImageSize,
 ) -> nalgebra::Matrix4<f32> {
     // don't blame me, I just twiddled the matrices until things
@@ -136,9 +136,9 @@ fn transform2(
 
 /// Computes a transform matrix to put a 3D image in the right place on a canvas
 fn transform3(
-    image_view: fidget::render::View3,
+    image_view: fidget::gui::View3,
     image_size: fidget::render::VoxelSize,
-    canvas_view: fidget::render::View3,
+    canvas_view: fidget::gui::View3,
     canvas_size: fidget::render::ImageSize,
 ) -> nalgebra::Matrix4<f32> {
     // don't blame me, I just twiddled the matrices until things

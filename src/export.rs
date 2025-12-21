@@ -8,7 +8,8 @@ use zerocopy::IntoBytes;
 use fidget::{
     context::Tree,
     mesh::{Octree, Settings},
-    render::{ImageRenderConfig, ImageSize, RenderHints, ThreadPool},
+    raster::ImageRenderConfig,
+    render::{ImageSize, RenderHints, ThreadPool},
     shapes::{
         Box, Intersection,
         types::{Vec2, Vec3},
@@ -76,8 +77,7 @@ pub(crate) fn mesh_settings(
         return Err(ExportError::BoundsAreTooSmall);
     }
 
-    let view =
-        fidget::render::View3::from_center_and_scale(center, scale as f32);
+    let view = fidget::gui::View3::from_center_and_scale(center, scale as f32);
     let settings = Settings {
         depth,
         world_to_model: view.world_to_model(),
@@ -119,7 +119,7 @@ fn image_view(
     lower: Vec2,
     upper: Vec2,
     resolution: f64,
-) -> Result<fidget::render::View2, ExportError> {
+) -> Result<fidget::gui::View2, ExportError> {
     let center = (lower + upper) / 2.0;
     let scale_xyz = (upper - center).abs().max((lower - center).abs());
     let scale = scale_xyz.x.min(scale_xyz.y);
@@ -134,7 +134,7 @@ fn image_view(
     if scale.is_nan() || scale < 1e-8 {
         return Err(ExportError::BoundsAreTooSmall);
     }
-    Ok(fidget::render::View2::from_center_and_scale(
+    Ok(fidget::gui::View2::from_center_and_scale(
         center,
         scale as f32,
     ))
@@ -144,7 +144,7 @@ pub(crate) fn image_settings(
     lower: Vec2,
     upper: Vec2,
     resolution: f64,
-) -> Result<fidget::render::ImageRenderConfig<'static>, ExportError> {
+) -> Result<ImageRenderConfig<'static>, ExportError> {
     let view = image_view(lower, upper, resolution)?;
 
     let size = (upper - lower) * resolution;
@@ -189,7 +189,7 @@ pub(crate) fn build_image(
         .collect::<Option<_>>()
         .ok_or(ExportError::Cancelled)?;
 
-    let mut out = fidget::render::Image::<[u8; 4]>::new(cfg.image_size);
+    let mut out = fidget::raster::Image::<[u8; 4]>::new(cfg.image_size);
     out.apply_effect(
         |x, y| {
             let pos = y * cfg.image_size.width() as usize + x;

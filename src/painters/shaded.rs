@@ -7,14 +7,14 @@ use eframe::{
     egui,
     egui_wgpu::{self, wgpu},
 };
-use fidget::render::GeometryPixel;
+use fidget::raster::GeometryPixel;
 use std::{collections::HashMap, sync::Arc};
 use zerocopy::IntoBytes;
 
 /// GPU callback for painting shaded objects
 pub struct WgpuShadedPainter {
     /// Current view, which may differ from the image's view
-    view: fidget::render::View3,
+    view: fidget::gui::View3,
     size: fidget::render::ImageSize,
 
     /// Index of the block being rendered
@@ -29,7 +29,7 @@ pub struct WgpuShadedPainter {
 #[derive(Copy, Clone, zerocopy::IntoBytes, zerocopy::Immutable)]
 struct Uniforms {
     transform: [[f32; 4]; 4],
-    max_depth: u32,
+    max_depth: f32,
     _padding: [u8; 12],
 }
 
@@ -42,7 +42,7 @@ impl WgpuShadedPainter {
         index: BlockIndex,
         image: ShadedViewImage,
         size: fidget::render::ImageSize,
-        view: fidget::render::View3,
+        view: fidget::gui::View3,
     ) -> Self {
         Self {
             index,
@@ -147,7 +147,7 @@ impl egui_wgpu::CallbackTrait for WgpuShadedPainter {
             * if self.image.level == 0 { 2 } else { 1 };
         let uniforms = Uniforms {
             transform: transform.into(),
-            max_depth,
+            max_depth: max_depth as f32,
             _padding: Default::default(),
         };
         {

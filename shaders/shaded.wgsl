@@ -1,7 +1,7 @@
 // Uniform buffer containing the transform matrix
 struct Uniforms {
     transform: mat4x4<f32>,
-    max_depth: u32,
+    max_depth: f32,
 }
 
 struct Light {
@@ -74,19 +74,17 @@ fn fs_main(
     var pixel = textureSample(t_pixel, s_pixel, tex_coords);
     let color = textureSample(t_color, s_color, tex_coords).rgb;
 
-    // We twiddle the high two exponent bits to avoid being denormalized in
-    // Vulkan; see halfspace#1 for details
-    var depth = bitcast<u32>(pixel.r) ^ 0x60000000;
+    var depth = pixel.r;
 
     // If depth is 0, this pixel is transparent
     var out = RgbaDepth(vec4(1.0, 1.0, 1.0, 1.0), 0.0);
-    if (depth == 0u) {
+    if (depth == 0.0) {
         discard;
     } else if (depth < uniforms.max_depth) {
         // Pixel position (for lighting calculations)
         let p = vec3<f32>(
             (tex_coords.xy - 0.5) * 2.0,
-            2.0 * (f32(depth) / f32(uniforms.max_depth) - 0.5)
+            2.0 * (depth / uniforms.max_depth - 0.5)
         );
 
         let normal = vec3<f32>(pixel.yzw);
@@ -106,7 +104,7 @@ fn fs_main(
         let c = vec3<f32>(accum * color);
         out = RgbaDepth(
             vec4<f32>(c, 1.0),
-            1.0 - f32(depth) / f32(uniforms.max_depth)
+            1.0 - depth / uniforms.max_depth
         );
     }
     return out;

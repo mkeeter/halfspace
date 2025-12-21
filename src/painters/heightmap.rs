@@ -1,4 +1,4 @@
-use super::{blit::BlitData, WgpuResources};
+use super::{WgpuResources, blit::BlitData};
 use crate::{view::HeightmapViewImage, world::BlockIndex};
 use eframe::{
     egui,
@@ -10,7 +10,7 @@ use zerocopy::IntoBytes;
 /// GPU callback for painting heightmap objects
 pub struct WgpuHeightmapPainter {
     /// Current view, which may differ from the image's view
-    view: fidget::render::View3,
+    view: fidget::gui::View3,
     size: fidget::render::ImageSize,
 
     /// Index of the block being rendered
@@ -40,7 +40,7 @@ impl WgpuHeightmapPainter {
         index: BlockIndex,
         image: HeightmapViewImage,
         size: fidget::render::ImageSize,
-        view: fidget::render::View3,
+        view: fidget::gui::View3,
     ) -> Self {
         Self {
             index,

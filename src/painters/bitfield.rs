@@ -20,7 +20,7 @@ struct Uniforms {
 /// GPU callback
 pub struct WgpuBitfieldPainter {
     /// Current view, which may differ from the image's view
-    view: fidget::render::View2,
+    view: fidget::gui::View2,
     size: fidget::render::ImageSize,
 
     /// Index of the block being rendered
@@ -39,7 +39,7 @@ impl WgpuBitfieldPainter {
         index: BlockIndex,
         image: BitfieldViewImage,
         size: fidget::render::ImageSize,
-        view: fidget::render::View2,
+        view: fidget::gui::View2,
     ) -> Self {
         Self {
             index,

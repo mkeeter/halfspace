@@ -73,7 +73,7 @@ impl rhai::CustomType for Color {
                                 rhai::EvalAltResult::ErrorMismatchDataType(
                                     "float in the 0.0 - 1.0 range".to_owned(),
                                     format!("float with value {c}"),
-                                    ctx.position(),
+                                    ctx.call_position(),
                                 )
                                 .into(),
                             );
@@ -105,7 +105,7 @@ impl rhai::CustomType for Color {
                                 rhai::EvalAltResult::ErrorMismatchDataType(
                                     "float in the 0.0 - 1.0 range".to_owned(),
                                     format!("float with value {c}"),
-                                    ctx.position(),
+                                    ctx.call_position(),
                                 )
                                 .into(),
                             );
@@ -182,7 +182,7 @@ fn build_scene(
                 Err(Box::new(rhai::EvalAltResult::ErrorMismatchDataType(
                     "tree or drawable".to_owned(),
                     v.type_name().to_string(),
-                    ctx.position(),
+                    ctx.call_position(),
                 )))
             }
         })

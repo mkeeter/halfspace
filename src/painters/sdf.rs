@@ -1,4 +1,4 @@
-use super::{blit::BlitData, WgpuResources};
+use super::{WgpuResources, blit::BlitData};
 
 /// Painter drawing SDFs
 use crate::{view::SdfViewImage, world::BlockIndex};
@@ -23,7 +23,7 @@ struct Uniforms {
 /// GPU callback
 pub struct WgpuSdfPainter {
     /// Current view, which may differ from the image's view
-    view: fidget::render::View2,
+    view: fidget::gui::View2,
     size: fidget::render::ImageSize,
 
     /// Index of the block being rendered
@@ -42,7 +42,7 @@ impl WgpuSdfPainter {
         index: BlockIndex,
         image: SdfViewImage,
         size: fidget::render::ImageSize,
-        view: fidget::render::View2,
+        view: fidget::gui::View2,
     ) -> Self {
         Self {
             index,

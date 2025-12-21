@@ -808,13 +808,13 @@ impl BlockEvalData {
         if !rhai::is_valid_identifier(name) {
             Err(rhai::EvalAltResult::ErrorForbiddenVariable(
                 name.to_owned(),
-                ctx.position(),
+                ctx.call_position(),
             )
             .into())
         } else if !self.names.insert(name.to_owned()) {
             Err(rhai::EvalAltResult::ErrorVariableExists(
                 format!("io `{name}` already exists"),
-                ctx.position(),
+                ctx.call_position(),
             )
             .into())
         } else {
@@ -838,7 +838,7 @@ impl BlockEvalData {
             IoValue::Output {
                 value: v,
                 text,
-                pos: ctx.position(),
+                pos: ctx.call_position(),
             },
         ));
         Ok(())
@@ -869,7 +869,7 @@ impl BlockEvalData {
             name.to_owned(),
             IoValue::Input {
                 value: i,
-                pos: ctx.position(),
+                pos: ctx.call_position(),
             },
         ));
         v.map_err(|_| "error in input expression".into())
@@ -883,7 +883,7 @@ impl BlockEvalData {
         if self.view.is_some() {
             return Err(rhai::EvalAltResult::ErrorRuntime(
                 "cannot have multiple views in a single block".into(),
-                ctx.position(),
+                ctx.call_position(),
             )
             .into());
         }
@@ -972,7 +972,7 @@ impl BlockEvalData {
                 if eval_data.export.is_some() {
                     return Err(rhai::EvalAltResult::ErrorRuntime(
                         "cannot have multiple exports in a single block".into(),
-                        ctx.position(),
+                        ctx.call_position(),
                     )
                     .into());
                 }
@@ -998,7 +998,7 @@ impl BlockEvalData {
                 if eval_data.export.is_some() {
                     return Err(rhai::EvalAltResult::ErrorRuntime(
                         "cannot have multiple exports in a single block".into(),
-                        ctx.position(),
+                        ctx.call_position(),
                     )
                     .into());
                 }

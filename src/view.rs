@@ -138,7 +138,7 @@ impl From<ViewState> for ViewCanvas {
                 height,
             } => {
                 let canvas = fidget::gui::Canvas2::from_components(
-                    fidget::render::View2::from_components(center, scale),
+                    fidget::gui::View2::from_components(center, scale),
                     fidget::render::ImageSize::new(width, height),
                 );
                 Self::Canvas2 { canvas, mode }
@@ -155,7 +155,7 @@ impl From<ViewState> for ViewCanvas {
                 perspective,
             } => {
                 let canvas = fidget::gui::Canvas3::from_components(
-                    fidget::render::View3::from_components(
+                    fidget::gui::View3::from_components(
                         center, scale, yaw, pitch,
                     ),
                     fidget::render::VoxelSize::new(width, height, depth),
@@ -174,7 +174,7 @@ impl From<ViewState> for ViewCanvas {
 #[derive(Clone)]
 pub struct SdfViewImage {
     pub data: Vec<SdfImageData>,
-    pub view: fidget::render::View2,
+    pub view: fidget::gui::View2,
     pub size: fidget::render::ImageSize,
     pub level: usize,
 }
@@ -190,7 +190,7 @@ pub struct SdfImageData {
 #[derive(Clone)]
 pub struct BitfieldViewImage {
     pub data: Vec<BitfieldImageData>,
-    pub view: fidget::render::View2,
+    pub view: fidget::gui::View2,
     pub size: fidget::render::ImageSize,
     pub level: usize,
 }
@@ -214,10 +214,10 @@ impl BitfieldViewImage {
     /// neighbors, to reduce visual glitches when rendering lower-than-native
     /// resolution images.
     pub fn denoise(
-        image: fidget::render::Image<fidget::render::DistancePixel>,
+        image: fidget::raster::Image<fidget::raster::DistancePixel>,
         threads: Option<&fidget::render::ThreadPool>,
-    ) -> fidget::render::Image<f32> {
-        let mut out = fidget::render::Image::new(image.size());
+    ) -> fidget::raster::Image<f32> {
+        let mut out = fidget::raster::Image::new(image.size());
         out.apply_effect(
             |x, y| match image[(y, x)].distance() {
                 Ok(v) => v,
@@ -282,7 +282,7 @@ impl BitfieldViewImage {
 #[derive(Clone)]
 pub struct DebugViewImage {
     pub data: Vec<DebugImageData>,
-    pub view: fidget::render::View2,
+    pub view: fidget::gui::View2,
     pub size: fidget::render::ImageSize,
     pub level: usize,
 }
@@ -298,7 +298,7 @@ pub struct DebugImageData {
 #[derive(Clone)]
 pub struct HeightmapViewImage {
     pub data: Vec<HeightmapImageData>,
-    pub view: fidget::render::View3,
+    pub view: fidget::gui::View3,
     pub size: fidget::render::VoxelSize,
     pub level: usize,
 }
@@ -315,7 +315,7 @@ pub struct HeightmapImageData {
 pub struct ShadedViewImage {
     pub data: Vec<ShadedImageData>,
     pub ssao: Arc<[f32]>,
-    pub view: fidget::render::View3,
+    pub view: fidget::gui::View3,
     pub size: fidget::render::VoxelSize,
     pub level: usize,
 }
@@ -323,7 +323,7 @@ pub struct ShadedViewImage {
 /// Single shaded image to be drawn to the screen
 #[derive(Clone)]
 pub struct ShadedImageData {
-    pub pixels: Arc<[fidget::render::GeometryPixel]>,
+    pub pixels: Arc<[fidget::raster::GeometryPixel]>,
     pub color: Arc<[[u8; 4]]>,
 }
 

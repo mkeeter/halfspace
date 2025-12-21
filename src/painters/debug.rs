@@ -17,7 +17,7 @@ struct Uniforms {
 /// GPU callback for painting debug images
 pub struct WgpuDebugPainter {
     /// Current view, which may differ from the image's view
-    view: fidget::render::View2,
+    view: fidget::gui::View2,
     size: fidget::render::ImageSize,
 
     /// Index of the block being rendered
@@ -36,7 +36,7 @@ impl WgpuDebugPainter {
         index: BlockIndex,
         image: DebugViewImage,
         size: fidget::render::ImageSize,
-        view: fidget::render::View2,
+        view: fidget::gui::View2,
     ) -> Self {
         Self {
             index,

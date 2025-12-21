@@ -12,7 +12,7 @@ use crate::{
 
 use fidget::{
     eval::{BulkEvaluator, Function, MathFunction},
-    render::{GeometryPixel, effects},
+    raster::{GeometryPixel, effects},
 };
 
 use rayon::prelude::*;
@@ -112,7 +112,7 @@ impl RenderTask {
                     (size.width() / scale).max(1),
                     (size.height() / scale).max(1),
                 );
-                let cfg = fidget::render::ImageRenderConfig {
+                let cfg = fidget::raster::ImageRenderConfig {
                     image_size,
                     world_to_model: view.world_to_model(),
                     cancel,
@@ -206,7 +206,7 @@ impl RenderTask {
                     *world_to_model.get_mut((3, 2)).unwrap() =
                         0.3 / bonus_z as f32;
                 }
-                let cfg = fidget::render::VoxelRenderConfig {
+                let cfg = fidget::raster::VoxelRenderConfig {
                     image_size,
                     world_to_model,
                     cancel,
@@ -274,14 +274,14 @@ pub enum RenderSettings {
     Render2 {
         scene: Scene,
         mode: ViewMode2,
-        view: fidget::render::View2,
+        view: fidget::gui::View2,
         size: fidget::render::ImageSize,
     },
     Render3 {
         scene: Scene,
         mode: ViewMode3,
         perspective: bool,
-        view: fidget::render::View3,
+        view: fidget::gui::View3,
         size: fidget::render::VoxelSize,
     },
 }
@@ -378,8 +378,8 @@ impl std::cmp::PartialEq for RenderSettings {
 }
 
 fn image_to_sdf(
-    image: fidget::render::Image<fidget::render::DistancePixel>,
-    view: fidget::render::View2,
+    image: fidget::raster::Image<fidget::raster::DistancePixel>,
+    view: fidget::gui::View2,
     color: Option<Color>,
 ) -> SdfImageData {
     let color = color.map(|c| {
@@ -408,8 +408,8 @@ fn image_to_sdf(
 }
 
 pub(crate) fn image_to_bitfield(
-    image: fidget::render::Image<fidget::render::DistancePixel>,
-    view: fidget::render::View2,
+    image: fidget::raster::Image<fidget::raster::DistancePixel>,
+    view: fidget::gui::View2,
     color: Option<Color>,
 ) -> BitfieldImageData {
     let threads = Some(&fidget::render::ThreadPool::Global);
@@ -427,11 +427,11 @@ pub(crate) fn image_to_bitfield(
 }
 
 fn image_to_heightmap(
-    image: fidget::render::Image<
-        fidget::render::GeometryPixel,
+    image: fidget::raster::Image<
+        fidget::raster::GeometryPixel,
         fidget::render::VoxelSize,
     >,
-    view: fidget::render::View3,
+    view: fidget::gui::View3,
     color: Option<Color>,
 ) -> HeightmapImageData {
     let color = color.map(|c| {
@@ -448,18 +448,18 @@ fn image_to_heightmap(
 }
 
 fn merged_ssao(
-    images: &[(fidget::render::GeometryBuffer, Option<Color>)],
+    images: &[(fidget::raster::GeometryBuffer, Option<Color>)],
 ) -> std::sync::Arc<[f32]> {
-    let mut out = fidget::render::GeometryBuffer::new(images[0].0.size());
+    let mut out = fidget::raster::GeometryBuffer::new(images[0].0.size());
     let threads = Some(&fidget::render::ThreadPool::Global);
     out.apply_effect(
         |x, y| {
             images
                 .iter()
                 .map(|(i, _c)| i[(y, x)])
-                .max_by_key(|p| p.depth)
+                .max_by_key(|p| ordered_float::OrderedFloat(p.depth))
                 .unwrap_or(GeometryPixel {
-                    depth: 0,
+                    depth: 0.0,
                     normal: [0.0; 3],
                 })
         },
@@ -471,8 +471,8 @@ fn merged_ssao(
 }
 
 fn image_to_shaded(
-    image: fidget::render::GeometryBuffer,
-    view: fidget::render::View3,
+    image: fidget::raster::GeometryBuffer,
+    view: fidget::gui::View3,
     color: Option<Color>,
 ) -> ShadedImageData {
     let threads = Some(&fidget::render::ThreadPool::Global);
@@ -518,12 +518,12 @@ pub(crate) fn hsl_to_rgb(hsl: [u8; 4]) -> [u8; 4] {
 }
 
 fn render_hsl_2d(
-    image: &fidget::render::Image<fidget::render::DistancePixel>,
-    view: fidget::render::View2,
+    image: &fidget::raster::Image<fidget::raster::DistancePixel>,
+    view: fidget::gui::View2,
     hsl: [fidget::context::Tree; 3],
-) -> fidget::render::Image<[u8; 4]> {
+) -> fidget::raster::Image<[u8; 4]> {
     let image = render_colors_2d(image, view, hsl);
-    let mut out = fidget::render::Image::new(image.size());
+    let mut out = fidget::raster::Image::new(image.size());
     out.apply_effect(
         |x, y| {
             let hsl = image[(y, x)];
@@ -535,10 +535,10 @@ fn render_hsl_2d(
 }
 
 pub(crate) fn render_colors_2d(
-    image: &fidget::render::Image<fidget::render::DistancePixel>,
-    view: fidget::render::View2,
+    image: &fidget::raster::Image<fidget::raster::DistancePixel>,
+    view: fidget::gui::View2,
     colors: [fidget::context::Tree; 3],
-) -> fidget::render::Image<[u8; 4]> {
+) -> fidget::raster::Image<[u8; 4]> {
     let mat = view.world_to_model() * image.size().screen_to_world();
 
     let image_size = image.size();
@@ -626,7 +626,7 @@ pub(crate) fn render_colors_2d(
         )
         .collect::<Vec<_>>();
 
-    let mut out = fidget::render::Image::new(image_size);
+    let mut out = fidget::raster::Image::new(image_size);
     for (x, y, data) in tiles {
         let mut iter = data.iter();
         for dy in 0..TILE_SIZE {
@@ -645,15 +645,15 @@ pub(crate) fn render_colors_2d(
 }
 
 fn render_hsl_3d(
-    image: &fidget::render::Image<
-        fidget::render::GeometryPixel,
+    image: &fidget::raster::Image<
+        fidget::raster::GeometryPixel,
         fidget::render::VoxelSize,
     >,
-    view: fidget::render::View3,
+    view: fidget::gui::View3,
     hsl: [fidget::context::Tree; 3],
-) -> fidget::render::Image<[u8; 4], fidget::render::VoxelSize> {
+) -> fidget::raster::Image<[u8; 4], fidget::render::VoxelSize> {
     let image = render_colors_3d(image, view, hsl);
-    let mut out = fidget::render::Image::new(image.size());
+    let mut out = fidget::raster::Image::new(image.size());
     out.apply_effect(
         |x, y| {
             let hsl = image[(y, x)];
@@ -665,13 +665,13 @@ fn render_hsl_3d(
 }
 
 fn render_colors_3d(
-    image: &fidget::render::Image<
-        fidget::render::GeometryPixel,
+    image: &fidget::raster::Image<
+        fidget::raster::GeometryPixel,
         fidget::render::VoxelSize,
     >,
-    view: fidget::render::View3,
+    view: fidget::gui::View3,
     colors: [fidget::context::Tree; 3],
-) -> fidget::render::Image<[u8; 4], fidget::render::VoxelSize> {
+) -> fidget::raster::Image<[u8; 4], fidget::render::VoxelSize> {
     let mat = view.world_to_model() * image.size().screen_to_world();
 
     let image_size = image.size();
@@ -698,7 +698,7 @@ fn render_colors_3d(
                     if y >= image_size.height() {
                         continue;
                     }
-                    if image[(y as usize, x as usize)].depth != 0 {
+                    if image[(y as usize, x as usize)].depth != 0.0 {
                         any_inside = true;
                         break 'outer;
                     }
@@ -732,7 +732,7 @@ fn render_colors_3d(
                         let pz = if py < image.height() && px < image.width() {
                             image[(py, px)].depth
                         } else {
-                            0
+                            0.0
                         };
                         let pos = mat.transform_point(&nalgebra::Point3::new(
                             px as f32, py as f32, pz as f32,
@@ -766,7 +766,7 @@ fn render_colors_3d(
         )
         .collect::<Vec<_>>();
 
-    let mut out = fidget::render::Image::new(image_size);
+    let mut out = fidget::raster::Image::new(image_size);
     for (x, y, data) in tiles {
         let mut iter = data.iter();
         for dy in 0..TILE_SIZE {
