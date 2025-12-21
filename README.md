@@ -4,7 +4,7 @@
 Halfspace is an experimental IDE for doing solid modeling with distance fields.
 
 It is lamentably undocumented.
-See the [`fidget::rhai`](https://docs.rs/fidget/latest/fidget/rhai/index.html)
+See the [`fidget::rhai`](https://docs.rs/fidget-rhai/latest/fidget_rhai/index.html)
 documentation for details on scripting; otherwise, look to the examples for
 inspiration.  When in doubt, read the source code!
 
@@ -25,4 +25,3 @@ and [`npm`](https://www.npmjs.com/).
 just serve # serves a local copy of the app
 just dist  # builds the web app in `pkg/`
 ```
-
