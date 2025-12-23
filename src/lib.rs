@@ -586,48 +586,38 @@ impl App {
     fn draw_menu(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
-                let mut clicked = false;
                 if ui.button("\u{ea7b} New").clicked() {
                     self.on_new();
-                    clicked = true;
                 }
                 ui.separator();
                 if cfg!(target_arch = "wasm32") {
                     // Web menu
                     if ui.button("\u{f093} Upload").clicked() {
                         self.on_load(false);
-                        clicked = true;
                     }
                     if ui.button("\u{f019} Download").clicked() {
                         self.on_download();
-                        clicked = true;
                     }
                     ui.separator();
                     if ui.button("\u{eb4b} Save").clicked() {
                         self.on_save_local();
-                        clicked = true;
                     }
                     if ui.button("\u{eb4a} Save As").clicked() {
                         self.on_save_as_local();
-                        clicked = true;
                     }
                     if ui.button("\u{f07c} Open").clicked() {
                         self.on_open();
-                        clicked = true;
                     }
                 } else {
                     // Native menu items!
                     if ui.button("\u{eb4b} Save").clicked() {
                         self.on_save();
-                        clicked = true;
                     }
                     if ui.button("\u{eb4a} Save as").clicked() {
                         self.on_save_as();
-                        clicked = true;
                     }
                     if ui.button("\u{f07c} Open").clicked() {
                         self.on_open();
-                        clicked = true;
                     }
                     ui.separator();
 
@@ -636,49 +626,35 @@ impl App {
                         ui.label("Debug zone:");
                         if ui.button("\u{f019} Download").clicked() {
                             self.on_download();
-                            clicked = true;
                         }
                         if ui.button("Save (local)").clicked() {
                             self.on_save_local();
-                            clicked = true;
                         }
                         if ui.button("Save As (local)").clicked() {
                             self.on_save_as_local();
-                            clicked = true;
                         }
                         if ui.button("Open (local)").clicked() {
                             self.on_load(true);
-                            clicked = true;
                         }
                         ui.separator();
                     }
 
                     if ui.button("\u{f0a48} Quit").clicked() {
                         self.on_quit(ctx);
-                        clicked = true;
                     }
-                }
-                if clicked {
-                    ui.close(); // TODO is this still necessary?
                 }
             });
             ui.menu_button("Edit", |ui| {
-                let mut clicked = false;
                 ui.add_enabled_ui(self.undo.has_undo(&self.data), |ui| {
                     if ui.button("Undo").clicked() {
                         self.on_undo();
-                        clicked = true;
                     }
                 });
                 ui.add_enabled_ui(self.undo.has_redo(&self.data), |ui| {
                     if ui.button("Redo").clicked() {
                         self.on_redo();
-                        clicked = true;
                     }
                 });
-                if clicked {
-                    ui.close();
-                }
             });
             ui.menu_button("Examples", |ui| {
                 let mut load_state = None;
@@ -701,13 +677,11 @@ impl App {
                             NextAction::LoadExample(state),
                         ));
                     }
-                    ui.close();
                 }
             });
             ui.menu_button("Help", |ui| {
                 if ui.button("\u{eb32} About").clicked() {
                     self.on_about();
-                    ui.close();
                 }
                 if self.debug {
                     ui.checkbox(&mut self.show_inspection_ui, "Debug");
