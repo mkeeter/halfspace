@@ -21,12 +21,12 @@ overflow-checks = true
 anyhow = "1.0.98"
 bincode = { version = "2", features = ["serde"] }
 bitflags = "2.9.1"
-eframe = { version = "0.31.1", default-features = false, features = ["wgpu", "accesskit", "wayland", "web_screen_reader", "x11"] }
-egui = "0.31.1"
-egui-wgpu = { version = "0.31.1" }
-egui_dnd = "0.12.0"
-egui_dock = { git = "https://github.com/mkeeter/egui_dock", features = ["serde"], branch = "next" }
-egui_extras = { git = "https://github.com/mkeeter/egui", features = ["syntect"], branch = "custom-syntect-settings-0.31.1-backport" }
+eframe = { version = "0.33.3", default-features = false, features = ["wgpu", "wayland", "web_screen_reader", "x11"] }
+egui = { version = "0.33.3" }
+egui-wgpu = { version = "0.33.3" }
+egui_dnd = "0.14.0"
+egui_dock = { version = "0.18.0", features = ["serde"] }
+egui_extras = { version = "0.33.3", features = ["syntect"] }
 facet = "0.31"
 fidget = { git = "https://github.com/mkeeter/fidget" }
 git-version = "0.3.9"
@@ -73,13 +73,14 @@ getrandom-03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] 
 getrandom-02 = { package = "getrandom", version = "0.2", features = ["js"] }
 
 [features]
-deadlock_detection = ["egui/deadlock_detection"]
 jit = ["fidget/jit"]
 default = ["jit"]
 
+# We're *actually* using my own egui fork to fix egui#7346
 [patch.crates-io]
-egui = { git = "https://github.com/mkeeter/egui", branch = "custom-syntect-settings-0.31.1-backport" }
-epaint = { git = "https://github.com/mkeeter/egui", branch = "custom-syntect-settings-0.31.1-backport" }
+egui = { git = "https://github.com/mkeeter/egui", branch = "v0.33.0-backport" }
+egui-winit = { git = "https://github.com/mkeeter/egui", branch = "v0.33.0-backport" }
+epaint = { git = "https://github.com/mkeeter/egui", branch = "v0.33.0-backport" }
 
 # Optimize dependencies (mostly Fidget) even in debug builds
 [profile.dev.package."*"]
