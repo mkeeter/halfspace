@@ -379,18 +379,20 @@ impl<'a> WorldView<'a> {
                 draw_line_numbers(ui, index, block);
 
                 let mut layouter =
-                    |ui: &egui::Ui, buf: &str, _wrap_width: f32| {
+                    |ui: &egui::Ui,
+                     buf: &dyn egui::TextBuffer,
+                     _wrap_width: f32| {
                         let mut layout_job =
                             egui_extras::syntax_highlighting::highlight_with(
                                 ui.ctx(),
                                 ui.style(),
                                 &theme,
-                                buf,
+                                buf.as_str(),
                                 "rhai",
                                 self.syntax,
                             );
                         layout_job.wrap.max_width = f32::INFINITY;
-                        ui.fonts(|f| f.layout_job(layout_job))
+                        ui.fonts_mut(|f| f.layout_job(layout_job))
                     };
                 let r = ui.add(
                     egui::TextEdit::multiline(&mut block.script)
@@ -532,20 +534,21 @@ fn draw_line_numbers(
     type LineNumberCache =
         egui::cache::FrameCache<egui::text::LayoutJob, LineNumberDraw>;
 
-    let mut layouter = |ui: &egui::Ui, buf: &str, wrap_width: f32| {
-        let ctx = ui.ctx();
-        let mut layout_job = ctx.memory_mut(|mem| {
-            mem.caches.cache::<LineNumberCache>().get((
-                buf,
-                err_line,
-                line_color,
-                error_color,
-                &font_id,
-            ))
-        });
-        layout_job.wrap.max_width = wrap_width;
-        ui.fonts(|f| f.layout_job(layout_job))
-    };
+    let mut layouter =
+        |ui: &egui::Ui, buf: &dyn egui::TextBuffer, wrap_width: f32| {
+            let ctx = ui.ctx();
+            let mut layout_job = ctx.memory_mut(|mem| {
+                mem.caches.cache::<LineNumberCache>().get((
+                    buf.as_str(),
+                    err_line,
+                    line_color,
+                    error_color,
+                    &font_id,
+                ))
+            });
+            layout_job.wrap.max_width = wrap_width;
+            ui.fonts_mut(|f| f.layout_job(layout_job))
+        };
     let lines = egui::TextEdit::multiline(&mut line_text)
         .id_source(index.id().with("line_numbers"))
         .font(egui::TextStyle::Monospace)
@@ -1120,7 +1123,7 @@ impl<'a> DockStateEditor<'a> {
     }
     pub fn toggle_script(&mut self) {
         if let Some((surface, node, tab)) = self.script {
-            let egui_dock::Node::Leaf { active, .. } =
+            let egui_dock::Node::Leaf(egui_dock::LeafNode { active, .. }) =
                 &self.tree[surface][node]
             else {
                 panic!("target node was not a leaf ")

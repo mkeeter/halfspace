@@ -22,7 +22,7 @@ use world::{BlockIndex, World};
 #[derive(thiserror::Error, Debug)]
 pub enum WgpuError {
     #[error("could not get WebGPU adapter")]
-    NoAdapter,
+    RequestAdapterError(#[from] wgpu::RequestAdapterError),
 
     #[error("missing feature `{0}`")]
     MissingFeature(&'static str),
@@ -42,8 +42,7 @@ pub async fn wgpu_setup() -> Result<egui_wgpu::WgpuSetupExisting, WgpuError> {
             compatible_surface: None,
             force_fallback_adapter: false,
         })
-        .await
-        .ok_or(WgpuError::NoAdapter)?;
+        .await?;
 
     let adapter_features = adapter.features();
     if !adapter_features.contains(wgpu::Features::FLOAT32_FILTERABLE) {
@@ -53,15 +52,14 @@ pub async fn wgpu_setup() -> Result<egui_wgpu::WgpuSetupExisting, WgpuError> {
     let required_features = wgpu::Features::FLOAT32_FILTERABLE;
 
     let (device, queue) = adapter
-        .request_device(
-            &wgpu::DeviceDescriptor {
-                label: Some("Device with float32-filterable"),
-                required_features,
-                required_limits: wgpu::Limits::default(),
-                memory_hints: wgpu::MemoryHints::default(),
-            },
-            None,
-        )
+        .request_device(&wgpu::DeviceDescriptor {
+            label: Some("Device with float32-filterable"),
+            required_features,
+            required_limits: wgpu::Limits::default(),
+            memory_hints: wgpu::MemoryHints::default(),
+            experimental_features: wgpu::ExperimentalFeatures::disabled(),
+            trace: wgpu::Trace::Off,
+        })
         .await?;
 
     Ok(egui_wgpu::WgpuSetupExisting {
@@ -103,6 +101,8 @@ pub mod color {
 fn theme_visuals() -> egui::Visuals {
     use color::*;
     let base = egui::Visuals::dark();
+
+    // Helper function to translate a color into our theme
     let c = |c: egui::Color32| {
         if c == egui::Color32::from_rgb(255, 143, 0) {
             ORANGE
@@ -171,6 +171,12 @@ fn theme_visuals() -> egui::Visuals {
         window_stroke: s(base.window_stroke),
         panel_fill: c(base.panel_fill),
         text_cursor: t(base.text_cursor),
+
+        text_options: base.text_options,
+        weak_text_alpha: base.weak_text_alpha,
+        weak_text_color: base.weak_text_color.map(c),
+        text_edit_bg_color: base.text_edit_bg_color.map(c),
+        disabled_alpha: base.disabled_alpha,
 
         collapsing_header_frame: base.collapsing_header_frame,
         handle_shape: base.handle_shape,
@@ -578,7 +584,7 @@ impl App {
     }
 
     fn draw_menu(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
-        egui::menu::bar(ui, |ui| {
+        egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
                 let mut clicked = false;
                 if ui.button("\u{ea7b} New").clicked() {
@@ -653,7 +659,7 @@ impl App {
                     }
                 }
                 if clicked {
-                    ui.close_menu();
+                    ui.close(); // TODO is this still necessary?
                 }
             });
             ui.menu_button("Edit", |ui| {
@@ -671,7 +677,7 @@ impl App {
                     }
                 });
                 if clicked {
-                    ui.close_menu();
+                    ui.close();
                 }
             });
             ui.menu_button("Examples", |ui| {
@@ -695,13 +701,13 @@ impl App {
                             NextAction::LoadExample(state),
                         ));
                     }
-                    ui.close_menu();
+                    ui.close();
                 }
             });
             ui.menu_button("Help", |ui| {
                 if ui.button("\u{eb32} About").clicked() {
                     self.on_about();
-                    ui.close_menu();
+                    ui.close();
                 }
                 if self.debug {
                     ui.checkbox(&mut self.show_inspection_ui, "Debug");
@@ -803,7 +809,7 @@ impl App {
             (window_size / 2.0).max(egui::Vec2::new(200.0, 200.0));
 
         // Block all interaction behind the modal
-        let screen_rect = ctx.screen_rect();
+        let screen_rect = ctx.content_rect();
         let layer_id = egui::LayerId::new(
             egui::Order::Middle,
             egui::Id::new("modal_layer"),
@@ -1231,14 +1237,14 @@ impl App {
     #[must_use]
     fn draw_ui(&mut self, ctx: &egui::Context) -> bool {
         let mut changed = false;
-        egui::TopBottomPanel::top("menu").show(ctx, |ui| {
+        egui::Panel::top("menu").show(ctx, |ui| {
             ui.add_space(2.0);
             self.draw_menu(ctx, ui);
             ui.add_space(2.0);
         });
 
-        changed |= egui::SidePanel::left("left_panel")
-            .min_width(250.0)
+        changed |= egui::Panel::left("left_panel")
+            .min_size(250.0)
             .show(ctx, |ui| self.draw_block_list(ui))
             .inner;
 
