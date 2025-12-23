@@ -2,6 +2,9 @@ cargo-web := "RUSTFLAGS='-C target-feature=+atomics,+bulk-memory --cfg getrandom
 rustup run nightly-2025-06-30 \
 cargo -Z build-std=std,panic_abort"
 
+_default:
+  just --list
+
 # Build a web application in `pkg/`
 dist:
     {{cargo-web}} build --lib --release --target wasm32-unknown-unknown 
