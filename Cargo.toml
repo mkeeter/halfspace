@@ -76,10 +76,13 @@ getrandom-02 = { package = "getrandom", version = "0.2", features = ["js"] }
 jit = ["fidget/jit"]
 default = ["jit"]
 
-# We're *actually* using my own egui fork to fix egui#7346
+# We're using my own egui fork to fix egui#7346; this requires patching the
+# whole graph of egui crates.
 [patch.crates-io]
+eframe = { git = "https://github.com/mkeeter/egui", branch = "v0.33.0-backport" }
 egui = { git = "https://github.com/mkeeter/egui", branch = "v0.33.0-backport" }
 egui-winit = { git = "https://github.com/mkeeter/egui", branch = "v0.33.0-backport" }
+egui-wgpu = { git = "https://github.com/mkeeter/egui", branch = "v0.33.0-backport" }
 epaint = { git = "https://github.com/mkeeter/egui", branch = "v0.33.0-backport" }
 
 # Optimize dependencies (mostly Fidget) even in debug builds

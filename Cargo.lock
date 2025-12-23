@@ -970,8 +970,7 @@ dependencies = [
 [[package]]
 name = "eframe"
 version = "0.33.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "457481173e6db5ca9fa2be93a58df8f4c7be639587aeb4853b526c6cf87db4e6"
+source = "git+https://github.com/mkeeter/egui?branch=v0.33.0-backport#065f16a9fe75092e952b1589401a11263d248721"
 dependencies = [
  "ahash",
  "bytemuck",
@@ -1024,8 +1023,7 @@ dependencies = [
 [[package]]
 name = "egui-wgpu"
 version = "0.33.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e4d209971c84b2352a06174abdba701af1e552ce56b144d96f2bd50a3c91236"
+source = "git+https://github.com/mkeeter/egui?branch=v0.33.0-backport#065f16a9fe75092e952b1589401a11263d248721"
 dependencies = [
  "ahash",
  "bytemuck",
@@ -1114,8 +1112,7 @@ dependencies = [
 [[package]]
 name = "egui_glow"
 version = "0.33.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6420863ea1d90e750f75075231a260030ad8a9f30a7cef82cdc966492dc4c4eb"
+source = "git+https://github.com/mkeeter/egui?branch=v0.33.0-backport#065f16a9fe75092e952b1589401a11263d248721"
 dependencies = [
  "bytemuck",
  "egui",
