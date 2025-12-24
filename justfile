@@ -7,7 +7,7 @@ _default:
 
 # Build a web application in `pkg/`
 dist:
-    {{cargo-web}} build --lib --release --target wasm32-unknown-unknown 
+    {{cargo-web}} build --lib --release --target wasm32-unknown-unknown
     wasm-bindgen target/wasm32-unknown-unknown/release/halfspace.wasm --out-dir pkg --target web
     wasm-opt -O pkg/halfspace_bg.wasm -o pkg/halfspace_bg.opt.wasm
     mv pkg/halfspace_bg.opt.wasm pkg/halfspace_bg.wasm
