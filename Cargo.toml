@@ -27,7 +27,7 @@ egui-wgpu = { version = "0.33.3" }
 egui_dnd = "0.14.0"
 egui_dock = { version = "0.18.0", features = ["serde"] }
 egui_extras = { version = "0.33.3", features = ["syntect"] }
-facet = "0.31"
+facet = "0.33"
 fidget = { git = "https://github.com/mkeeter/fidget" }
 git-version = "0.3.9"
 heck = "0.5"

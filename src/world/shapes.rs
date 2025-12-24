@@ -320,9 +320,9 @@ fn get_field_as<T: Facet<'static>>(
     if field.shape().id == T::SHAPE.id {
         Some((
             T::SHAPE.id,
-            if let Some(df) = field.vtable.default_fn {
+            if let Some(facet::DefaultSource::Custom(df)) = field.default {
                 let mut v = std::mem::MaybeUninit::<T>::uninit();
-                let ptr = facet::PtrUninit::new((&mut v).into());
+                let ptr = facet::PtrUninit::new((&mut v) as *mut _);
                 // SAFETY: `df` must be a builder for type `T`
                 unsafe { df(ptr) };
                 // SAFETY: `v` is initialized by `f`
