@@ -14,7 +14,7 @@ mod world;
 
 pub mod platform;
 
-use platform::{Notify, Platform, PlatformData};
+use platform::{Notify, Platform, PlatformData, PlatformExport};
 use state::{AppState, WorldState};
 use world::{BlockIndex, World};
 
@@ -341,7 +341,7 @@ struct Example {
     data: AppState,
 }
 
-pub struct App<P: Platform> {
+pub(crate) struct App<P: Platform> {
     data: World,
     generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
     library: world::ShapeLibrary,
@@ -367,7 +367,7 @@ pub struct App<P: Platform> {
     /// Shows the inspection UI (debug mode only)
     show_inspection_ui: bool,
 
-    modal: Option<Modal>,
+    modal: Option<Modal<P::ExportTarget>>,
     quit_confirmed: bool,
     request_repaint: bool,
 
@@ -406,7 +406,7 @@ impl std::fmt::Debug for NextAction {
 
 #[must_use]
 #[allow(clippy::large_enum_variant)]
-enum Modal {
+enum Modal<E: std::fmt::Debug> {
     /// An action requires a check to discard unsaved changes
     Unsaved(NextAction),
     Error {
@@ -428,14 +428,14 @@ enum Modal {
         name: String,
     },
     ExportInProgress {
-        target: platform::ExportTarget,
+        target: E,
         cancel: fidget::render::CancelToken,
     },
     WaitForLoad,
     About,
 }
 
-impl std::fmt::Debug for Modal {
+impl<E: std::fmt::Debug> std::fmt::Debug for Modal<E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Modal::Unsaved(u) => f.debug_tuple("Unsaved").field(u).finish(),
@@ -550,7 +550,7 @@ impl<P: Platform> App<P> {
         let data = World::new();
         let undo = state::Undo::new(&data);
         let queue = rx.sender();
-        let platform = P::Data::new(queue);
+        let platform = P::Data::new(&cc.egui_ctx, queue);
         let app = Self {
             data,
             library: world::ShapeLibrary::build(),
@@ -1366,22 +1366,44 @@ impl<P: Platform> App<P> {
     }
 
     fn platform_save(&mut self) {
-        if let Some(f) = self.file.take() {
-            let state = self.get_state();
-            self.platform.save(&state, &f).unwrap();
-            self.file = Some(f);
-            self.undo.mark_saved(state.world);
+        if self.platform.can_save() {
+            if let Some(f) = self.file.take() {
+                let state = self.get_state();
+                self.platform.save(&state, &f).unwrap();
+                self.file = Some(f);
+                self.undo.mark_saved(state.world);
+            } else {
+                self.platform_save_as()
+            }
         } else {
-            self.platform_save_as()
+            self.on_save_local()
         }
     }
 
     fn platform_save_as(&mut self) {
-        let state = self.get_state();
-        if let Some(f) = self.platform.save_as(&state).unwrap() {
-            self.file = Some(f);
-            self.undo.mark_saved(state.world);
+        if self.platform.can_save() {
+            let state = self.get_state();
+            if let Some(f) = self.platform.save_as(&state).unwrap() {
+                self.file = Some(f);
+                self.undo.mark_saved(state.world);
+            }
+        } else {
+            self.on_save_local()
         }
+    }
+
+    fn platform_update_title(&self) {
+        let marker = if self.undo.is_saved() { "" } else { "*" };
+        let title = if let Some(f) = &self.file {
+            let f = f
+                .file_name()
+                .map(|s| s.to_string_lossy())
+                .unwrap_or_else(|| "[no file name]".to_owned().into());
+            format!("{f}{marker}")
+        } else {
+            format!("[untitled]{marker}")
+        };
+        self.platform.update_title(&title);
     }
 
     fn open_local(&mut self) {
@@ -1499,7 +1521,7 @@ impl<P: Platform> eframe::App for App<P> {
             self.start_world_rebuild();
         }
 
-        self.platform_update_title(ctx);
+        self.platform_update_title();
 
         if std::mem::take(&mut self.request_repaint) {
             ctx.request_repaint();
@@ -1636,7 +1658,11 @@ impl<P: Platform> App<P> {
                 feature_size,
             }) => {
                 if self.modal.is_none()
-                    && let Some(target) = self.platform_select_download("stl")
+                    && let Some(target) = self.platform.export_name(
+                        self.meta.name.as_deref(),
+                        "mesh",
+                        "stl",
+                    )
                 {
                     let cancel = fidget::render::CancelToken::new();
                     let cancel_ = cancel.clone();
@@ -1662,7 +1688,11 @@ impl<P: Platform> App<P> {
                 resolution,
             }) => {
                 if self.modal.is_none()
-                    && let Some(target) = self.platform_select_download("png")
+                    && let Some(target) = self.platform.export_name(
+                        self.meta.name.as_deref(),
+                        "image",
+                        "png",
+                    )
                 {
                     let cancel = fidget::render::CancelToken::new();
                     let cancel_ = cancel.clone();

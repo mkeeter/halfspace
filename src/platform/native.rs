@@ -21,6 +21,7 @@ impl Platform for NativePlatform {
 
 pub struct Data {
     queue: MessageSender<Notify>,
+    ctx: egui::Context,
 }
 
 impl Data {
@@ -28,8 +29,11 @@ impl Data {
 }
 
 impl PlatformData<NativePlatform> for Data {
-    fn new(queue: MessageSender<Notify>) -> Self {
-        Self { queue }
+    fn new(ctx: &egui::Context, queue: MessageSender<Notify>) -> Self {
+        Self {
+            queue,
+            ctx: ctx.clone(),
+        }
     }
 
     fn list_local_storage(&self) -> Vec<String> {
@@ -68,7 +72,11 @@ impl PlatformData<NativePlatform> for Data {
         panic!("file {path} not found");
     }
 
-    fn download_file(&self, filename: &str, _data: &[u8]) -> Option<Modal> {
+    fn download_file(
+        &self,
+        filename: &str,
+        _data: &[u8],
+    ) -> Option<Modal<ExportTarget>> {
         Some(Modal::Error {
             title: "Download failed".to_owned(),
             message: format!(
@@ -78,7 +86,7 @@ impl PlatformData<NativePlatform> for Data {
         })
     }
 
-    fn open(&self) -> Option<Modal> {
+    fn open(&self) -> Option<Modal<ExportTarget>> {
         let filename = rfd::FileDialog::new()
             .add_filter("halfspace", &["half"])
             .pick_file();
@@ -98,6 +106,10 @@ impl PlatformData<NativePlatform> for Data {
             self.queue.send(Message::CancelLoad);
         }
         Some(Modal::WaitForLoad)
+    }
+
+    fn can_save(&self) -> bool {
+        true
     }
 
     fn save(
@@ -120,14 +132,31 @@ impl PlatformData<NativePlatform> for Data {
             Ok(None)
         }
     }
+
+    fn export_name(
+        &self,
+        _name: Option<&str>,
+        dialog_name: &str,
+        extension: &str,
+    ) -> Option<ExportTarget> {
+        rfd::FileDialog::new()
+            .add_filter(dialog_name, &[extension])
+            .save_file()
+            .map(ExportTarget)
+    }
+
+    fn update_title(&self, title: &str) {
+        self.ctx
+            .send_viewport_cmd(egui::ViewportCommand::Title(title.to_owned()));
+    }
 }
 
 /// Platform-specific export target
 #[derive(Debug)]
 pub struct ExportTarget(std::path::PathBuf);
 
-impl ExportTarget {
-    pub fn save(&self, data: &[u8]) -> Result<(), std::io::Error> {
+impl platform::PlatformExport for ExportTarget {
+    fn save(&self, data: &[u8]) -> Result<(), std::io::Error> {
         std::fs::File::create(&self.0)?.write_all(data)
     }
 }
@@ -218,31 +247,7 @@ pub fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
-impl App<NativePlatform> {
-    pub(crate) fn platform_update_title(&self, ctx: &egui::Context) {
-        let marker = if self.undo.is_saved() { "" } else { "*" };
-        let title = if let Some(f) = &self.file {
-            let f = f
-                .file_name()
-                .map(|s| s.to_string_lossy())
-                .unwrap_or_else(|| "[no file name]".to_owned().into());
-            format!("{f}{marker}")
-        } else {
-            format!("[untitled]{marker}")
-        };
-        ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
-    }
-
-    pub(crate) fn platform_select_download(
-        &self,
-        ext: &str,
-    ) -> Option<ExportTarget> {
-        rfd::FileDialog::new()
-            .add_filter("STL", &[ext])
-            .save_file()
-            .map(ExportTarget)
-    }
-}
+impl App<NativePlatform> {}
 
 fn load_from_file(
     filename: &std::path::Path,

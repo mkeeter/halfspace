@@ -1,5 +1,8 @@
-use crate::{App, AppState, Message, MessageSender, Modal, state, wgpu_setup};
+use crate::{
+    App, AppState, Message, MessageSender, Modal, platform, state, wgpu_setup,
+};
 use log::{error, info, warn};
+use std::path::{Path, PathBuf};
 use wasm_bindgen::prelude::*;
 
 /// Re-export init_thread_pool to be called on the web
@@ -107,7 +110,8 @@ pub fn run() {
                 web_options,
                 Box::new(|cc| {
                     let (notify_tx, notify_rx) = flume::unbounded();
-                    let mut app = App::new(cc, Notify(notify_tx), false);
+                    let mut app =
+                        App::<WebPlatform>::new(cc, Notify(notify_tx), false);
                     if let Some(example) = example
                         && !app.load_example(&example)
                     {
@@ -132,56 +136,65 @@ pub fn run() {
     });
 }
 
-impl App {
-    pub(crate) fn platform_update_title(&self, _ctx: &egui::Context) {
+struct WebPlatform;
+
+impl platform::Platform for WebPlatform {
+    type Data = Data;
+    type ExportTarget = ExportTarget;
+    type Notify = Notify;
+}
+
+impl platform::PlatformData<WebPlatform> for Data {
+    fn new(_ctx: &egui::Context, queue: MessageSender<Notify>) -> Self {
+        let (dialog_tx, dialog_rx) = flume::unbounded();
+        wasm_bindgen_futures::spawn_local(dialog_worker(dialog_rx, queue));
+        Self { dialogs: dialog_tx }
+    }
+
+    fn update_title(&self, _title: &str) {
         // no-op on the web backend
     }
 
-    pub(crate) fn platform_save(&mut self) {
-        self.on_save_local();
+    fn can_save(&self) -> bool {
+        false
     }
 
-    pub(crate) fn platform_save_as(&mut self) {
-        self.on_save_as_local();
+    fn save(&self, _state: &AppState, _f: &Path) -> std::io::Result<()> {
+        panic!(
+            "saving is not supported on web platform, use save_local instead"
+        )
     }
 
-    pub(crate) fn platform_open(&mut self) {
-        if self.platform.dialogs.send(DialogRequest::Open).is_ok() {
-            self.modal = Some(Modal::WaitForLoad);
+    fn save_as(&self, _state: &AppState) -> std::io::Result<Option<PathBuf>> {
+        panic!(
+            "saving is not supported on web platform, use save_local instead"
+        )
+    }
+
+    fn open(&self) -> Option<Modal<ExportTarget>> {
+        if self.dialogs.send(DialogRequest::Open).is_ok() {
+            Some(Modal::WaitForLoad)
         } else {
             error!("could not send Open to dialog thread");
+            None
         }
     }
 
-    pub(crate) fn platform_select_download(
+    fn export_name(
         &self,
-        ext: &str,
+        name: Option<&str>,
+        _dialog_name: &str,
+        extension: &str,
     ) -> Option<ExportTarget> {
-        if let Some(name) = &self.meta.name {
-            Some(ExportTarget(format!("{name}.{ext}")))
+        if let Some(name) = &name {
+            Some(ExportTarget(format!("{name}.{extension}")))
         } else {
-            Some(ExportTarget(format!("halfspace_export.{ext}")))
+            Some(ExportTarget(format!("halfspace_export.{extension}")))
         }
-    }
-}
-
-pub struct Data {
-    /// Dialogs are handled in a separate task
-    dialogs: flume::Sender<DialogRequest>,
-}
-
-impl Data {
-    /// Prefix to namespace file storage keys
-    const FILE_PREFIX: &str = "vfs:";
-
-    pub(crate) fn new(queue: MessageSender) -> Data {
-        let (dialog_tx, dialog_rx) = flume::unbounded();
-        wasm_bindgen_futures::spawn_local(dialog_worker(dialog_rx, queue));
-        Data { dialogs: dialog_tx }
     }
 
     /// List all "files" in localStorage (keys starting with `vfs:`)
-    pub(crate) fn list_local_storage(&self) -> Vec<String> {
+    fn list_local_storage(&self) -> Vec<String> {
         let storage = web_sys::window()
             .and_then(|w| w.local_storage().ok().flatten())
             .expect("localStorage not available");
@@ -201,7 +214,7 @@ impl Data {
     }
 
     /// Write a file (string content) to a given path
-    pub(crate) fn save_to_local_storage(&self, path: &str, contents: &str) {
+    fn save_to_local_storage(&self, path: &str, contents: &str) {
         let storage = web_sys::window()
             .and_then(|w| w.local_storage().ok().flatten())
             .expect("localStorage not available");
@@ -212,7 +225,7 @@ impl Data {
     }
 
     /// Read a file from a given path
-    pub(crate) fn read_from_local_storage(&self, path: &str) -> String {
+    fn read_from_local_storage(&self, path: &str) -> String {
         let storage = web_sys::window()
             .and_then(|w| w.local_storage().ok().flatten())
             .expect("localStorage not available");
@@ -223,11 +236,11 @@ impl Data {
             .unwrap()
     }
 
-    pub(crate) fn download_file(
+    fn download_file(
         &self,
         filename: &str,
         data: &[u8],
-    ) -> Option<Modal> {
+    ) -> Option<Modal<ExportTarget>> {
         match Self::download_file_inner(filename, data) {
             Ok(()) => None,
             Err(e) => Some(Modal::Error {
@@ -236,12 +249,19 @@ impl Data {
             }),
         }
     }
+}
+
+pub struct Data {
+    /// Dialogs are handled in a separate task
+    dialogs: flume::Sender<DialogRequest>,
+}
+
+impl Data {
+    /// Prefix to namespace file storage keys
+    const FILE_PREFIX: &str = "vfs:";
 
     /// Downloads the given file
-    pub fn download_file_inner(
-        filename: &str,
-        data: &[u8],
-    ) -> Result<(), JsValue> {
+    fn download_file_inner(filename: &str, data: &[u8]) -> Result<(), JsValue> {
         let uint8_array =
             js_sys::Uint8Array::new_with_length(data.len() as u32);
         uint8_array.copy_from(data);
@@ -293,8 +313,9 @@ impl Data {
 #[derive(Clone)]
 pub struct Notify(flume::Sender<()>);
 
-impl Notify {
-    pub(crate) fn wake(&self) -> Result<(), flume::SendError<()>> {
+impl platform::Notify for Notify {
+    type Err = flume::SendError<()>;
+    fn wake(&self) -> Result<(), flume::SendError<()>> {
         self.0.send(())
     }
 }
@@ -303,8 +324,8 @@ impl Notify {
 #[derive(Debug)]
 pub struct ExportTarget(String);
 
-impl ExportTarget {
-    pub fn save(&self, data: &[u8]) -> Result<(), std::io::Error> {
+impl platform::PlatformExport for ExportTarget {
+    fn save(&self, data: &[u8]) -> Result<(), std::io::Error> {
         Data::download_file_inner(&self.0, data)
             .map_err(|e| std::io::Error::other(format!("{e:?}")))
     }
@@ -316,7 +337,7 @@ pub enum DialogRequest {
 
 pub(crate) async fn dialog_worker(
     rx: flume::Receiver<DialogRequest>,
-    tx: MessageSender,
+    tx: MessageSender<Notify>,
 ) {
     while let Ok(m) = rx.recv_async().await {
         let r = match m {
