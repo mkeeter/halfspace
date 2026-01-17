@@ -1,6 +1,7 @@
 use crate::{
     BlockIndex, MessageGenSender, ViewResponse,
     gui::{CAMERA, WARN},
+    platform::Notify,
     render::{RenderSettings, RenderTask},
     state,
     state::ViewState,
@@ -403,11 +404,11 @@ impl ViewData {
     ///
     /// This should be called in the main GUI loop, or whenever `notify` has
     /// pinged the main loop.
-    pub(crate) fn image(
+    pub(crate) fn image<N: Notify>(
         &mut self,
         block: BlockIndex,
         scene: Scene,
-        tx: &MessageGenSender,
+        tx: &MessageGenSender<N>,
     ) -> Option<&ViewImage> {
         // If the image settings have changed, then clear `task` (which causes
         // us to reinitialize it below).  Skip clearing the task if it's a

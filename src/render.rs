@@ -1,6 +1,7 @@
 //! Image rendering
 use crate::{
     BlockIndex, Message, MessageGenSender,
+    platform::Notify,
     view::{
         BitfieldImageData, BitfieldViewImage, DebugImageData, DebugViewImage,
         HeightmapImageData, HeightmapViewImage, SdfImageData, SdfViewImage,
@@ -64,12 +65,12 @@ impl RenderTask {
     }
 
     /// Begins a new image rendering task in the global thread pool
-    pub(crate) fn spawn(
+    pub(crate) fn spawn<N: Notify>(
         block: BlockIndex,
         generation: u64,
         settings: RenderSettings,
         level: usize,
-        tx: MessageGenSender,
+        tx: MessageGenSender<N>,
     ) -> Self {
         let cancel = fidget::render::CancelToken::new();
         let cancel_ = cancel.clone();

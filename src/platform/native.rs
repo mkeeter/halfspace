@@ -1,21 +1,38 @@
-use crate::{App, AppState, Message, MessageSender, Modal, state, wgpu_setup};
+use crate::{
+    App, AppState, Message, MessageSender, Modal,
+    platform::{self, Platform, PlatformData},
+    state, wgpu_setup,
+};
 use log::{info, warn};
-use std::io::{Read, Write};
+use std::{
+    io::{Read, Write},
+    path::PathBuf,
+};
 
 use clap::Parser;
 
-/// No platform-specific data
-#[derive(Default)]
-pub struct Data;
+struct NativePlatform;
+
+impl Platform for NativePlatform {
+    type Data = Data;
+    type ExportTarget = ExportTarget;
+    type Notify = Notify;
+}
+
+pub struct Data {
+    queue: MessageSender<Notify>,
+}
 
 impl Data {
     const LOCAL_STORAGE: &str = ".localdb";
+}
 
-    pub(crate) fn new(_queue: MessageSender) -> Data {
-        Data
+impl PlatformData<NativePlatform> for Data {
+    fn new(queue: MessageSender<Notify>) -> Self {
+        Self { queue }
     }
 
-    pub(crate) fn list_local_storage(&self) -> Vec<String> {
+    fn list_local_storage(&self) -> Vec<String> {
         let s = std::fs::read_to_string(Self::LOCAL_STORAGE)
             .unwrap_or_else(|_| String::new());
         s.trim()
@@ -24,7 +41,7 @@ impl Data {
             .collect()
     }
 
-    pub(crate) fn save_to_local_storage(&self, path: &str, contents: &str) {
+    fn save_to_local_storage(&self, path: &str, contents: &str) {
         let prev = std::fs::read_to_string(Self::LOCAL_STORAGE)
             .unwrap_or_else(|_| String::new());
         let mut out = String::new();
@@ -39,7 +56,7 @@ impl Data {
         std::fs::write(Self::LOCAL_STORAGE, out).unwrap();
     }
 
-    pub(crate) fn read_from_local_storage(&self, path: &str) -> String {
+    fn read_from_local_storage(&self, path: &str) -> String {
         let data = std::fs::read_to_string(Self::LOCAL_STORAGE)
             .unwrap_or_else(|_| String::new());
         for line in data.lines() {
@@ -51,11 +68,7 @@ impl Data {
         panic!("file {path} not found");
     }
 
-    pub(crate) fn download_file(
-        &self,
-        filename: &str,
-        _data: &[u8],
-    ) -> Option<Modal> {
+    fn download_file(&self, filename: &str, _data: &[u8]) -> Option<Modal> {
         Some(Modal::Error {
             title: "Download failed".to_owned(),
             message: format!(
@@ -63,6 +76,49 @@ impl Data {
                 implemented in the native platform"
             ),
         })
+    }
+
+    fn open(&self) -> Option<Modal> {
+        let filename = rfd::FileDialog::new()
+            .add_filter("halfspace", &["half"])
+            .pick_file();
+        if let Some(filename) = filename {
+            let m = match load_from_file(&filename) {
+                Ok(state) => Message::Loaded {
+                    state,
+                    path: Some(filename),
+                },
+                Err(e) => Message::LoadFailed {
+                    title: "Load failed".to_owned(),
+                    message: format!("{:#}", anyhow::Error::from(e)),
+                },
+            };
+            self.queue.send(m);
+        } else {
+            self.queue.send(Message::CancelLoad);
+        }
+        Some(Modal::WaitForLoad)
+    }
+
+    fn save(
+        &self,
+        state: &AppState,
+        f: &std::path::Path,
+    ) -> std::io::Result<()> {
+        write_to_file(state, f)
+    }
+
+    fn save_as(&self, state: &AppState) -> std::io::Result<Option<PathBuf>> {
+        let filename = rfd::FileDialog::new()
+            .add_filter("halfspace", &["half"])
+            .save_file();
+        if let Some(filename) = filename {
+            write_to_file(state, &filename)?;
+            Ok(Some(filename))
+        } else {
+            warn!("file save cancelled due to empty selection");
+            Ok(None)
+        }
     }
 }
 
@@ -99,8 +155,9 @@ struct Args {
 #[derive(Clone)]
 pub struct Notify(egui::Context);
 
-impl Notify {
-    pub(crate) fn wake(&self) -> Result<(), std::convert::Infallible> {
+impl platform::Notify for Notify {
+    type Err = std::convert::Infallible;
+    fn wake(&self) -> Result<(), std::convert::Infallible> {
         self.0.request_repaint();
         Ok(())
     }
@@ -127,7 +184,7 @@ pub fn run() -> anyhow::Result<()> {
         Box::new(|cc| {
             let ctx = cc.egui_ctx.clone();
             let notify = Notify(ctx);
-            let mut app = App::new(cc, notify, args.debug);
+            let mut app = App::<NativePlatform>::new(cc, notify, args.debug);
             if let Some(example) = args.example
                 && !app.load_example(&format!("{example}.half"))
             {
@@ -135,7 +192,7 @@ pub fn run() -> anyhow::Result<()> {
             }
 
             if let Some(filename) = args.target {
-                match App::load_from_file(&filename) {
+                match load_from_file(&filename) {
                     Ok(state) => {
                         info!("restoring state from file");
                         app.file = Some(filename);
@@ -161,7 +218,7 @@ pub fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
-impl App {
+impl App<NativePlatform> {
     pub(crate) fn platform_update_title(&self, ctx: &egui::Context) {
         let marker = if self.undo.is_saved() { "" } else { "*" };
         let title = if let Some(f) = &self.file {
@@ -176,54 +233,6 @@ impl App {
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
     }
 
-    pub(crate) fn platform_save(&mut self) {
-        if let Some(f) = self.file.take() {
-            self.write_to_file(&f).unwrap();
-            self.file = Some(f);
-        } else {
-            self.platform_save_as();
-        }
-    }
-
-    pub(crate) fn platform_save_as(&mut self) {
-        let filename = rfd::FileDialog::new()
-            .add_filter("halfspace", &["half"])
-            .save_file();
-        if let Some(filename) = filename {
-            if self.write_to_file(&filename).is_ok() {
-                self.file = Some(filename);
-            } else {
-                panic!("could not create file");
-            }
-        } else {
-            warn!("file save cancelled due to empty selection");
-        }
-    }
-
-    pub(crate) fn platform_open(&mut self) {
-        assert!(self.modal.is_none());
-        self.modal = Some(Modal::WaitForLoad);
-
-        let filename = rfd::FileDialog::new()
-            .add_filter("halfspace", &["half"])
-            .pick_file();
-        if let Some(filename) = filename {
-            let m = match Self::load_from_file(&filename) {
-                Ok(state) => Message::Loaded {
-                    state,
-                    path: Some(filename),
-                },
-                Err(e) => Message::LoadFailed {
-                    title: "Load failed".to_owned(),
-                    message: format!("{:#}", anyhow::Error::from(e)),
-                },
-            };
-            self.rx.sender().send(m);
-        } else {
-            self.rx.sender().send(Message::CancelLoad);
-        }
-    }
-
     pub(crate) fn platform_select_download(
         &self,
         ext: &str,
@@ -235,33 +244,29 @@ impl App {
     }
 }
 
-impl App {
-    fn load_from_file(
-        filename: &std::path::Path,
-    ) -> Result<AppState, state::ReadError> {
-        info!("loading {filename:?}");
-        let mut f = std::fs::File::options().read(true).open(filename)?;
-        let mut data = vec![];
-        f.read_to_end(&mut data)?;
-        let s = std::str::from_utf8(&data)?;
-        AppState::deserialize(s)
-    }
+fn load_from_file(
+    filename: &std::path::Path,
+) -> Result<AppState, state::ReadError> {
+    info!("loading {filename:?}");
+    let mut f = std::fs::File::options().read(true).open(filename)?;
+    let mut data = vec![];
+    f.read_to_end(&mut data)?;
+    let s = std::str::from_utf8(&data)?;
+    AppState::deserialize(s)
+}
 
-    /// Writes to the given file and marks the current state as saved
-    fn write_to_file(
-        &mut self,
-        filename: &std::path::Path,
-    ) -> std::io::Result<()> {
-        info!("writing to {filename:?}");
-        let mut f = std::fs::File::options()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .open(filename)?;
-        let state = self.get_state();
-        f.write_all(state.serialize().as_bytes())?;
-        f.flush()?;
-        self.undo.mark_saved(state.world);
-        Ok(())
-    }
+/// Writes to the given file
+fn write_to_file(
+    state: &AppState,
+    filename: &std::path::Path,
+) -> std::io::Result<()> {
+    info!("writing to {filename:?}");
+    let mut f = std::fs::File::options()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(filename)?;
+    f.write_all(state.serialize().as_bytes())?;
+    f.flush()?;
+    Ok(())
 }

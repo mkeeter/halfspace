@@ -14,6 +14,7 @@ mod world;
 
 pub mod platform;
 
+use platform::{Notify, Platform, PlatformData};
 use state::{AppState, WorldState};
 use world::{BlockIndex, World};
 
@@ -232,12 +233,12 @@ enum Message {
 /// Messages are sent on a blocking `mpsc` queue; after a message is sent, we
 /// also call into a platform-specific notifier to wake the `egui` context
 #[derive(Clone)]
-struct MessageSenderInner {
+struct MessageSenderInner<N: Notify> {
     /// Main (blocking) queue for messages
     queue: std::sync::mpsc::Sender<(Message, Option<u64>)>,
 
     /// Notifier to wake the `egui` context
-    notify: platform::Notify,
+    notify: N,
 }
 
 /// Message sender tagged with a generation
@@ -247,9 +248,9 @@ struct MessageSenderInner {
 /// generation, which causes messages from older tasks to be discarded when
 /// received.
 #[derive(Clone)]
-struct MessageGenSender {
+struct MessageGenSender<N: Notify> {
     /// Inner queue
-    inner: MessageSenderInner,
+    inner: MessageSenderInner<N>,
 
     /// Generation to be send with each message
     generation: u64,
@@ -257,21 +258,21 @@ struct MessageGenSender {
 
 /// Unconditional message sender
 #[derive(Clone)]
-struct MessageSender {
+struct MessageSender<N: Notify> {
     /// Inner queue
-    inner: MessageSenderInner,
+    inner: MessageSenderInner<N>,
 }
 
-struct MessageReceiver {
+struct MessageReceiver<N: Notify> {
     receiver: std::sync::mpsc::Receiver<(Message, Option<u64>)>,
     generation: u64,
 
     sender: std::sync::mpsc::Sender<(Message, Option<u64>)>,
-    notify: platform::Notify,
+    notify: N,
 }
 
-impl MessageReceiver {
-    fn new(notify: platform::Notify) -> Self {
+impl<N: Notify> MessageReceiver<N> {
+    fn new(notify: N) -> Self {
         let (sender, receiver) = std::sync::mpsc::channel();
         Self {
             sender,
@@ -288,7 +289,7 @@ impl MessageReceiver {
         }
         None
     }
-    fn sender(&self) -> MessageSender {
+    fn sender(&self) -> MessageSender<N> {
         MessageSender {
             inner: MessageSenderInner {
                 queue: self.sender.clone(),
@@ -296,7 +297,7 @@ impl MessageReceiver {
             },
         }
     }
-    fn sender_with_gen(&self) -> MessageGenSender {
+    fn sender_with_gen(&self) -> MessageGenSender<N> {
         MessageGenSender {
             inner: MessageSenderInner {
                 queue: self.sender.clone(),
@@ -311,19 +312,19 @@ impl MessageReceiver {
     }
 }
 
-impl MessageSender {
+impl<N: Notify> MessageSender<N> {
     fn send(&self, m: Message) {
         self.inner.send(m, None)
     }
 }
 
-impl MessageGenSender {
+impl<N: Notify> MessageGenSender<N> {
     fn send(&self, m: Message) {
         self.inner.send(m, Some(self.generation))
     }
 }
 
-impl MessageSenderInner {
+impl<N: Notify> MessageSenderInner<N> {
     fn send(&self, m: Message, g: Option<u64>) {
         if self.queue.send((m, g)).is_ok() {
             if self.notify.wake().is_err() {
@@ -340,7 +341,7 @@ struct Example {
     data: AppState,
 }
 
-pub struct App {
+pub struct App<P: Platform> {
     data: World,
     generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
     library: world::ShapeLibrary,
@@ -355,10 +356,10 @@ pub struct App {
     syntax: egui_extras::syntax_highlighting::SyntectSettings,
     views: HashMap<BlockIndex, view::ViewData>,
 
-    rx: MessageReceiver,
+    rx: MessageReceiver<P::Notify>,
     script_state: ScriptState,
 
-    platform: platform::Data,
+    platform: P::Data,
 
     /// Show debug options and menu items in native build
     debug: bool,
@@ -469,14 +470,14 @@ impl std::fmt::Debug for Modal {
     }
 }
 
-impl App {
+impl<P: Platform> App<P> {
     /// Builds a new `App`
     ///
     /// Returns a tuple of the `App` and a channel which should trigger a
     /// repaint when it receives a message.
     pub fn new(
         cc: &eframe::CreationContext<'_>,
-        notify: platform::Notify,
+        notify: P::Notify,
         debug: bool,
     ) -> Self {
         // Install custom render pipelines
@@ -549,7 +550,7 @@ impl App {
         let data = World::new();
         let undo = state::Undo::new(&data);
         let queue = rx.sender();
-        let platform = platform::Data::new(queue);
+        let platform = P::Data::new(queue);
         let app = Self {
             data,
             library: world::ShapeLibrary::build(),
@@ -1014,7 +1015,7 @@ impl App {
                             if local {
                                 self.open_local()
                             } else {
-                                self.platform_open();
+                                self.platform_open()
                             }
                         }
                         NextAction::LoadExample(s) => self.load_from_state(s),
@@ -1352,10 +1353,34 @@ impl App {
             if local {
                 self.open_local()
             } else {
-                self.platform_open()
+                self.platform_open();
             }
         } else {
             self.modal = Some(Modal::Unsaved(NextAction::LoadFile { local }));
+        }
+    }
+
+    fn platform_open(&mut self) {
+        assert!(self.modal.is_none());
+        self.modal = self.platform.open();
+    }
+
+    fn platform_save(&mut self) {
+        if let Some(f) = self.file.take() {
+            let state = self.get_state();
+            self.platform.save(&state, &f).unwrap();
+            self.file = Some(f);
+            self.undo.mark_saved(state.world);
+        } else {
+            self.platform_save_as()
+        }
+    }
+
+    fn platform_save_as(&mut self) {
+        let state = self.get_state();
+        if let Some(f) = self.platform.save_as(&state).unwrap() {
+            self.file = Some(f);
+            self.undo.mark_saved(state.world);
         }
     }
 
@@ -1462,7 +1487,7 @@ impl App {
     }
 }
 
-impl eframe::App for App {
+impl<P: Platform> eframe::App for App<P> {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         Self::reset_wgpu_state(frame);
         self.update_undo_redo(ctx);
@@ -1482,7 +1507,7 @@ impl eframe::App for App {
     }
 }
 
-impl App {
+impl<P: Platform> App<P> {
     /// Pick the characteristic matrix for each block
     ///
     /// The matrix is the view's matrix (if present); otherwise, it's the next

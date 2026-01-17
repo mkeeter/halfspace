@@ -4,6 +4,7 @@ use std::collections::HashMap;
 pub use crate::state::{Tab, TabMode};
 use crate::{
     BlockResponse, MessageGenSender, ViewResponse, export,
+    platform::Notify,
     view::{self, ViewCanvas, ViewData, ViewImage, ViewMode2, ViewMode3},
     world::{
         Block, BlockError, BlockIndex, IoValue, ScriptBlock, ValueBlock, World,
@@ -11,12 +12,12 @@ use crate::{
 };
 use fidget::shapes::types::{Vec2, Vec3};
 
-pub struct WorldView<'a> {
+pub struct WorldView<'a, N: Notify> {
     pub world: &'a mut World,
     pub syntax: &'a egui_extras::syntax_highlighting::SyntectSettings,
     pub views: &'a mut HashMap<BlockIndex, ViewData>,
     pub out: &'a mut Vec<(BlockIndex, ViewResponse)>,
-    pub tx: &'a MessageGenSender,
+    pub tx: &'a MessageGenSender<N>,
 }
 
 impl Tab {
@@ -34,7 +35,7 @@ impl Tab {
     }
 }
 
-impl<'a> egui_dock::TabViewer for WorldView<'a> {
+impl<'a, N: Notify> egui_dock::TabViewer for WorldView<'a, N> {
     type Tab = Tab;
 
     fn id(&mut self, tab: &mut Tab) -> egui::Id {
@@ -65,7 +66,7 @@ impl<'a> egui_dock::TabViewer for WorldView<'a> {
     }
 }
 
-impl<'a> WorldView<'a> {
+impl<'a, N: Notify> WorldView<'a, N> {
     fn view_ui(
         &mut self,
         ui: &mut egui::Ui,
