@@ -105,7 +105,7 @@ pub fn run() {
                 canvas,
                 web_options,
                 Box::new(|cc| {
-                    let (mut app, mut notify_rx) = App::new(cc, false);
+                    let (mut app, notify_rx) = App::new(cc, false);
                     if let Some(example) = example {
                         if !app.load_example(&example) {
                             warn!("failed to load example '{example}'");
@@ -116,7 +116,7 @@ pub fn run() {
                     // per egui#4368 and egui#4405
                     let ctx = cc.egui_ctx.clone();
                     wasm_bindgen_futures::spawn_local(async move {
-                        while let Some(()) = notify_rx.recv().await {
+                        while let Ok(()) = notify_rx.recv_async().await {
                             ctx.request_repaint();
                         }
                         info!("repaint notification task is stopping");
@@ -165,7 +165,7 @@ impl App {
 
 pub struct Data {
     /// Dialogs are handled in a separate task
-    dialogs: tokio::sync::mpsc::UnboundedSender<DialogRequest>,
+    dialogs: flume::Sender<DialogRequest>,
 }
 
 impl Data {
@@ -173,7 +173,7 @@ impl Data {
     const FILE_PREFIX: &str = "vfs:";
 
     pub(crate) fn new(queue: MessageSender) -> Data {
-        let (dialog_tx, dialog_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (dialog_tx, dialog_rx) = flume::unbounded();
         wasm_bindgen_futures::spawn_local(dialog_worker(dialog_rx, queue));
         Data { dialogs: dialog_tx }
     }
@@ -304,10 +304,10 @@ pub enum DialogRequest {
 }
 
 pub(crate) async fn dialog_worker(
-    mut rx: tokio::sync::mpsc::UnboundedReceiver<DialogRequest>,
+    rx: flume::Receiver<DialogRequest>,
     tx: MessageSender,
 ) {
-    while let Some(m) = rx.recv().await {
+    while let Ok(m) = rx.recv_async().await {
         let r = match m {
             DialogRequest::Open => {
                 if let Some(f) = rfd::AsyncFileDialog::new()

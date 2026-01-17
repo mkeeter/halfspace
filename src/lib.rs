@@ -34,7 +34,7 @@ pub enum WgpuError {
 /// Manually open a WebGPU session with `float32-filterable`
 pub async fn wgpu_setup() -> Result<egui_wgpu::WgpuSetupExisting, WgpuError> {
     let instance = wgpu::Instance::default();
-    info!("wgpu_setup");
+    info!("calling wgpu_setup...");
 
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
@@ -236,7 +236,7 @@ struct MessageSender {
     generation: Option<u64>,
 
     /// Optionally async queue, for `ctx` notifications
-    notify: tokio::sync::mpsc::UnboundedSender<()>,
+    notify: flume::Sender<()>,
 }
 
 struct MessageReceiver {
@@ -244,11 +244,11 @@ struct MessageReceiver {
     generation: u64,
 
     sender: std::sync::mpsc::Sender<(Message, Option<u64>)>,
-    notify: tokio::sync::mpsc::UnboundedSender<()>,
+    notify: flume::Sender<()>,
 }
 
 impl MessageReceiver {
-    fn new(notify: tokio::sync::mpsc::UnboundedSender<()>) -> Self {
+    fn new(notify: flume::Sender<()>) -> Self {
         let (sender, receiver) = std::sync::mpsc::channel();
         Self {
             sender,
@@ -439,7 +439,7 @@ impl App {
     pub fn new(
         cc: &eframe::CreationContext<'_>,
         debug: bool,
-    ) -> (Self, tokio::sync::mpsc::UnboundedReceiver<()>) {
+    ) -> (Self, flume::Receiver<()>) {
         // Install custom render pipelines
         let wgpu_state = cc.wgpu_render_state.as_ref().unwrap();
         painters::WgpuResources::install(wgpu_state);
@@ -506,7 +506,7 @@ impl App {
             style.visuals = theme_visuals();
         });
 
-        let (notify_tx, notify_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (notify_tx, notify_rx) = flume::unbounded();
         let rx = MessageReceiver::new(notify_tx);
         let data = World::new();
         let undo = state::Undo::new(&data);

@@ -115,7 +115,7 @@ pub fn run() -> anyhow::Result<()> {
         "halfspace",
         native_options,
         Box::new(|cc| {
-            let (mut app, mut notify_rx) = App::new(cc, args.debug);
+            let (mut app, notify_rx) = App::new(cc, args.debug);
             if let Some(example) = args.example
                 && !app.load_example(&format!("{example}.half"))
             {
@@ -125,7 +125,7 @@ pub fn run() -> anyhow::Result<()> {
             // Worker thread to request repaints based on notifications
             let ctx = cc.egui_ctx.clone();
             std::thread::spawn(move || {
-                while let Some(()) = notify_rx.blocking_recv() {
+                while let Ok(()) = notify_rx.recv() {
                     ctx.request_repaint();
                 }
                 info!("repaint notification thread is stopping");
