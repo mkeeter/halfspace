@@ -7,16 +7,18 @@ _default:
 
 # Build a web application in `pkg/`
 dist:
-    {{cargo-web}} build --lib --release --target wasm32-unknown-unknown
-    wasm-bindgen target/wasm32-unknown-unknown/release/halfspace.wasm --out-dir pkg --target web
+    just _build-web
     wasm-opt -O pkg/halfspace_bg.wasm -o pkg/halfspace_bg.opt.wasm
     just _copy
 
-# Build a web application in `pkg/` without optimization
+# Build a web application in `pkg/` without `wasm-opt` optimization
 dist-fast:
-    {{cargo-web}} build --lib --release --target wasm32-unknown-unknown 
-    wasm-bindgen target/wasm32-unknown-unknown/release/halfspace.wasm --out-dir pkg --target web
+    just _build-web
     just _copy
+
+_build-web:
+    {{cargo-web}} build --lib --release --target wasm32-unknown-unknown
+    wasm-bindgen target/wasm32-unknown-unknown/release/halfspace.wasm --out-dir pkg --target web
 
 _copy:
     mv pkg/halfspace_bg.wasm pkg/halfspace_bg.wasm
