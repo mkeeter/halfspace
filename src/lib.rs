@@ -229,14 +229,36 @@ enum Message {
     ExportComplete(Result<Vec<u8>, export::ExportError>),
 }
 
+/// Message sender for worker tasks
 #[derive(Clone)]
-struct MessageSender {
+struct MessageSenderInner {
     /// Main (blocking) queue for messages
     queue: std::sync::mpsc::Sender<(Message, Option<u64>)>,
-    generation: Option<u64>,
 
     /// Optionally async queue, for `ctx` notifications
     notify: flume::Sender<()>,
+}
+
+/// Message sender tagged with a generation
+///
+/// This is used by long-running tasks which may be cancelled, e.g. evaluating a
+/// script or rendering an image.  If we load a new file, we increment the
+/// generation, which causes messages from older tasks to be discarded when
+/// received.
+#[derive(Clone)]
+struct MessageGenSender {
+    /// Inner queue
+    inner: MessageSenderInner,
+
+    /// Generation to be send with each message
+    generation: u64,
+}
+
+/// Unconditional message sender
+#[derive(Clone)]
+struct MessageSender {
+    /// Inner queue
+    inner: MessageSenderInner,
 }
 
 struct MessageReceiver {
@@ -267,16 +289,19 @@ impl MessageReceiver {
     }
     fn sender(&self) -> MessageSender {
         MessageSender {
-            queue: self.sender.clone(),
-            generation: None,
-            notify: self.notify.clone(),
+            inner: MessageSenderInner {
+                queue: self.sender.clone(),
+                notify: self.notify.clone(),
+            },
         }
     }
-    fn sender_with_gen(&self) -> MessageSender {
-        MessageSender {
-            queue: self.sender.clone(),
-            generation: Some(self.generation),
-            notify: self.notify.clone(),
+    fn sender_with_gen(&self) -> MessageGenSender {
+        MessageGenSender {
+            inner: MessageSenderInner {
+                queue: self.sender.clone(),
+                notify: self.notify.clone(),
+            },
+            generation: self.generation,
         }
     }
     /// Increment the generation, orphaning senders from older generations
@@ -287,7 +312,19 @@ impl MessageReceiver {
 
 impl MessageSender {
     fn send(&self, m: Message) {
-        if self.queue.send((m, self.generation)).is_ok() {
+        self.inner.send(m, None)
+    }
+}
+
+impl MessageGenSender {
+    fn send(&self, m: Message) {
+        self.inner.send(m, Some(self.generation))
+    }
+}
+
+impl MessageSenderInner {
+    fn send(&self, m: Message, g: Option<u64>) {
+        if self.queue.send((m, g)).is_ok() {
             if self.notify.send(()).is_err() {
                 error!("notify returned an error");
             }

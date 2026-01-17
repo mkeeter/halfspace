@@ -1,6 +1,6 @@
 //! Image rendering
 use crate::{
-    BlockIndex, Message, MessageSender,
+    BlockIndex, Message, MessageGenSender,
     view::{
         BitfieldImageData, BitfieldViewImage, DebugImageData, DebugViewImage,
         HeightmapImageData, HeightmapViewImage, SdfImageData, SdfViewImage,
@@ -69,7 +69,7 @@ impl RenderTask {
         generation: u64,
         settings: RenderSettings,
         level: usize,
-        tx: MessageSender,
+        tx: MessageGenSender,
     ) -> Self {
         let cancel = fidget::render::CancelToken::new();
         let cancel_ = cancel.clone();

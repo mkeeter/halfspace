@@ -1,5 +1,5 @@
 use crate::{
-    BlockIndex, MessageSender, ViewResponse,
+    BlockIndex, MessageGenSender, ViewResponse,
     gui::{CAMERA, WARN},
     render::{RenderSettings, RenderTask},
     state,
@@ -407,7 +407,7 @@ impl ViewData {
         &mut self,
         block: BlockIndex,
         scene: Scene,
-        tx: &MessageSender,
+        tx: &MessageGenSender,
     ) -> Option<&ViewImage> {
         // If the image settings have changed, then clear `task` (which causes
         // us to reinitialize it below).  Skip clearing the task if it's a

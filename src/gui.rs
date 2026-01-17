@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 pub use crate::state::{Tab, TabMode};
 use crate::{
-    BlockResponse, MessageSender, ViewResponse, export,
+    BlockResponse, MessageGenSender, ViewResponse, export,
     view::{self, ViewCanvas, ViewData, ViewImage, ViewMode2, ViewMode3},
     world::{
         Block, BlockError, BlockIndex, IoValue, ScriptBlock, ValueBlock, World,
@@ -16,7 +16,7 @@ pub struct WorldView<'a> {
     pub syntax: &'a egui_extras::syntax_highlighting::SyntectSettings,
     pub views: &'a mut HashMap<BlockIndex, ViewData>,
     pub out: &'a mut Vec<(BlockIndex, ViewResponse)>,
-    pub tx: &'a MessageSender,
+    pub tx: &'a MessageGenSender,
 }
 
 impl Tab {
