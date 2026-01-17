@@ -106,10 +106,10 @@ pub fn run() {
                 web_options,
                 Box::new(|cc| {
                     let (mut app, notify_rx) = App::new(cc, false);
-                    if let Some(example) = example {
-                        if !app.load_example(&example) {
-                            warn!("failed to load example '{example}'");
-                        }
+                    if let Some(example) = example
+                        && !app.load_example(&example)
+                    {
+                        warn!("failed to load example '{example}'");
                     }
 
                     // Spawn a worker task to trigger repaints,
@@ -188,10 +188,10 @@ impl Data {
         let len = storage.length().unwrap_or(0);
 
         for i in 0..len {
-            if let Some(key) = storage.key(i).unwrap_or(None) {
-                if let Some(stripped) = key.strip_prefix(Self::FILE_PREFIX) {
-                    result.push(stripped.to_string());
-                }
+            if let Some(key) = storage.key(i).unwrap_or(None)
+                && let Some(stripped) = key.strip_prefix(Self::FILE_PREFIX)
+            {
+                result.push(stripped.to_string());
             }
         }
 

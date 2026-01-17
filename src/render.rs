@@ -443,7 +443,7 @@ fn image_to_heightmap(
         .0
         .into()
     });
-    let depth = image.map(|v| v.depth as f32).take().0.into();
+    let depth = image.map(|v| v.depth).take().0.into();
     HeightmapImageData { depth, color }
 }
 
@@ -735,7 +735,7 @@ fn render_colors_3d(
                             0.0
                         };
                         let pos = mat.transform_point(&nalgebra::Point3::new(
-                            px as f32, py as f32, pz as f32,
+                            px as f32, py as f32, pz,
                         ));
                         xs[i] = pos.x;
                         ys[i] = pos.y;
