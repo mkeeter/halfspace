@@ -3,6 +3,7 @@ use log::{error, info, warn};
 use wasm_bindgen::prelude::*;
 
 /// Re-export init_thread_pool to be called on the web
+#[expect(unused)] // called from javascript only
 pub use wasm_bindgen_rayon::init_thread_pool;
 
 use eframe::wasm_bindgen::JsCast;

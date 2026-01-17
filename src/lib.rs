@@ -12,8 +12,6 @@ mod state;
 mod view;
 mod world;
 
-#[cfg_attr(target_arch = "wasm32", path = "web.rs")]
-#[cfg_attr(not(target_arch = "wasm32"), path = "native.rs")]
 pub mod platform;
 
 use state::{AppState, WorldState};
