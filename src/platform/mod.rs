@@ -3,4 +3,4 @@
 mod inner;
 
 pub use inner::run;
-pub(crate) use inner::{Data, ExportTarget};
+pub(crate) use inner::{Data, ExportTarget, Notify};

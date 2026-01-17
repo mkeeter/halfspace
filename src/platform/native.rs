@@ -96,6 +96,16 @@ struct Args {
     target: Option<std::path::PathBuf>,
 }
 
+#[derive(Clone)]
+pub struct Notify(egui::Context);
+
+impl Notify {
+    pub(crate) fn wake(&self) -> Result<(), std::convert::Infallible> {
+        self.0.request_repaint();
+        Ok(())
+    }
+}
+
 pub fn run() -> anyhow::Result<()> {
     let args = Args::parse();
     env_logger::Builder::from_env(
@@ -115,21 +125,14 @@ pub fn run() -> anyhow::Result<()> {
         "halfspace",
         native_options,
         Box::new(|cc| {
-            let (mut app, notify_rx) = App::new(cc, args.debug);
+            let ctx = cc.egui_ctx.clone();
+            let notify = Notify(ctx);
+            let mut app = App::new(cc, notify, args.debug);
             if let Some(example) = args.example
                 && !app.load_example(&format!("{example}.half"))
             {
                 warn!("could not find example '{example}'");
             }
-
-            // Worker thread to request repaints based on notifications
-            let ctx = cc.egui_ctx.clone();
-            std::thread::spawn(move || {
-                while let Ok(()) = notify_rx.recv() {
-                    ctx.request_repaint();
-                }
-                info!("repaint notification thread is stopping");
-            });
 
             if let Some(filename) = args.target {
                 match App::load_from_file(&filename) {

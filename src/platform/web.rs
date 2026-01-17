@@ -106,7 +106,8 @@ pub fn run() {
                 canvas,
                 web_options,
                 Box::new(|cc| {
-                    let (mut app, notify_rx) = App::new(cc, false);
+                    let (notify_tx, notify_rx) = flume::unbounded();
+                    let mut app = App::new(cc, Notify(notify_tx), false);
                     if let Some(example) = example
                         && !app.load_example(&example)
                     {
@@ -286,6 +287,15 @@ impl Data {
         a.remove();
 
         Ok(())
+    }
+}
+
+#[derive(Clone)]
+pub struct Notify(flume::Sender<()>);
+
+impl Notify {
+    pub(crate) fn wake(&self) -> Result<(), flume::SendError<()>> {
+        self.0.send(())
     }
 }
 

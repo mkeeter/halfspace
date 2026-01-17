@@ -228,13 +228,16 @@ enum Message {
 }
 
 /// Message sender for worker tasks
+///
+/// Messages are sent on a blocking `mpsc` queue; after a message is sent, we
+/// also call into a platform-specific notifier to wake the `egui` context
 #[derive(Clone)]
 struct MessageSenderInner {
     /// Main (blocking) queue for messages
     queue: std::sync::mpsc::Sender<(Message, Option<u64>)>,
 
-    /// Optionally async queue, for `ctx` notifications
-    notify: flume::Sender<()>,
+    /// Notifier to wake the `egui` context
+    notify: platform::Notify,
 }
 
 /// Message sender tagged with a generation
@@ -264,11 +267,11 @@ struct MessageReceiver {
     generation: u64,
 
     sender: std::sync::mpsc::Sender<(Message, Option<u64>)>,
-    notify: flume::Sender<()>,
+    notify: platform::Notify,
 }
 
 impl MessageReceiver {
-    fn new(notify: flume::Sender<()>) -> Self {
+    fn new(notify: platform::Notify) -> Self {
         let (sender, receiver) = std::sync::mpsc::channel();
         Self {
             sender,
@@ -323,7 +326,7 @@ impl MessageGenSender {
 impl MessageSenderInner {
     fn send(&self, m: Message, g: Option<u64>) {
         if self.queue.send((m, g)).is_ok() {
-            if self.notify.send(()).is_err() {
+            if self.notify.wake().is_err() {
                 error!("notify returned an error");
             }
         } else {
@@ -473,8 +476,9 @@ impl App {
     /// repaint when it receives a message.
     pub fn new(
         cc: &eframe::CreationContext<'_>,
+        notify: platform::Notify,
         debug: bool,
-    ) -> (Self, flume::Receiver<()>) {
+    ) -> Self {
         // Install custom render pipelines
         let wgpu_state = cc.wgpu_render_state.as_ref().unwrap();
         painters::WgpuResources::install(wgpu_state);
@@ -541,8 +545,7 @@ impl App {
             style.visuals = theme_visuals();
         });
 
-        let (notify_tx, notify_rx) = flume::unbounded();
-        let rx = MessageReceiver::new(notify_tx);
+        let rx = MessageReceiver::new(notify);
         let data = World::new();
         let undo = state::Undo::new(&data);
         let queue = rx.sender();
@@ -568,7 +571,7 @@ impl App {
             request_repaint: false,
             local_name_confirmed: false,
         };
-        (app, notify_rx)
+        app
     }
 
     /// Gets our current `AppState`
