@@ -242,8 +242,6 @@ pub fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
-impl App<NativePlatform> {}
-
 fn load_from_file(
     filename: &std::path::Path,
 ) -> Result<AppState, state::ReadError> {
