@@ -551,7 +551,7 @@ impl<P: Platform> App<P> {
         let undo = state::Undo::new(&data);
         let queue = rx.sender();
         let platform = P::Data::new(&cc.egui_ctx, queue);
-        let app = Self {
+        Self {
             data,
             library: world::ShapeLibrary::build(),
             examples,
@@ -571,8 +571,7 @@ impl<P: Platform> App<P> {
             quit_confirmed: false,
             request_repaint: false,
             local_name_confirmed: false,
-        };
-        app
+        }
     }
 
     /// Gets our current `AppState`
