@@ -136,15 +136,15 @@ pub fn run() {
     });
 }
 
-struct WebPlatform;
-
-impl platform::Platform for WebPlatform {
-    type Data = Data;
-    type ExportTarget = ExportTarget;
-    type Notify = Notify;
+struct WebPlatform {
+    /// Dialogs are handled in a separate task
+    dialogs: flume::Sender<DialogRequest>,
 }
 
-impl platform::PlatformData<WebPlatform> for Data {
+impl platform::Platform for WebPlatform {
+    type ExportTarget = ExportTarget;
+    type Notify = Notify;
+
     fn new(_ctx: &egui::Context, queue: MessageSender<Notify>) -> Self {
         let (dialog_tx, dialog_rx) = flume::unbounded();
         wasm_bindgen_futures::spawn_local(dialog_worker(dialog_rx, queue));
@@ -241,7 +241,7 @@ impl platform::PlatformData<WebPlatform> for Data {
         filename: &str,
         data: &[u8],
     ) -> Option<Modal<ExportTarget>> {
-        match Self::download_file_inner(filename, data) {
+        match download_file_inner(filename, data) {
             Ok(()) => None,
             Err(e) => Some(Modal::Error {
                 title: "Download failed".to_owned(),
@@ -251,63 +251,57 @@ impl platform::PlatformData<WebPlatform> for Data {
     }
 }
 
-pub struct Data {
-    /// Dialogs are handled in a separate task
-    dialogs: flume::Sender<DialogRequest>,
-}
-
-impl Data {
+impl WebPlatform {
     /// Prefix to namespace file storage keys
     const FILE_PREFIX: &str = "vfs:";
+}
 
-    /// Downloads the given file
-    fn download_file_inner(filename: &str, data: &[u8]) -> Result<(), JsValue> {
-        let uint8_array =
-            js_sys::Uint8Array::new_with_length(data.len() as u32);
-        uint8_array.copy_from(data);
+/// Downloads the given file
+fn download_file_inner(filename: &str, data: &[u8]) -> Result<(), JsValue> {
+    let uint8_array = js_sys::Uint8Array::new_with_length(data.len() as u32);
+    uint8_array.copy_from(data);
 
-        let array = js_sys::Array::new();
-        array.push(&uint8_array);
+    let array = js_sys::Array::new();
+    array.push(&uint8_array);
 
-        let blob_options = web_sys::BlobPropertyBag::new();
-        blob_options.set_type("text/plain");
+    let blob_options = web_sys::BlobPropertyBag::new();
+    blob_options.set_type("text/plain");
 
-        // Create and return the Blob
-        let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(
-            &array,
-            &blob_options,
-        )?;
+    // Create and return the Blob
+    let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(
+        &array,
+        &blob_options,
+    )?;
 
-        // Create an object URL
-        let url = web_sys::Url::create_object_url_with_blob(&blob)?;
+    // Create an object URL
+    let url = web_sys::Url::create_object_url_with_blob(&blob)?;
 
-        // Save the file
-        Self::download_blob(filename, &url)?;
+    // Save the file
+    download_blob(filename, &url)?;
 
-        // Clean up the URL
-        web_sys::Url::revoke_object_url(&url)?;
+    // Clean up the URL
+    web_sys::Url::revoke_object_url(&url)?;
 
-        Ok(())
-    }
+    Ok(())
+}
 
-    fn download_blob(file_name: &str, url: &str) -> Result<(), JsValue> {
-        let document = web_sys::window().unwrap().document().unwrap();
+fn download_blob(file_name: &str, url: &str) -> Result<(), JsValue> {
+    let document = web_sys::window().unwrap().document().unwrap();
 
-        // Create the anchor element
-        let a = document
-            .create_element("a")?
-            .dyn_into::<web_sys::HtmlAnchorElement>()?;
-        a.set_href(url);
-        a.set_download(file_name);
-        a.set_attribute("style", "display: none")?;
+    // Create the anchor element
+    let a = document
+        .create_element("a")?
+        .dyn_into::<web_sys::HtmlAnchorElement>()?;
+    a.set_href(url);
+    a.set_download(file_name);
+    a.set_attribute("style", "display: none")?;
 
-        // Append to body and trigger click
-        document.body().unwrap().append_child(&a)?;
-        a.click();
-        a.remove();
+    // Append to body and trigger click
+    document.body().unwrap().append_child(&a)?;
+    a.click();
+    a.remove();
 
-        Ok(())
-    }
+    Ok(())
 }
 
 #[derive(Clone)]
@@ -326,7 +320,7 @@ pub struct ExportTarget(String);
 
 impl platform::PlatformExport for ExportTarget {
     fn save(&self, data: &[u8]) -> Result<(), std::io::Error> {
-        Data::download_file_inner(&self.0, data)
+        download_file_inner(&self.0, data)
             .map_err(|e| std::io::Error::other(format!("{e:?}")))
     }
 }

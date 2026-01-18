@@ -14,7 +14,7 @@ mod world;
 
 pub mod platform;
 
-use platform::{Notify, Platform, PlatformData, PlatformExport};
+use platform::{Notify, Platform, PlatformExport};
 use state::{AppState, WorldState};
 use world::{BlockIndex, World};
 
@@ -359,7 +359,7 @@ pub(crate) struct App<P: Platform> {
     rx: MessageReceiver<P::Notify>,
     script_state: ScriptState,
 
-    platform: P::Data,
+    platform: P,
 
     /// Show debug options and menu items in native build
     debug: bool,
@@ -550,7 +550,7 @@ impl<P: Platform> App<P> {
         let data = World::new();
         let undo = state::Undo::new(&data);
         let queue = rx.sender();
-        let platform = P::Data::new(&cc.egui_ctx, queue);
+        let platform = P::new(&cc.egui_ctx, queue);
         Self {
             data,
             library: world::ShapeLibrary::build(),

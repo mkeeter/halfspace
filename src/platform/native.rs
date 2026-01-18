@@ -1,6 +1,6 @@
 use crate::{
     App, AppState, Message, MessageSender, Modal,
-    platform::{self, Platform, PlatformData},
+    platform::{self, Platform},
     state, wgpu_setup,
 };
 use log::{info, warn};
@@ -11,24 +11,15 @@ use std::{
 
 use clap::Parser;
 
-struct NativePlatform;
-
-impl Platform for NativePlatform {
-    type Data = Data;
-    type ExportTarget = ExportTarget;
-    type Notify = Notify;
-}
-
-pub struct Data {
+struct NativePlatform {
     queue: MessageSender<Notify>,
     ctx: egui::Context,
 }
 
-impl Data {
-    const LOCAL_STORAGE: &str = ".localdb";
-}
+impl Platform for NativePlatform {
+    type ExportTarget = ExportTarget;
+    type Notify = Notify;
 
-impl PlatformData<NativePlatform> for Data {
     fn new(ctx: &egui::Context, queue: MessageSender<Notify>) -> Self {
         Self {
             queue,
@@ -149,6 +140,10 @@ impl PlatformData<NativePlatform> for Data {
         self.ctx
             .send_viewport_cmd(egui::ViewportCommand::Title(title.to_owned()));
     }
+}
+
+impl NativePlatform {
+    const LOCAL_STORAGE: &str = ".localdb";
 }
 
 /// Platform-specific export target

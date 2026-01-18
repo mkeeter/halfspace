@@ -11,17 +11,10 @@ pub(crate) trait Platform
 where
     Self: Sized,
 {
-    type Data: PlatformData<Self>;
     type ExportTarget: PlatformExport + std::fmt::Debug;
     type Notify: Notify + Clone;
-}
 
-pub(crate) trait PlatformExport {
-    fn save(&self, data: &[u8]) -> Result<(), std::io::Error>;
-}
-
-pub(crate) trait PlatformData<P: Platform> {
-    fn new(ctx: &egui::Context, queue: MessageSender<P::Notify>) -> Self;
+    fn new(ctx: &egui::Context, queue: MessageSender<Self::Notify>) -> Self;
     fn list_local_storage(&self) -> Vec<String>;
     fn save_to_local_storage(&self, path: &str, contents: &str);
     fn read_from_local_storage(&self, path: &str) -> String;
@@ -29,8 +22,8 @@ pub(crate) trait PlatformData<P: Platform> {
         &self,
         filename: &str,
         _data: &[u8],
-    ) -> Option<Modal<P::ExportTarget>>;
-    fn open(&self) -> Option<Modal<P::ExportTarget>>;
+    ) -> Option<Modal<Self::ExportTarget>>;
+    fn open(&self) -> Option<Modal<Self::ExportTarget>>;
 
     /// Returns `true` if `save` and `save_as` are valid
     fn can_save(&self) -> bool;
@@ -48,7 +41,11 @@ pub(crate) trait PlatformData<P: Platform> {
         name: Option<&str>,
         dialog_name: &str,
         extension: &str,
-    ) -> Option<P::ExportTarget>;
+    ) -> Option<Self::ExportTarget>;
+}
+
+pub(crate) trait PlatformExport {
+    fn save(&self, data: &[u8]) -> Result<(), std::io::Error>;
 }
 
 pub(crate) trait Notify: Send + Clone + 'static {
