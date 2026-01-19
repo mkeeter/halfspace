@@ -1,30 +1,52 @@
 use crate::{
-    App, AppState, Message, MessageSender, Modal,
+    App, AppState, Message, MessageReceiver, MessageSender, Modal,
     platform::{self, Platform},
     state, wgpu_setup,
 };
 use log::{info, warn};
-use std::{
-    io::{Read, Write},
-    path::PathBuf,
-};
+use std::io::{Read, Write};
 
 use clap::Parser;
 
 struct NativePlatform {
+    rx_channel: Option<MessageReceiver<Notify>>,
     queue: MessageSender<Notify>,
     ctx: egui::Context,
+
+    /// File path used for loading and saving
+    file: Option<std::path::PathBuf>,
+}
+
+impl NativePlatform {
+    fn set_filename(&mut self, filename: std::path::PathBuf) {
+        self.file = Some(filename);
+    }
 }
 
 impl Platform for NativePlatform {
     type ExportTarget = ExportTarget;
     type Notify = Notify;
 
-    fn new(ctx: &egui::Context, queue: MessageSender<Notify>) -> Self {
+    fn new(ctx: &egui::Context) -> Self {
+        let notify = Notify(ctx.clone());
+        let rx = MessageReceiver::new(notify.clone());
+        let queue = rx.sender();
         Self {
-            queue,
             ctx: ctx.clone(),
+            file: None,
+            queue,
+            rx_channel: Some(rx),
         }
+    }
+
+    fn reset(&mut self) {
+        self.file = None;
+    }
+
+    fn take_rx_channel(&mut self) -> MessageReceiver<Self::Notify> {
+        self.rx_channel
+            .take()
+            .expect("rx channel may only be taken once")
     }
 
     fn list_local_storage(&self) -> Vec<String> {
@@ -77,16 +99,16 @@ impl Platform for NativePlatform {
         })
     }
 
-    fn open(&self) -> Option<Modal<ExportTarget>> {
+    fn open(&mut self) -> Option<Modal<ExportTarget>> {
         let filename = rfd::FileDialog::new()
             .add_filter("halfspace", &["half"])
             .pick_file();
         if let Some(filename) = filename {
             let m = match load_from_file(&filename) {
-                Ok(state) => Message::Loaded {
-                    state,
-                    path: Some(filename),
-                },
+                Ok(state) => {
+                    self.file = Some(filename);
+                    Message::Loaded { state }
+                }
                 Err(e) => Message::LoadFailed {
                     title: "Load failed".to_owned(),
                     message: format!("{:#}", anyhow::Error::from(e)),
@@ -103,24 +125,27 @@ impl Platform for NativePlatform {
         true
     }
 
-    fn save(
-        &self,
-        state: &AppState,
-        f: &std::path::Path,
-    ) -> std::io::Result<()> {
-        write_to_file(state, f)
+    fn save(&mut self, state: &AppState) -> std::io::Result<bool> {
+        if let Some(f) = self.file.take() {
+            let r = write_to_file(state, &f);
+            self.file = Some(f);
+            r.map(|()| true)
+        } else {
+            self.save_as(state)
+        }
     }
 
-    fn save_as(&self, state: &AppState) -> std::io::Result<Option<PathBuf>> {
+    fn save_as(&mut self, state: &AppState) -> std::io::Result<bool> {
         let filename = rfd::FileDialog::new()
             .add_filter("halfspace", &["half"])
             .save_file();
         if let Some(filename) = filename {
             write_to_file(state, &filename)?;
-            Ok(Some(filename))
+            self.file = Some(filename);
+            Ok(true)
         } else {
             warn!("file save cancelled due to empty selection");
-            Ok(None)
+            Ok(false)
         }
     }
 
@@ -136,7 +161,17 @@ impl Platform for NativePlatform {
             .map(ExportTarget)
     }
 
-    fn update_title(&self, title: &str) {
+    fn update_title(&self, saved: bool) {
+        let marker = if saved { "" } else { "*" };
+        let title = if let Some(f) = &self.file {
+            let f = f
+                .file_name()
+                .map(|s| s.to_string_lossy())
+                .unwrap_or_else(|| "[no file name]".to_owned().into());
+            format!("{f}{marker}")
+        } else {
+            format!("[untitled]{marker}")
+        };
         self.ctx
             .send_viewport_cmd(egui::ViewportCommand::Title(title.to_owned()));
     }
@@ -206,22 +241,13 @@ pub fn run() -> anyhow::Result<()> {
         "halfspace",
         native_options,
         Box::new(|cc| {
-            let ctx = cc.egui_ctx.clone();
-            let notify = Notify(ctx);
-            let mut app = App::<NativePlatform>::new(cc, notify, args.debug);
-            if let Some(example) = args.example
-                && !app.load_example(&format!("{example}.half"))
-            {
-                warn!("could not find example '{example}'");
-            }
-
-            if let Some(filename) = args.target {
+            let mut platform = NativePlatform::new(&cc.egui_ctx);
+            let state = if let Some(filename) = args.target {
                 match load_from_file(&filename) {
                     Ok(state) => {
                         info!("restoring state from file");
-                        app.file = Some(filename);
-                        app.load_from_state(state);
-                        app.start_world_rebuild();
+                        platform.set_filename(filename);
+                        Some(state)
                     }
                     Err(state::ReadError::IoError(e))
                         if e.kind() == std::io::ErrorKind::NotFound =>
@@ -230,11 +256,28 @@ pub fn run() -> anyhow::Result<()> {
                         info!(
                             "file {filename:?} is not yet present; treating it as empty"
                         );
-                        app.file = Some(filename);
+                        platform.set_filename(filename);
+                        None
                     }
                     Err(e) => return Err(e.into()),
-                };
+                }
+            } else {
+                None
+            };
+
+            let mut app = App::<NativePlatform>::new(cc, platform, args.debug);
+
+            // The argument parser enforces that "load a file" and "load an
+            // example" are mutually exclusive.
+            if let Some(state) = state {
+                app.load_from_state(state);
+                app.start_world_rebuild();
+            } else if let Some(example) = args.example
+                && !app.load_example(&format!("{example}.half"))
+            {
+                warn!("could not find example '{example}'");
             }
+
             Ok(Box::new(app))
         }),
     )?;

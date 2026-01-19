@@ -218,7 +218,6 @@ enum Message {
     },
     Loaded {
         state: AppState,
-        path: Option<std::path::PathBuf>,
     },
     LoadFailed {
         title: String,
@@ -348,9 +347,6 @@ pub(crate) struct App<P: Platform> {
     examples: Vec<Example>,
     undo: state::Undo,
 
-    /// File path used for loading and saving
-    pub file: Option<std::path::PathBuf>,
-
     meta: state::Metadata,
     tree: egui_dock::DockState<gui::Tab>,
     syntax: egui_extras::syntax_highlighting::SyntectSettings,
@@ -477,7 +473,7 @@ impl<P: Platform> App<P> {
     /// repaint when it receives a message.
     pub fn new(
         cc: &eframe::CreationContext<'_>,
-        notify: P::Notify,
+        mut platform: P,
         debug: bool,
     ) -> Self {
         // Install custom render pipelines
@@ -546,11 +542,9 @@ impl<P: Platform> App<P> {
             style.visuals = theme_visuals();
         });
 
-        let rx = MessageReceiver::new(notify);
+        let rx = platform.take_rx_channel();
         let data = World::new();
         let undo = state::Undo::new(&data);
-        let queue = rx.sender();
-        let platform = P::new(&cc.egui_ctx, queue);
         Self {
             data,
             library: world::ShapeLibrary::build(),
@@ -558,7 +552,6 @@ impl<P: Platform> App<P> {
             tree: egui_dock::DockState::new(vec![]),
             script_state: ScriptState::Done,
             undo,
-            file: None,
             syntax,
             views: HashMap::new(),
             meta: state::Metadata::default(),
@@ -1014,7 +1007,7 @@ impl<P: Platform> App<P> {
                             if local {
                                 self.open_local()
                             } else {
-                                self.platform_open()
+                                self.modal = self.platform.open();
                             }
                         }
                         NextAction::LoadExample(s) => self.load_from_state(s),
@@ -1352,38 +1345,17 @@ impl<P: Platform> App<P> {
             if local {
                 self.open_local()
             } else {
-                self.platform_open();
+                self.modal = self.platform.open();
             }
         } else {
             self.modal = Some(Modal::Unsaved(NextAction::LoadFile { local }));
         }
     }
 
-    fn platform_open(&mut self) {
-        assert!(self.modal.is_none());
-        self.modal = self.platform.open();
-    }
-
-    fn platform_save(&mut self) {
-        if self.platform.can_save() {
-            if let Some(f) = self.file.take() {
-                let state = self.get_state();
-                self.platform.save(&state, &f).unwrap();
-                self.file = Some(f);
-                self.undo.mark_saved(state.world);
-            } else {
-                self.platform_save_as()
-            }
-        } else {
-            self.on_save_local()
-        }
-    }
-
     fn platform_save_as(&mut self) {
         if self.platform.can_save() {
             let state = self.get_state();
-            if let Some(f) = self.platform.save_as(&state).unwrap() {
-                self.file = Some(f);
+            if self.platform.save_as(&state).unwrap() {
                 self.undo.mark_saved(state.world);
             }
         } else {
@@ -1392,17 +1364,7 @@ impl<P: Platform> App<P> {
     }
 
     fn platform_update_title(&self) {
-        let marker = if self.undo.is_saved() { "" } else { "*" };
-        let title = if let Some(f) = &self.file {
-            let f = f
-                .file_name()
-                .map(|s| s.to_string_lossy())
-                .unwrap_or_else(|| "[no file name]".to_owned().into());
-            format!("{f}{marker}")
-        } else {
-            format!("[untitled]{marker}")
-        };
-        self.platform.update_title(&title);
+        self.platform.update_title(self.undo.is_saved());
     }
 
     fn open_local(&mut self) {
@@ -1464,8 +1426,13 @@ impl<P: Platform> App<P> {
     fn on_save(&mut self) {
         if self.modal.is_some() {
             warn!("ignoring save while modal is active");
+        } else if self.platform.can_save() {
+            let state = self.get_state();
+            if self.platform.save(&state).unwrap() {
+                self.undo.mark_saved(state.world);
+            }
         } else {
-            self.platform_save();
+            self.on_save_local()
         }
     }
 
@@ -1502,7 +1469,7 @@ impl<P: Platform> App<P> {
 
     /// Resets our file to an empty state, setting `self.request_repaint`
     fn new_file(&mut self) {
-        self.file = None;
+        self.platform.reset();
         self.load_from_state(AppState::default());
         self.request_repaint = true;
     }
@@ -1779,10 +1746,9 @@ impl<P: Platform> App<P> {
                     e.update(generation, data, start_time.elapsed())
                 }
             }
-            Message::Loaded { state, path } => match self.modal {
+            Message::Loaded { state } => match self.modal {
                 Some(Modal::WaitForLoad) => {
                     self.load_from_state(state);
-                    self.file = path;
                     self.modal = None;
                     self.local_name_confirmed = true;
                 }

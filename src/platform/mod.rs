@@ -1,5 +1,4 @@
-use crate::{AppState, MessageSender, Modal};
-use std::path::{Path, PathBuf};
+use crate::{AppState, MessageReceiver, Modal};
 
 #[cfg_attr(target_arch = "wasm32", path = "web.rs")]
 #[cfg_attr(not(target_arch = "wasm32"), path = "native.rs")]
@@ -17,7 +16,17 @@ where
     /// Associated type for exporting files
     type ExportTarget: PlatformExport + std::fmt::Debug;
 
-    fn new(ctx: &egui::Context, queue: MessageSender<Self::Notify>) -> Self;
+    /// Builds a new platform-specific object
+    fn new(ctx: &egui::Context) -> Self;
+
+    /// Resets file state
+    fn reset(&mut self);
+
+    /// Takes the message receiver from the platform object
+    ///
+    /// # Panics
+    /// If this is called more than once
+    fn take_rx_channel(&mut self) -> MessageReceiver<Self::Notify>;
 
     /// List all file names in local storage
     fn list_local_storage(&self) -> Vec<String>;
@@ -34,19 +43,24 @@ where
         filename: &str,
         data: &[u8],
     ) -> Option<Modal<Self::ExportTarget>>;
-    fn open(&self) -> Option<Modal<Self::ExportTarget>>;
+
+    /// Tries to open a file
+    fn open(&mut self) -> Option<Modal<Self::ExportTarget>>;
 
     /// Returns `true` if `save` and `save_as` are valid
     fn can_save(&self) -> bool;
 
     /// Writes a file to a local path
-    fn save(&self, state: &AppState, f: &Path) -> std::io::Result<()>;
+    fn save(&mut self, state: &AppState) -> std::io::Result<bool>;
 
     /// Opens a dialog to select a file name, then writes to that file
-    fn save_as(&self, state: &AppState) -> std::io::Result<Option<PathBuf>>;
+    ///
+    /// Returns `true` if the file was written or `false` if the write was
+    /// cancelled.
+    fn save_as(&mut self, state: &AppState) -> std::io::Result<bool>;
 
     /// Changes the window title
-    fn update_title(&self, title: &str);
+    fn update_title(&self, saved: bool);
 
     /// Returns a target to be used when exporting files
     ///

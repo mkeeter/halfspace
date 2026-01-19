@@ -1,8 +1,9 @@
 use crate::{
-    App, AppState, Message, MessageSender, Modal, platform, state, wgpu_setup,
+    App, AppState, Message, MessageReceiver, MessageSender, Modal,
+    platform::{self, Platform},
+    state, wgpu_setup,
 };
 use log::{error, info, warn};
-use std::path::{Path, PathBuf};
 use wasm_bindgen::prelude::*;
 
 /// Re-export init_thread_pool to be called on the web
@@ -109,9 +110,9 @@ pub fn run() {
                 canvas,
                 web_options,
                 Box::new(|cc| {
-                    let (notify_tx, notify_rx) = flume::unbounded();
-                    let mut app =
-                        App::<WebPlatform>::new(cc, Notify(notify_tx), false);
+                    let mut platform = WebPlatform::new(&cc.egui_ctx);
+                    let notify_rx = platform.take_notify_rx();
+                    let mut app = App::<WebPlatform>::new(cc, platform, false);
                     if let Some(example) = example
                         && !app.load_example(&example)
                     {
@@ -139,19 +140,41 @@ pub fn run() {
 struct WebPlatform {
     /// Dialogs are handled in a separate task
     dialogs: flume::Sender<DialogRequest>,
+    rx_channel: Option<MessageReceiver<Notify>>,
+    notify_rx: Option<flume::Receiver<()>>,
+}
+
+impl WebPlatform {
+    fn take_notify_rx(&mut self) -> flume::Receiver<()> {
+        self.notify_rx.take().unwrap()
+    }
 }
 
 impl platform::Platform for WebPlatform {
     type ExportTarget = ExportTarget;
     type Notify = Notify;
 
-    fn new(_ctx: &egui::Context, queue: MessageSender<Notify>) -> Self {
+    fn new(_ctx: &egui::Context) -> Self {
+        let (notify_tx, notify_rx) = flume::unbounded();
+        let notify = Notify(notify_tx);
         let (dialog_tx, dialog_rx) = flume::unbounded();
-        wasm_bindgen_futures::spawn_local(dialog_worker(dialog_rx, queue));
-        Self { dialogs: dialog_tx }
+        let rx = MessageReceiver::new(notify);
+        wasm_bindgen_futures::spawn_local(dialog_worker(
+            dialog_rx,
+            rx.sender(),
+        ));
+        Self {
+            dialogs: dialog_tx,
+            rx_channel: Some(rx),
+            notify_rx: Some(notify_rx),
+        }
     }
 
-    fn update_title(&self, _title: &str) {
+    fn take_rx_channel(&mut self) -> MessageReceiver<Self::Notify> {
+        self.rx_channel.take().unwrap()
+    }
+
+    fn update_title(&self, _saved: bool) {
         // no-op on the web backend
     }
 
@@ -159,19 +182,19 @@ impl platform::Platform for WebPlatform {
         false
     }
 
-    fn save(&self, _state: &AppState, _f: &Path) -> std::io::Result<()> {
+    fn save(&mut self, _state: &AppState) -> std::io::Result<bool> {
         panic!(
             "saving is not supported on web platform, use save_local instead"
         )
     }
 
-    fn save_as(&self, _state: &AppState) -> std::io::Result<Option<PathBuf>> {
+    fn save_as(&mut self, _state: &AppState) -> std::io::Result<bool> {
         panic!(
             "saving is not supported on web platform, use save_local instead"
         )
     }
 
-    fn open(&self) -> Option<Modal<ExportTarget>> {
+    fn open(&mut self) -> Option<Modal<ExportTarget>> {
         if self.dialogs.send(DialogRequest::Open).is_ok() {
             Some(Modal::WaitForLoad)
         } else {
@@ -248,6 +271,10 @@ impl platform::Platform for WebPlatform {
                 message: format!("{e:?}"),
             }),
         }
+    }
+
+    fn reset(&mut self) {
+        // nothing to do here
     }
 }
 
@@ -346,7 +373,7 @@ pub(crate) async fn dialog_worker(
                         .map_err(state::ReadError::NotUtf8)
                         .and_then(AppState::deserialize)
                     {
-                        Ok(state) => Message::Loaded { state, path: None },
+                        Ok(state) => Message::Loaded { state },
                         Err(e) => Message::LoadFailed {
                             title: "Open error".to_owned(),
                             message: format!("{:#}", anyhow::Error::from(e)),
