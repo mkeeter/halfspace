@@ -9,6 +9,7 @@ _default:
 dist:
     just _build-web
     wasm-opt -O pkg/halfspace_bg.wasm -o pkg/halfspace_bg.opt.wasm
+    mv pkg/halfspace_bg.opt.wasm pkg/halfspace_bg.wasm
     just _copy
 
 # Build a web application in `pkg/` without `wasm-opt` optimization
@@ -21,7 +22,6 @@ _build-web:
     wasm-bindgen target/wasm32-unknown-unknown/release/halfspace.wasm --out-dir pkg --target web
 
 _copy:
-    mv pkg/halfspace_bg.wasm pkg/halfspace_bg.wasm
     cp -r web/index.html pkg
     cp -r web/htaccess pkg/.htaccess
 
