@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 pub use crate::state::{Tab, TabMode};
 use crate::{
-    BlockResponse, MessageGenSender, ViewResponse, export,
+    BlockResponse, MessageReceiver, ViewResponse, export,
     platform::Notify,
     view::{self, ViewCanvas, ViewData, ViewImage, ViewMode2, ViewMode3},
     world::{
@@ -17,7 +17,7 @@ pub struct WorldView<'a, N: Notify> {
     pub syntax: &'a egui_extras::syntax_highlighting::SyntectSettings,
     pub views: &'a mut HashMap<BlockIndex, ViewData>,
     pub out: &'a mut Vec<(BlockIndex, ViewResponse)>,
-    pub tx: &'a MessageGenSender<N>,
+    pub rx: &'a MessageReceiver<N>,
 }
 
 impl Tab {
@@ -171,7 +171,7 @@ impl<'a, N: Notify> WorldView<'a, N> {
         let current_canvas = entry.canvas;
         let (image, valid) = if let Some(block_view) = block_view {
             let Some(image) =
-                entry.image(index, block_view.scene.clone(), self.tx)
+                entry.image(index, block_view.scene.clone(), self.rx)
             else {
                 return out
                     | view::fallback_ui(

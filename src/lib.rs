@@ -228,7 +228,6 @@ struct RenderViewReply {
 ///
 /// Messages are sent on a blocking `mpsc` queue; after a message is sent, we
 /// also call into a platform-specific notifier to wake the `egui` context
-#[derive(Clone)]
 struct MessageSenderInner<N: Notify> {
     /// Main (blocking) queue for messages
     queue: std::sync::mpsc::Sender<(Message, Option<u64>)>,
@@ -243,7 +242,6 @@ struct MessageSenderInner<N: Notify> {
 /// script or rendering an image.  If we load a new file, we increment the
 /// generation, which causes messages from older tasks to be discarded when
 /// received.
-#[derive(Clone)]
 struct MessageGenSender<N: Notify> {
     /// Inner queue
     inner: MessageSenderInner<N>,
@@ -253,7 +251,6 @@ struct MessageGenSender<N: Notify> {
 }
 
 /// Unconditional message sender
-#[derive(Clone)]
 struct MessageSender<N: Notify> {
     /// Inner queue
     inner: MessageSenderInner<N>,
@@ -1199,7 +1196,7 @@ impl<P: Platform> App<P> {
             world: &mut self.data,
             syntax: &self.syntax,
             views: &mut self.views,
-            tx: &self.rx.sender_with_gen(),
+            rx: &self.rx,
             out: &mut io_out,
         };
         egui_dock::DockArea::new(&mut self.tree)

@@ -1,6 +1,5 @@
 use crate::{
-    BlockIndex, MessageGenSender, MessageReceiver, RenderViewReply,
-    ViewResponse,
+    BlockIndex, MessageReceiver, RenderViewReply, ViewResponse,
     gui::{CAMERA, WARN},
     platform::Notify,
     render::{RenderSettings, RenderTask},
@@ -409,7 +408,7 @@ impl ViewData {
         &mut self,
         block: BlockIndex,
         scene: Scene,
-        tx: &MessageGenSender<N>,
+        rx: &MessageReceiver<N>,
     ) -> Option<&ViewImage> {
         let settings = RenderSettings::from_canvas(&self.canvas, scene);
 
@@ -438,7 +437,7 @@ impl ViewData {
                 self.generation,
                 settings,
                 self.start_level,
-                tx.clone(),
+                rx.sender_with_gen(),
             ));
         }
         self.image.as_ref().map(|(_, image)| image)
