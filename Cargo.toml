@@ -7,7 +7,7 @@ repository = "https://github.com/mkeeter/halfspace"
 description = "An experimental CAD tool"
 authors = ["Matt Keeter <matt.j.keeter@gmail.com"]
 readme = "README.md"
-rust-version = "1.88"
+rust-version = "1.92"
 
 [profile.dev]
 panic = 'abort'
@@ -21,14 +21,14 @@ overflow-checks = true
 anyhow = "1.0.98"
 bincode = { version = "2", features = ["serde"] }
 bitflags = "2.9.1"
-eframe = { version = "0.33.3", default-features = false, features = ["wgpu", "wayland", "web_screen_reader", "x11"] }
-egui = { version = "0.33.3" }
-egui-wgpu = { version = "0.33.3" }
-egui_dnd = "0.14.0"
-egui_dock = { version = "0.18.0", features = ["serde"] }
-egui_extras = { version = "0.33.3", features = ["syntect"] }
-facet = "0.33"
-fidget = { git = "https://github.com/mkeeter/fidget" }
+eframe = { version = "0.34.1", default-features = false, features = ["wgpu", "wayland", "web_screen_reader", "x11"] }
+egui = { version = "0.34.1" }
+egui-wgpu = { version = "0.34.1" }
+egui_dnd = "0.15.0"
+egui_dock = { version = "0.19.1", features = ["serde"] }
+egui_extras = { version = "0.34.1", features = ["syntect"] }
+facet = "0.44"
+fidget = { version = "0.4.3" }
 flume = { version = "0.12", features = ["async"] }
 git-version = "0.3.9"
 heck = "0.5"
@@ -55,7 +55,7 @@ syntect = "5.2.0"
 
 # Desktop dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-clap = "4.5.39"
+clap = { version = "4.6", features = ["derive"] }
 env_logger = "0.11.8"
 rhai = { version = "1.21", features = ["sync", "internals"] }
 
@@ -75,15 +75,6 @@ getrandom-02 = { package = "getrandom", version = "0.2", features = ["js"] }
 [features]
 jit = ["fidget/jit"]
 default = ["jit"]
-
-# We're using my own egui fork to fix egui#7346; this requires patching the
-# whole graph of egui crates.
-[patch.crates-io]
-eframe = { git = "https://github.com/mkeeter/egui", branch = "v0.33.0-backport" }
-egui = { git = "https://github.com/mkeeter/egui", branch = "v0.33.0-backport" }
-egui-winit = { git = "https://github.com/mkeeter/egui", branch = "v0.33.0-backport" }
-egui-wgpu = { git = "https://github.com/mkeeter/egui", branch = "v0.33.0-backport" }
-epaint = { git = "https://github.com/mkeeter/egui", branch = "v0.33.0-backport" }
 
 # Optimize dependencies (mostly Fidget) even in debug builds
 [profile.dev.package."*"]

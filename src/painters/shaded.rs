@@ -128,7 +128,7 @@ impl egui_wgpu::CallbackTrait for WgpuShadedPainter {
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
             ..Default::default()
         });
 
@@ -363,10 +363,10 @@ impl ShadedResources {
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("shaded render pipeline layout"),
                 bind_group_layouts: &[
-                    &common_bind_group_layout,
-                    &image_bind_group_layout,
+                    Some(&common_bind_group_layout),
+                    Some(&image_bind_group_layout),
                 ],
-                push_constant_ranges: &[],
+                immediate_size: 0u32,
             });
 
         // Create the shaded render pipeline
@@ -405,8 +405,8 @@ impl ShadedResources {
                 },
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: wgpu::TextureFormat::Depth32Float,
-                    depth_write_enabled: true,
-                    depth_compare: wgpu::CompareFunction::Less,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Less),
                     stencil: wgpu::StencilState::default(),
                     bias: wgpu::DepthBiasState::default(),
                 }),
@@ -415,7 +415,7 @@ impl ShadedResources {
                     mask: !0,
                     alpha_to_coverage_enabled: false,
                 },
-                multiview: None,
+                multiview_mask: None,
             });
 
         Self {
@@ -491,7 +491,7 @@ impl ShadedResources {
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             ..Default::default()
         });
 
@@ -536,7 +536,7 @@ impl ShadedResources {
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             ..Default::default()
         });
 

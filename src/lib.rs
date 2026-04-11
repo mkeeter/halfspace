@@ -614,7 +614,7 @@ impl<P: Platform> App<P> {
         self.script_state = ScriptState::Running { changed: false };
     }
 
-    fn draw_menu(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
+    fn draw_menu(&mut self, ui: &mut egui::Ui) {
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
                 if ui.button("\u{ea7b} New").clicked() {
@@ -671,7 +671,7 @@ impl<P: Platform> App<P> {
                     }
 
                     if ui.button("\u{f0a48} Quit").clicked() {
-                        self.on_quit(ctx);
+                        self.on_quit(ui);
                     }
                 }
             });
@@ -891,8 +891,9 @@ impl<P: Platform> App<P> {
             enter_pressed: bool,
         ) -> FileNameResponse {
             let w = ui.available_width();
-            let initial_padding =
-                (w - (w * 0.8 + ui.ctx().style().spacing.item_spacing.x)) / 2.0;
+            let initial_padding = (w
+                - (w * 0.8 + ui.ctx().global_style().spacing.item_spacing.x))
+                / 2.0;
             let button_size = egui::Vec2::new(w * 0.4, 20.0);
             ui.add_space(5.0);
             ui.horizontal_top(|ui| {
@@ -937,7 +938,7 @@ impl<P: Platform> App<P> {
                 .min_height(dialog_size.y)
                 .max_height(dialog_size.y)
                 .default_height(dialog_size.x)
-                .frame(egui::Frame::popup(&ctx.style()))
+                .frame(egui::Frame::popup(&ctx.global_style()))
                 .show(ctx, add_contents)
                 .unwrap()
                 .inner
@@ -1145,7 +1146,7 @@ impl<P: Platform> App<P> {
                     .resizable(false)
                     .default_width(0.0)
                     .order(egui::Order::Foreground)
-                    .frame(egui::Frame::popup(&ctx.style()))
+                    .frame(egui::Frame::popup(&ctx.global_style()))
                     .show(ctx, |ui| {
                         ui.add_space(5.0);
                         use git_version::git_version;
@@ -1180,11 +1181,7 @@ impl<P: Platform> App<P> {
     }
 
     #[must_use]
-    fn draw_tab_region(
-        &mut self,
-        ctx: &egui::Context,
-        ui: &mut egui::Ui,
-    ) -> bool {
+    fn draw_tab_region(&mut self, ui: &mut egui::Ui) -> bool {
         // Manually draw a backdrop; this will be covered by the
         // DockArea if there's anything being drawn
         let style = ui.style();
@@ -1209,7 +1206,7 @@ impl<P: Platform> App<P> {
             out: &mut io_out,
         };
         egui_dock::DockArea::new(&mut self.tree)
-            .style(egui_dock::Style::from_egui(ctx.style().as_ref()))
+            .style(egui_dock::Style::from_egui(ui.global_style().as_ref()))
             .show_leaf_collapse_buttons(false)
             .show_leaf_close_all_buttons(false)
             .show_inside(ui, &mut bw);
@@ -1221,7 +1218,9 @@ impl<P: Platform> App<P> {
                         let tab = gui::Tab::script(block);
                         let tab_location = self.tree.find_tab(&tab);
                         if let Some(tab_location) = tab_location {
-                            self.tree.set_active_tab(tab_location)
+                            self.tree
+                                .set_active_tab(tab_location)
+                                .expect("could not find tab for script");
                         } else {
                             self.tree.push_to_focused_leaf(tab);
                         }
@@ -1240,38 +1239,41 @@ impl<P: Platform> App<P> {
     }
 
     #[must_use]
-    fn draw_ui(&mut self, ctx: &egui::Context) -> bool {
+    fn draw_ui(&mut self, ui: &mut egui::Ui) -> bool {
         let mut changed = false;
-        egui::Panel::top("menu").show(ctx, |ui| {
+        egui::Panel::top("menu").show_inside(ui, |ui| {
             ui.add_space(2.0);
-            self.draw_menu(ctx, ui);
+            self.draw_menu(ui);
             ui.add_space(2.0);
         });
 
         changed |= egui::Panel::left("left_panel")
             .min_size(250.0)
-            .show(ctx, |ui| self.draw_block_list(ui))
+            .show_inside(ui, |ui| self.draw_block_list(ui))
             .inner;
 
         let size = egui::CentralPanel::default()
             .frame(
-                egui::Frame::central_panel(&ctx.style())
+                egui::Frame::central_panel(&ui.global_style())
                     .inner_margin(0.0)
                     .fill(egui::Color32::TRANSPARENT),
             )
-            .show(ctx, |ui| {
+            .show_inside(ui, |ui| {
                 let size = ui.available_size();
-                changed |= self.draw_tab_region(ctx, ui);
+                changed |= self.draw_tab_region(ui);
                 size
             })
             .inner;
 
         // Draw optional modals
-        self.draw_modal(ctx, size);
+        self.draw_modal(ui, size);
 
         if self.show_inspection_ui {
-            egui::Window::new("Debug").show(ctx, |ui| {
-                ctx.style_ui(ui, egui::Theme::Light);
+            egui::Window::new("Debug").show(ui, |ui| {
+                let theme = egui::Theme::Light;
+                let mut style = (*ui.style_of(theme)).clone();
+                style.ui(ui);
+                ui.set_style_of(theme, style);
             });
         }
 
@@ -1303,9 +1305,9 @@ impl<P: Platform> App<P> {
         }
     }
 
-    fn on_quit(&mut self, ctx: &egui::Context) {
+    fn on_quit(&mut self, ui: &egui::Ui) {
         if self.undo.is_saved() {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            ui.send_viewport_cmd(egui::ViewportCommand::Close);
         } else {
             self.modal = Some(Modal::Unsaved(NextAction::Quit));
         }
@@ -1476,21 +1478,21 @@ impl<P: Platform> App<P> {
 }
 
 impl<P: Platform> eframe::App for App<P> {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         Self::reset_wgpu_state(frame);
-        self.update_undo_redo(ctx);
+        self.update_undo_redo(ui);
         self.handle_messages();
-        self.check_shortcuts(ctx);
-        self.intercept_quit(ctx);
+        self.check_shortcuts(ui);
+        self.intercept_quit(ui);
 
-        if self.draw_ui(ctx) {
+        if self.draw_ui(ui) {
             self.start_world_rebuild();
         }
 
         self.platform_update_title();
 
         if std::mem::take(&mut self.request_repaint) {
-            ctx.request_repaint();
+            ui.request_repaint();
         }
     }
 }
@@ -1805,10 +1807,10 @@ impl<P: Platform> App<P> {
         }
     }
 
-    fn check_shortcuts(&mut self, ctx: &egui::Context) {
+    fn check_shortcuts(&mut self, ui: &egui::Ui) {
         let mut quit_requested = false;
         if self.modal.is_none() {
-            ctx.input_mut(|i| {
+            ui.input_mut(|i| {
                 if i.consume_shortcut(&egui::KeyboardShortcut::new(
                     egui::Modifiers::MAC_CMD,
                     egui::Key::N,
@@ -1855,7 +1857,7 @@ impl<P: Platform> App<P> {
             });
         }
         if quit_requested {
-            self.on_quit(ctx);
+            self.on_quit(ui);
         }
     }
 

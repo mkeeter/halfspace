@@ -539,13 +539,16 @@ fn draw_line_numbers(
         |ui: &egui::Ui, buf: &dyn egui::TextBuffer, wrap_width: f32| {
             let ctx = ui.ctx();
             let mut layout_job = ctx.memory_mut(|mem| {
-                mem.caches.cache::<LineNumberCache>().get((
-                    buf.as_str(),
-                    err_line,
-                    line_color,
-                    error_color,
-                    &font_id,
-                ))
+                mem.caches
+                    .cache::<LineNumberCache>()
+                    .get((
+                        buf.as_str(),
+                        err_line,
+                        line_color,
+                        error_color,
+                        &font_id,
+                    ))
+                    .clone()
             });
             layout_job.wrap.max_width = wrap_width;
             ui.fonts_mut(|f| f.layout_job(layout_job))
@@ -555,7 +558,7 @@ fn draw_line_numbers(
         .font(egui::TextStyle::Monospace)
         .interactive(false)
         .desired_width(width)
-        .frame(false)
+        .frame(egui::Frame::NONE)
         .layouter(&mut layouter);
     ui.add(lines);
 }
@@ -1087,16 +1090,11 @@ impl DraggableInputValue {
 
 /// Helper type to stably edit the `egui_dock` state
 pub struct DockStateEditor<'a> {
-    script: Option<TabLocation>,
-    view: Option<TabLocation>,
+    script: Option<egui_dock::TabPath>,
+    view: Option<egui_dock::TabPath>,
     index: BlockIndex,
     tree: &'a mut egui_dock::DockState<Tab>,
 }
-type TabLocation = (
-    egui_dock::SurfaceIndex,
-    egui_dock::NodeIndex,
-    egui_dock::TabIndex,
-);
 
 impl<'a> DockStateEditor<'a> {
     pub fn new(
@@ -1123,16 +1121,18 @@ impl<'a> DockStateEditor<'a> {
         }
     }
     pub fn toggle_script(&mut self) {
-        if let Some((surface, node, tab)) = self.script {
+        if let Some(tab) = self.script {
             let egui_dock::Node::Leaf(egui_dock::LeafNode { active, .. }) =
-                &self.tree[surface][node]
+                &self.tree[tab.surface][tab.node]
             else {
                 panic!("target node was not a leaf ")
             };
-            if *active == tab {
+            if *active == tab.tab {
                 self.close_script();
             } else {
-                self.tree[surface].set_active_tab(node, tab);
+                self.tree[tab.surface]
+                    .set_active_tab(tab.node, tab.tab)
+                    .expect("script node not found");
             }
         } else {
             self.tree.push_to_focused_leaf(self.script_index());
