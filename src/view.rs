@@ -1,5 +1,6 @@
 use crate::{
-    BlockIndex, MessageGenSender, ViewResponse,
+    BlockIndex, MessageGenSender, MessageReceiver, RenderViewReply,
+    ViewResponse,
     gui::{CAMERA, WARN},
     platform::Notify,
     render::{RenderSettings, RenderTask},
@@ -24,13 +25,10 @@ pub struct ViewData {
     pub canvas: ViewCanvas,
 
     /// Current image
-    image: Option<ViewImage>,
+    image: Option<(RenderSettings, ViewImage)>,
 
     /// Initial render depth, used to render faster
     start_level: usize,
-
-    /// Pending render task, with a new start level
-    pending: Option<usize>,
 
     /// Monotonic counter to identify the most recent task
     generation: u64,
@@ -69,7 +67,6 @@ impl From<ViewCanvas> for ViewData {
             canvas,
             image: None,
             start_level: 0,
-            pending: None,
             generation: 0,
         }
     }
@@ -367,36 +364,40 @@ impl ViewData {
             image: None,
             generation: 0,
             start_level: 0,
-            pending: None,
         }
     }
 
     /// Callback when a render task is complete
-    pub fn update(
+    pub fn update<N: Notify>(
         &mut self,
-        generation: u64,
-        data: ViewImage,
-        render_time: Duration,
+        r: RenderViewReply,
+        rx: &MessageReceiver<N>,
     ) {
         const TARGET_RENDER_TIME: Duration = Duration::from_millis(33);
         const MAX_LEVEL: usize = 10;
+        let render_time = r.start_time.elapsed();
 
         // Adjust self.start_level to hit a render time target
-        if data.level() == self.start_level {
-            if render_time > TARGET_RENDER_TIME && data.level() < MAX_LEVEL {
+        if r.data.level() == self.start_level {
+            if render_time > TARGET_RENDER_TIME && r.data.level() < MAX_LEVEL {
                 self.start_level += 1;
             } else if render_time < TARGET_RENDER_TIME * 3 / 4 {
                 self.start_level = self.start_level.saturating_sub(1);
             }
         }
-        if generation == self.generation {
-            if let Some(task) = &mut self.task {
-                task.set_done();
+        if r.generation == self.generation {
+            let _ = self.task.take();
+            if let Some(next) = r.data.level().checked_sub(1) {
+                self.generation += 1;
+                self.task = Some(RenderTask::spawn(
+                    r.block,
+                    self.generation,
+                    r.settings.clone(),
+                    next,
+                    rx.sender_with_gen(),
+                ));
             }
-            if let Some(next) = data.level().checked_sub(1) {
-                self.pending = Some(next);
-            }
-            self.image = Some(data);
+            self.image = Some((r.settings, r.data));
         }
     }
 
@@ -410,17 +411,27 @@ impl ViewData {
         scene: Scene,
         tx: &MessageGenSender<N>,
     ) -> Option<&ViewImage> {
-        // If the image settings have changed, then clear `task` (which causes
-        // us to reinitialize it below).  Skip clearing the task if it's a
-        // max-level (i.e. lowest-resolution) render, to preserve responsiveness
         let settings = RenderSettings::from_canvas(&self.canvas, scene);
-        if let Some(prev) = &self.task
-            && prev.should_cancel(&settings, self.start_level)
+
+        // If the image settings have changed, then start a new render, unless
+        // the task is a max-level  (i.e. lowest-resolution) render, to preserve
+        // responsiveness
+        if self
+            .task
+            .as_ref()
+            .is_some_and(|prev| prev.should_cancel(&settings, self.start_level))
         {
-            self.task = None;
-            self.pending = None;
+            self.task = None; // dropping the task cancels it
         }
-        if self.task.is_none() {
+
+        // If we don't have a task and our image was rendered with different
+        // settings, then start a new task
+        if self.task.is_none()
+            && self
+                .image
+                .as_ref()
+                .is_none_or(|(prev_settings, _)| &settings != prev_settings)
+        {
             self.generation += 1;
             self.task = Some(RenderTask::spawn(
                 block,
@@ -429,22 +440,12 @@ impl ViewData {
                 self.start_level,
                 tx.clone(),
             ));
-        } else if let Some(next) = self.pending.take() {
-            self.generation += 1;
-            self.task = Some(RenderTask::spawn(
-                block,
-                self.generation,
-                settings,
-                next,
-                tx.clone(),
-            ));
         }
-
-        self.image.as_ref()
+        self.image.as_ref().map(|(_, image)| image)
     }
 
     pub fn prev_image(&self) -> Option<&ViewImage> {
-        self.image.as_ref()
+        self.image.as_ref().map(|(_, image)| image)
     }
 }
 

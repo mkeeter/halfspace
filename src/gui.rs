@@ -291,7 +291,7 @@ impl<'a, N: Notify> WorldView<'a, N> {
             }
             _ => {
                 return out
-                    | if entry.task.as_ref().is_some_and(|t| !t.done()) {
+                    | if entry.task.as_ref().is_some() {
                         view::fallback_ui(
                             ui,
                             index,

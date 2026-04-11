@@ -1,6 +1,51 @@
 //! Image rendering
+//!
+//! # Big Theory Statement
+//! Each block in the GUI may have 0 or 1 views (represented by a
+//! [`ViewData`](crate::view::ViewData)).  The [`App`](crate::App) stores a map
+//! from `BlockIndex` to `ViewData`.
+//!
+//! When updating the UI, we construct a [`WorldView`](crate::gui::WorldView),
+//! which implements the [`egui_dock::TabViewer`] trait.  When a view is drawn,
+//! we call [`WorldView::view_ui`](crate::gui::WorldView::view_ui), which grabs
+//! the `ViewData` for that block.  This in turn calls
+//! [`ViewData::image`](crate::view::ViewData::image) to get a [`ViewImage`] to
+//! draw.
+//!
+//! From here, our dive goes in two directions.
+//!
+//! ## Rendering images
+//! [`ViewData::image`](crate::view::ViewData::image) checks to see whether our
+//! current settings match those of an in-progress render.  If not, then it
+//! cancels the in-progress render and starts a new render, spawning it into the
+//! global `rayon` thread pool.  If available, it returns a cached image, which
+//! is a [`ViewImage`].
+//!
+//! A render task is represented by a [`RenderTask`] object, which performs the
+//! render then sends a generation-tagged result into a [`MessageGenSender`].
+//! Note that there are **two** generations: a global generation associated with
+//! the `App`, and a local generation associated with the `ViewData`.  The
+//! global generation invalidates messages associated with a previous file; the
+//! local generation invalidates render results which arrive out of order (only
+//! the newest render task has the correct local generation number).
+//!
+//! Eventually, the [`RenderTask`] finishes.  It sends [`Message::RenderView`]
+//! into the global event queue; the main loop receives it and dispatches to the
+//! appropriate [`ViewData::update`](crate::view::ViewData::update).
+//!
+//! In [`ViewData::update`](crate::view::ViewData::update), the new image data
+//! is stored and we adjust the `start_level` based on render time; this is used
+//! in subsequent renders to maintain a high frame rate.
+//!
+//! At the end of this process, we have a [`ViewImage`], which contains pixels
+//! in RAM for a particular image type and render settings (angle, image size,
+//! etc).  We store this image (and the settings used to generate it) into the
+//! `ViewData`, for use in the next check.
+//!
+//! ## Drawing images to the screen
+//! TODO write this
 use crate::{
-    BlockIndex, Message, MessageGenSender,
+    BlockIndex, Message, MessageGenSender, RenderViewReply,
     platform::Notify,
     view::{
         BitfieldImageData, BitfieldViewImage, DebugImageData, DebugViewImage,
@@ -31,7 +76,6 @@ pub(crate) type RenderShape = fidget::shape::Shape<RenderFunction>;
 pub struct RenderTask {
     settings: RenderSettings,
     level: usize,
-    done: bool,
     cancel: fidget::render::CancelToken,
 }
 
@@ -42,16 +86,6 @@ impl Drop for RenderTask {
 }
 
 impl RenderTask {
-    /// Checks whether the `done` flag is set
-    pub fn done(&self) -> bool {
-        self.done
-    }
-
-    /// Sets the `done` flag
-    pub fn set_done(&mut self) {
-        self.done = true
-    }
-
     /// Checks whether the new settings are different from our settings
     ///
     /// This only returns `true` if `self.level != max_level`; we want to avoid
@@ -61,7 +95,7 @@ impl RenderTask {
         other: &RenderSettings,
         max_level: usize,
     ) -> bool {
-        &self.settings != other && (self.done || self.level != max_level)
+        &self.settings != other && self.level != max_level
     }
 
     /// Begins a new image rendering task in the global thread pool
@@ -78,19 +112,19 @@ impl RenderTask {
         let start_time = Instant::now();
         rayon::spawn(move || {
             if let Some(data) = Self::run(&settings_, level, cancel_) {
-                tx.send(Message::RenderView {
+                tx.send(Message::RenderView(RenderViewReply {
                     block,
                     generation,
                     start_time,
                     data,
-                })
+                    settings: settings_,
+                }))
             }
         });
         Self {
             settings,
             cancel,
             level,
-            done: false,
         }
     }
 

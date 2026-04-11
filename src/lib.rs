@@ -207,24 +207,21 @@ fn theme_visuals() -> egui::Visuals {
 
 #[allow(clippy::large_enum_variant)]
 enum Message {
-    RebuildWorld {
-        world: World,
-    },
-    RenderView {
-        block: BlockIndex,
-        generation: u64,
-        start_time: Instant,
-        data: view::ViewImage,
-    },
-    Loaded {
-        state: AppState,
-    },
-    LoadFailed {
-        title: String,
-        message: String,
-    },
+    RebuildWorld { world: World },
+    RenderView(RenderViewReply),
+    Loaded { state: AppState },
+    LoadFailed { title: String, message: String },
     CancelLoad,
     ExportComplete(Result<Vec<u8>, export::ExportError>),
+}
+
+// TODO put this in a module somewhere?
+struct RenderViewReply {
+    block: BlockIndex,
+    generation: u64,
+    start_time: Instant,
+    settings: render::RenderSettings,
+    data: view::ViewImage,
 }
 
 /// Message sender for worker tasks
@@ -1738,14 +1735,9 @@ impl<P: Platform> App<P> {
                     self.start_world_rebuild();
                 }
             }
-            Message::RenderView {
-                block,
-                generation,
-                data,
-                start_time,
-            } => {
-                if let Some(e) = self.views.get_mut(&block) {
-                    e.update(generation, data, start_time.elapsed())
+            Message::RenderView(reply) => {
+                if let Some(e) = self.views.get_mut(&reply.block) {
+                    e.update(reply, &self.rx)
                 }
             }
             Message::Loaded { state } => match self.modal {
