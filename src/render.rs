@@ -48,10 +48,9 @@ use crate::{
     BlockIndex, Message, MessageGenSender, RenderViewReply,
     platform::Notify,
     view::{
-        BitfieldImageData, BitfieldViewImage, DebugImageData, DebugViewImage,
-        HeightmapImageData, HeightmapViewImage, SdfImageData, SdfViewImage,
-        ShadedImageData, ShadedViewImage, ViewCanvas, ViewImage, ViewMode2,
-        ViewMode3,
+        BitfieldImageData, BitfieldViewImage, HeightmapImageData,
+        HeightmapViewImage, SdfImageData, SdfViewImage, ShadedImageData,
+        ShadedViewImage, ViewCanvas, ViewImage, ViewMode2, ViewMode3,
     },
     world::{Color, Scene},
 };
@@ -135,7 +134,6 @@ impl RenderTask {
         cancel: fidget::render::CancelToken,
     ) -> Option<ViewImage> {
         let scale = 1 << level;
-        let threads = Some(&fidget::render::ThreadPool::Global);
         let data = match settings {
             RenderSettings::Render2 {
                 scene,
@@ -193,26 +191,6 @@ impl RenderTask {
                                 .collect(),
                         };
                         ViewImage::Sdf(image)
-                    }
-                    ViewMode2::Debug => {
-                        let image = DebugViewImage {
-                            view: *view,
-                            size: *size,
-                            level,
-                            data: images
-                                .into_iter()
-                                .map(|(image, _color)| {
-                                    let image = effects::to_debug_bitmap(
-                                        image, threads,
-                                    );
-                                    DebugImageData {
-                                        pixels: image.take().0.into(),
-                                        // No color for debug images
-                                    }
-                                })
-                                .collect(),
-                        };
-                        ViewImage::Debug(image)
                     }
                 }
             }

@@ -104,7 +104,7 @@ impl From<v1::ViewState> for ViewState {
 impl From<v1::ViewMode2> for ViewMode2 {
     fn from(v: v1::ViewMode2) -> Self {
         match v {
-            v1::ViewMode2::Debug => ViewMode2::Debug,
+            v1::ViewMode2::Debug => ViewMode2::Sdf,
             v1::ViewMode2::Sdf => ViewMode2::Sdf,
             v1::ViewMode2::Bitfield => ViewMode2::Bitfield,
         }

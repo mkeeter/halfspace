@@ -275,22 +275,6 @@ impl BitfieldViewImage {
     }
 }
 
-/// Set of debug images, along with their position and metadata
-#[derive(Clone)]
-pub struct DebugViewImage {
-    pub data: Vec<DebugImageData>,
-    pub view: fidget::gui::View2,
-    pub size: fidget::render::ImageSize,
-    pub level: usize,
-}
-
-/// Single debug image to be drawn to the screen
-#[derive(Clone)]
-pub struct DebugImageData {
-    pub pixels: Arc<[[u8; 4]]>,
-    // No diffuse color here, this is just a debug view
-}
-
 /// Set of heightmap images, along with their position and metadata
 #[derive(Clone)]
 pub struct HeightmapViewImage {
@@ -330,7 +314,6 @@ pub struct ShadedImageData {
 pub enum ViewImage {
     Sdf(SdfViewImage),
     Bitfield(BitfieldViewImage),
-    Debug(DebugViewImage),
     Heightmap(HeightmapViewImage),
     Shaded(ShadedViewImage),
 }
@@ -340,7 +323,6 @@ impl ViewImage {
         match self {
             ViewImage::Sdf(i) => i.level,
             ViewImage::Bitfield(i) => i.level,
-            ViewImage::Debug(i) => i.level,
             ViewImage::Heightmap(i) => i.level,
             ViewImage::Shaded(i) => i.level,
         }
@@ -462,10 +444,6 @@ pub fn edit_button(
             ..
         } => ViewCanvasType::Bitfield,
         ViewCanvas::Canvas2 {
-            mode: ViewMode2::Debug,
-            ..
-        } => ViewCanvasType::Debug,
-        ViewCanvas::Canvas2 {
             mode: ViewMode2::Sdf,
             ..
         } => ViewCanvasType::Sdf,
@@ -496,11 +474,6 @@ pub fn edit_button(
                 "2D bitfield",
             );
             ui.selectable_value(&mut tag, ViewCanvasType::Sdf, "2D SDF");
-            ui.selectable_value(
-                &mut tag,
-                ViewCanvasType::Debug,
-                "2D debug view",
-            );
             ui.separator();
             ui.selectable_value(
                 &mut tag,
@@ -521,17 +494,16 @@ pub fn edit_button(
     if tag != initial_tag {
         out |= ViewResponse::REDRAW;
         let mut next_canvas = match tag {
-            ViewCanvasType::Sdf
-            | ViewCanvasType::Bitfield
-            | ViewCanvasType::Debug => ViewCanvas::Canvas2 {
-                canvas: fidget::gui::Canvas2::new(size),
-                mode: match tag {
-                    ViewCanvasType::Sdf => ViewMode2::Sdf,
-                    ViewCanvasType::Bitfield => ViewMode2::Bitfield,
-                    ViewCanvasType::Debug => ViewMode2::Debug,
-                    _ => unreachable!(),
-                },
-            },
+            ViewCanvasType::Sdf | ViewCanvasType::Bitfield => {
+                ViewCanvas::Canvas2 {
+                    canvas: fidget::gui::Canvas2::new(size),
+                    mode: match tag {
+                        ViewCanvasType::Sdf => ViewMode2::Sdf,
+                        ViewCanvasType::Bitfield => ViewMode2::Bitfield,
+                        _ => unreachable!(),
+                    },
+                }
+            }
             ViewCanvasType::Heightmap | ViewCanvasType::Shaded => {
                 let size = fidget::render::VoxelSize::new(
                     size.width(),

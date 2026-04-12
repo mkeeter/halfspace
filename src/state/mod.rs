@@ -31,8 +31,9 @@ use std::collections::HashMap;
 mod undo;
 mod v1;
 mod v2;
+mod v3;
 pub use undo::Undo;
-pub use v2::*;
+pub use v3::*;
 
 /// Unique index for blocks
 ///
@@ -170,10 +171,15 @@ impl AppState {
         let data = match raw.major {
             v1::MAJOR_VERSION => {
                 let data = Self::deserialize_from_reader::<v1::Reader>(raw)?;
-                v2::Reader::migrate(data)
+                let data = v2::Reader::migrate(data);
+                v3::Reader::migrate(data)
             }
             v2::MAJOR_VERSION => {
-                Self::deserialize_from_reader::<v2::Reader>(raw)?
+                let data = Self::deserialize_from_reader::<v2::Reader>(raw)?;
+                v3::Reader::migrate(data)
+            }
+            v3::MAJOR_VERSION => {
+                Self::deserialize_from_reader::<v3::Reader>(raw)?
             }
             i => {
                 return Err(ReadError::BadMajorVersion {
