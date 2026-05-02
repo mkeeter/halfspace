@@ -1,7 +1,7 @@
 use fidget::rhai::FromDynamic;
 use std::ops::Deref;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct Drawable {
     /// Tree to draw, as a node in the parent [`Scene`]'s context
     pub tree: fidget::context::Tree,
@@ -117,7 +117,7 @@ impl rhai::CustomType for Color {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct Scene {
     pub shapes: Vec<Drawable>,
 }

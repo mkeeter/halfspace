@@ -72,45 +72,53 @@ pub(crate) type RenderFunction = fidget::vm::VmFunction;
 pub(crate) type RenderShape = fidget::shape::Shape<RenderFunction>;
 
 /// State representing an in-progress render
-pub struct RenderTask {
-    settings: RenderSettings,
+///
+/// This lives in the main thread; the work itself lives in a closure in the
+/// `rayon` or WGPU thread pool.
+pub struct RenderTaskHandle {
+    kind: RenderTaskKind,
     level: usize,
     cancel: fidget::render::CancelToken,
 }
 
-impl Drop for RenderTask {
+impl Drop for RenderTaskHandle {
     fn drop(&mut self) {
         self.cancel.cancel()
     }
 }
 
-impl RenderTask {
-    /// Checks whether the new settings are different from our settings
-    ///
-    /// This only returns `true` if `self.level != max_level`; we want to avoid
-    /// interrupting max-level renders to preserve responsiveness.
-    pub fn should_cancel(
-        &self,
-        other: &RenderSettings,
-        max_level: usize,
-    ) -> bool {
-        &self.settings != other && self.level != max_level
+pub enum RenderTaskKind {
+    Cpu { settings: RenderSettings },
+}
+
+/// CPU worker pool, which dispatches to the (global) Rayon thread pool
+pub(crate) struct CpuWorkerPool<N: Notify> {
+    // TODO actually make an explicit Rayon pool here?
+    _marker: std::marker::PhantomData<N>,
+}
+
+impl<N: Notify> CpuWorkerPool<N> {
+    pub(crate) fn new() -> Self {
+        Self {
+            _marker: std::marker::PhantomData,
+        }
     }
 
-    /// Begins a new image rendering task in the global thread pool
-    pub(crate) fn spawn<N: Notify>(
+    /// Begins a new image rendering task in the global rayon thread pool
+    pub(crate) fn spawn(
+        &self,
         block: BlockIndex,
         generation: u64,
         settings: RenderSettings,
         level: usize,
         tx: MessageGenSender<N>,
-    ) -> Self {
+    ) -> RenderTaskHandle {
         let cancel = fidget::render::CancelToken::new();
         let cancel_ = cancel.clone();
         let settings_ = settings.clone();
         let start_time = Instant::now();
         rayon::spawn(move || {
-            if let Some(data) = Self::run(&settings_, level, cancel_) {
+            if let Some(data) = CpuRenderTask::run(&settings_, level, cancel_) {
                 tx.send(Message::RenderView(RenderViewReply {
                     block,
                     generation,
@@ -120,13 +128,35 @@ impl RenderTask {
                 }))
             }
         });
-        Self {
-            settings,
+        RenderTaskHandle {
+            kind: RenderTaskKind::Cpu { settings },
             cancel,
             level,
         }
     }
+}
 
+impl RenderTaskHandle {
+    /// Checks whether the new settings are different from our settings
+    ///
+    /// This only returns `true` if `self.level != max_level`; we want to avoid
+    /// interrupting max-level renders to preserve responsiveness.
+    pub fn should_cancel(
+        &self,
+        other: &RenderSettings,
+        max_level: usize,
+    ) -> bool {
+        let settings_changed = match &self.kind {
+            RenderTaskKind::Cpu { settings, .. } => settings != other,
+        };
+        settings_changed && self.level != max_level
+    }
+}
+
+/// Dummy object representing a CPU render task
+struct CpuRenderTask;
+
+impl CpuRenderTask {
     /// Function which actually renders images (off-thread)
     pub fn run(
         settings: &RenderSettings,
@@ -135,12 +165,12 @@ impl RenderTask {
     ) -> Option<ViewImage> {
         let scale = 1 << level;
         let data = match settings {
-            RenderSettings::Render2 {
+            RenderSettings::Image(ImageRenderSettings {
                 scene,
                 mode,
                 view,
                 size,
-            } => {
+            }) => {
                 let image_size = fidget::render::ImageSize::new(
                     (size.width() / scale).max(1),
                     (size.height() / scale).max(1),
@@ -194,13 +224,13 @@ impl RenderTask {
                     }
                 }
             }
-            RenderSettings::Render3 {
+            RenderSettings::Voxel(VoxelRenderSettings {
                 scene,
                 mode,
                 view,
                 size,
                 perspective,
-            } => {
+            }) => {
                 // If this is our final rendering level, then do oversampling in
                 // the Z direction for better rendering of edges.  XXX if you
                 // change this, then you also need to edit `shaded.rs` to adjust
@@ -281,40 +311,47 @@ impl RenderTask {
 }
 
 /// Settings for rendering an image
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub enum RenderSettings {
-    // TODO flatten this?
-    Render2 {
-        scene: Scene,
-        mode: ViewMode2,
-        view: fidget::gui::View2,
-        size: fidget::render::ImageSize,
-    },
-    Render3 {
-        scene: Scene,
-        mode: ViewMode3,
-        perspective: bool,
-        view: fidget::gui::View3,
-        size: fidget::render::VoxelSize,
-    },
+    Image(ImageRenderSettings),
+    Voxel(VoxelRenderSettings),
+}
+
+#[derive(Clone, PartialEq)]
+pub struct ImageRenderSettings {
+    scene: Scene,
+    mode: ViewMode2,
+    view: fidget::gui::View2,
+    size: fidget::render::ImageSize,
+}
+
+#[derive(Clone, PartialEq)]
+pub struct VoxelRenderSettings {
+    scene: Scene,
+    mode: ViewMode3,
+    perspective: bool,
+    view: fidget::gui::View3,
+    size: fidget::render::VoxelSize,
 }
 
 impl RenderSettings {
     pub fn from_canvas(canvas: &ViewCanvas, scene: Scene) -> Self {
         match canvas {
-            ViewCanvas::Canvas2 { canvas, mode } => RenderSettings::Render2 {
-                scene,
-                view: canvas.view(),
-                size: canvas.image_size(),
-                mode: *mode,
-            },
+            ViewCanvas::Canvas2 { canvas, mode } => {
+                RenderSettings::Image(ImageRenderSettings {
+                    scene,
+                    view: canvas.view(),
+                    size: canvas.image_size(),
+                    mode: *mode,
+                })
+            }
             ViewCanvas::Canvas3 {
                 canvas,
                 mode,
                 perspective,
             } => {
                 let size = canvas.image_size();
-                RenderSettings::Render3 {
+                RenderSettings::Voxel(VoxelRenderSettings {
                     scene,
                     view: canvas.view(),
                     perspective: *perspective,
@@ -325,67 +362,8 @@ impl RenderSettings {
                         size.width().max(size.height()),
                     ),
                     mode: *mode,
-                }
+                })
             }
-        }
-    }
-}
-
-impl std::cmp::PartialEq for RenderSettings {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (
-                Self::Render2 {
-                    scene: scene_a,
-                    mode: mode_a,
-                    view: view_a,
-                    size: size_a,
-                },
-                Self::Render2 {
-                    scene: scene_b,
-                    mode: mode_b,
-                    view: view_b,
-                    size: size_b,
-                },
-            ) => {
-                mode_a == mode_b
-                    && view_a == view_b
-                    && size_a == size_b
-                    && scene_a.shapes.len() == scene_b.shapes.len()
-                    && scene_a
-                        .shapes
-                        .iter()
-                        .zip(&scene_b.shapes)
-                        .all(|(a, b)| a.color == b.color && a.tree == b.tree)
-            }
-            (
-                Self::Render3 {
-                    scene: scene_a,
-                    mode: mode_a,
-                    view: view_a,
-                    size: size_a,
-                    perspective: perspective_a,
-                },
-                Self::Render3 {
-                    scene: scene_b,
-                    mode: mode_b,
-                    view: view_b,
-                    size: size_b,
-                    perspective: perspective_b,
-                },
-            ) => {
-                mode_a == mode_b
-                    && view_a == view_b
-                    && size_a == size_b
-                    && perspective_a == perspective_b
-                    && scene_a.shapes.len() == scene_b.shapes.len()
-                    && scene_a
-                        .shapes
-                        .iter()
-                        .zip(&scene_b.shapes)
-                        .all(|(a, b)| a.color == b.color && a.tree == b.tree)
-            }
-            _ => false,
         }
     }
 }

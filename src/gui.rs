@@ -5,6 +5,7 @@ pub use crate::state::{Tab, TabMode};
 use crate::{
     BlockResponse, MessageReceiver, ViewResponse, export,
     platform::Notify,
+    render,
     view::{self, ViewCanvas, ViewData, ViewImage, ViewMode2, ViewMode3},
     world::{
         Block, BlockError, BlockIndex, IoValue, ScriptBlock, ValueBlock, World,
@@ -18,6 +19,7 @@ pub struct WorldView<'a, N: Notify> {
     pub views: &'a mut HashMap<BlockIndex, ViewData>,
     pub out: &'a mut Vec<(BlockIndex, ViewResponse)>,
     pub rx: &'a MessageReceiver<N>,
+    pub cpu_pool: &'a render::CpuWorkerPool<N>,
 }
 
 impl Tab {
@@ -170,9 +172,12 @@ impl<'a, N: Notify> WorldView<'a, N> {
         // previous image, drawing it in an *invalid* state (with a red border).
         let current_canvas = entry.canvas;
         let (image, valid) = if let Some(block_view) = block_view {
-            let Some(image) =
-                entry.image(index, block_view.scene.clone(), self.rx)
-            else {
+            let Some(image) = entry.image(
+                index,
+                block_view.scene.clone(),
+                self.rx,
+                self.cpu_pool,
+            ) else {
                 return out
                     | view::fallback_ui(
                         ui,

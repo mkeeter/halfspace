@@ -2,7 +2,7 @@ use crate::{
     BlockIndex, MessageReceiver, RenderViewReply, ViewResponse,
     gui::{CAMERA, WARN},
     platform::Notify,
-    render::{RenderSettings, RenderTask},
+    render::{CpuWorkerPool, RenderSettings, RenderTaskHandle},
     state,
     state::ViewState,
     world::Scene,
@@ -17,8 +17,8 @@ use web_time::Duration;
 /// Each block may have 0 or 1 views.  Views are persistent even when closed;
 /// they're deleted when their block is deleted.
 pub struct ViewData {
-    /// Render task, running in a thread pool
-    pub task: Option<RenderTask>,
+    /// Handle to a render task, running in a thread pool
+    pub task: Option<RenderTaskHandle>,
 
     /// Interaction canvas
     pub canvas: ViewCanvas,
@@ -353,6 +353,7 @@ impl ViewData {
         &mut self,
         r: RenderViewReply,
         rx: &MessageReceiver<N>,
+        cpu_pool: &CpuWorkerPool<N>,
     ) {
         const TARGET_RENDER_TIME: Duration = Duration::from_millis(33);
         const MAX_LEVEL: usize = 10;
@@ -369,17 +370,35 @@ impl ViewData {
         if r.generation == self.generation {
             let _ = self.task.take();
             if let Some(next) = r.data.level().checked_sub(1) {
-                self.generation += 1;
-                self.task = Some(RenderTask::spawn(
+                self.spawn_render_task(
                     r.block,
-                    self.generation,
                     r.settings.clone(),
                     next,
-                    rx.sender_with_gen(),
-                ));
+                    rx,
+                    cpu_pool,
+                );
             }
             self.image = Some((r.settings, r.data));
         }
+    }
+
+    /// Bumps `self.generation` by 1 and spawns a new render task
+    fn spawn_render_task<N: Notify>(
+        &mut self,
+        block: BlockIndex,
+        settings: RenderSettings,
+        level: usize,
+        rx: &MessageReceiver<N>,
+        cpu_pool: &CpuWorkerPool<N>,
+    ) {
+        self.generation += 1;
+        self.task = Some(cpu_pool.spawn(
+            block,
+            self.generation,
+            settings,
+            level,
+            rx.sender_with_gen(),
+        ));
     }
 
     /// Gets the image, kicking off new render jobs if needed
@@ -391,6 +410,7 @@ impl ViewData {
         block: BlockIndex,
         scene: Scene,
         rx: &MessageReceiver<N>,
+        cpu_pool: &CpuWorkerPool<N>,
     ) -> Option<&ViewImage> {
         let settings = RenderSettings::from_canvas(&self.canvas, scene);
 
@@ -413,14 +433,13 @@ impl ViewData {
                 .as_ref()
                 .is_none_or(|(prev_settings, _)| &settings != prev_settings)
         {
-            self.generation += 1;
-            self.task = Some(RenderTask::spawn(
+            self.spawn_render_task(
                 block,
-                self.generation,
                 settings,
                 self.start_level,
-                rx.sender_with_gen(),
-            ));
+                rx,
+                cpu_pool,
+            );
         }
         self.image.as_ref().map(|(_, image)| image)
     }
