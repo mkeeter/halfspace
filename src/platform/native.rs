@@ -1,8 +1,10 @@
 use crate::{
     App, AppState, Message, MessageReceiver, MessageSender, Modal,
     platform::{self, Platform},
+    render::{GpuRenderTask, GpuWorkerPool},
     state, wgpu_setup,
 };
+use egui_wgpu::wgpu;
 use log::{info, warn};
 use std::io::{Read, Write};
 
@@ -174,6 +176,63 @@ impl Platform for NativePlatform {
         };
         self.ctx
             .send_viewport_cmd(egui::ViewportCommand::Title(title.to_owned()));
+    }
+
+    fn spawn_gpu_workers(&mut self) -> GpuWorkerPool<Self::Notify> {
+        let (tx, rx) = flume::unbounded();
+        for _ in 0..8 {
+            let rx = rx.clone();
+            std::thread::spawn(|| {
+                let instance = wgpu::Instance::default();
+                let (device, queue) = pollster::block_on(async move {
+                    let adapter = instance
+                        .request_adapter(&wgpu::RequestAdapterOptions {
+                            power_preference:
+                                wgpu::PowerPreference::HighPerformance,
+                            ..wgpu::RequestAdapterOptions::default()
+                        })
+                        .await
+                        .map_err(anyhow::Error::from)?;
+                    let out = adapter
+                        .request_device(&wgpu::DeviceDescriptor::default())
+                        .await?;
+                    Ok::<_, anyhow::Error>(out)
+                })
+                .unwrap();
+                gpu_worker(device, queue, rx)
+            });
+        }
+        GpuWorkerPool::new(tx)
+    }
+}
+
+/// Worker thread which receives GPU tasks
+fn gpu_worker(
+    device: egui_wgpu::wgpu::Device,
+    queue: egui_wgpu::wgpu::Queue,
+    rx: flume::Receiver<GpuRenderTask<Notify>>,
+) {
+    let mut ctx = fidget::wgpu::render3d::Context::new(device, queue);
+    while let Ok(task) = rx.recv() {
+        let (cfg, image_size) = task.cfg();
+        let images: Vec<_> = task
+            .scene()
+            .shapes
+            .iter()
+            .map(|shape| {
+                // TODO reuse these buffers
+                let start = std::time::Instant::now();
+                let buffers = ctx.buffers(image_size);
+                let rs = fidget::vm::VmShape::from(shape.tree.clone());
+
+                // TODO check for bytecode feasibility earlier?
+                let gpu_shape = ctx.shape(&rs).unwrap();
+                println!("built buffers in {:?}", start.elapsed());
+                let data = ctx.run(&gpu_shape, &buffers, cfg);
+                (data, shape.color.clone())
+            })
+            .collect::<_>();
+        task.finalize(images)
     }
 }
 

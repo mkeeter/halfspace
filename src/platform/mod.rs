@@ -1,4 +1,4 @@
-use crate::{AppState, MessageReceiver, Modal};
+use crate::{AppState, MessageReceiver, Modal, render::GpuWorkerPool};
 
 #[cfg_attr(target_arch = "wasm32", path = "web.rs")]
 #[cfg_attr(not(target_arch = "wasm32"), path = "native.rs")]
@@ -27,6 +27,9 @@ where
     /// # Panics
     /// If this is called more than once
     fn take_rx_channel(&mut self) -> MessageReceiver<Self::Notify>;
+
+    /// Initialize the GPU worker pool
+    fn spawn_gpu_workers(&mut self) -> GpuWorkerPool<Self::Notify>;
 
     /// List all file names in local storage
     fn list_local_storage(&self) -> Vec<String>;

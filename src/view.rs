@@ -2,7 +2,7 @@ use crate::{
     BlockIndex, MessageReceiver, RenderViewReply, ViewResponse,
     gui::{CAMERA, WARN},
     platform::Notify,
-    render::{CpuWorkerPool, RenderSettings, RenderTaskHandle},
+    render::{CpuWorkerPool, GpuWorkerPool, RenderSettings, RenderTaskHandle},
     state,
     state::ViewState,
     world::Scene,
@@ -354,6 +354,7 @@ impl ViewData {
         r: RenderViewReply,
         rx: &MessageReceiver<N>,
         cpu_pool: &CpuWorkerPool<N>,
+        gpu_pool: &GpuWorkerPool<N>,
     ) {
         const TARGET_RENDER_TIME: Duration = Duration::from_millis(33);
         const MAX_LEVEL: usize = 10;
@@ -376,6 +377,7 @@ impl ViewData {
                     next,
                     rx,
                     cpu_pool,
+                    gpu_pool,
                 );
             }
             self.image = Some((r.settings, r.data));
@@ -390,15 +392,19 @@ impl ViewData {
         level: usize,
         rx: &MessageReceiver<N>,
         cpu_pool: &CpuWorkerPool<N>,
+        gpu_pool: &GpuWorkerPool<N>,
     ) {
         self.generation += 1;
-        self.task = Some(cpu_pool.spawn(
-            block,
-            self.generation,
-            settings,
-            level,
-            rx.sender_with_gen(),
-        ));
+        let reply = rx.sender_with_gen();
+        self.task = Some(match settings {
+            RenderSettings::Image(..) => {
+                // TODO make this take the inner image settings
+                cpu_pool.spawn(block, self.generation, settings, level, reply)
+            }
+            RenderSettings::Voxel(v) => {
+                gpu_pool.spawn(block, self.generation, v, level, reply)
+            }
+        });
     }
 
     /// Gets the image, kicking off new render jobs if needed
@@ -411,6 +417,7 @@ impl ViewData {
         scene: Scene,
         rx: &MessageReceiver<N>,
         cpu_pool: &CpuWorkerPool<N>,
+        gpu_pool: &GpuWorkerPool<N>,
     ) -> Option<&ViewImage> {
         let settings = RenderSettings::from_canvas(&self.canvas, scene);
 
@@ -439,6 +446,7 @@ impl ViewData {
                 self.start_level,
                 rx,
                 cpu_pool,
+                gpu_pool,
             );
         }
         self.image.as_ref().map(|(_, image)| image)

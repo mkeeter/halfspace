@@ -89,6 +89,7 @@ impl Drop for RenderTaskHandle {
 
 pub enum RenderTaskKind {
     Cpu { settings: RenderSettings },
+    Gpu { settings: VoxelRenderSettings },
 }
 
 /// CPU worker pool, which dispatches to the (global) Rayon thread pool
@@ -148,12 +149,19 @@ impl RenderTaskHandle {
     ) -> bool {
         let settings_changed = match &self.kind {
             RenderTaskKind::Cpu { settings, .. } => settings != other,
+            RenderTaskKind::Gpu { settings, .. } => match other {
+                RenderSettings::Voxel(v) => v != settings,
+                RenderSettings::Image(..) => true,
+            },
         };
         settings_changed && self.level != max_level
     }
 }
 
 /// Dummy object representing a CPU render task
+///
+/// The actual task is spawned into the Rayon thread pool, so there's nothing to
+/// be stored here.
 struct CpuRenderTask;
 
 impl CpuRenderTask {
@@ -307,6 +315,163 @@ impl CpuRenderTask {
             }
         };
         Some(data)
+    }
+}
+
+/// Data required to render a scene on the GPU
+///
+/// This is constructed on the main thread then sent to the GPU worker pool to
+/// be rendered off the main thread.
+pub struct GpuRenderTask<N: Notify> {
+    start_time: Instant,
+    settings: VoxelRenderSettings,
+    level: usize,
+    block: BlockIndex,
+    generation: u64,
+    reply: MessageGenSender<N>,
+}
+
+impl<N: Notify> GpuRenderTask<N> {
+    /// Accessor function for the [`Scene`] to be rendered
+    pub fn scene(&self) -> &Scene {
+        &self.settings.scene
+    }
+
+    /// Returns the render configuration and size
+    pub fn cfg(
+        &self,
+    ) -> (
+        fidget::wgpu::render3d::RenderConfig,
+        fidget::render::VoxelSize,
+    ) {
+        let scale = 1 << self.level;
+
+        // If this is our final rendering level, then do oversampling in
+        // the Z direction for better rendering of edges.  XXX if you
+        // change this, then you also need to edit `shaded.rs` to adjust
+        // the `max_depth` passed into the shader.
+        let bonus_z = if self.level == 0 { 2 } else { 1 };
+        let image_size = fidget::render::VoxelSize::new(
+            (self.settings.size.width() / scale).max(1),
+            (self.settings.size.height() / scale).max(1),
+            (self.settings.size.depth() / scale).max(1) * bonus_z,
+        );
+        let z_scale = 2.0 / bonus_z as f32;
+        let scale = nalgebra::Scale3::new(1.0, 1.0, z_scale);
+        let mut world_to_model =
+            self.settings.view.world_to_model() * scale.to_homogeneous();
+        if self.settings.perspective {
+            *world_to_model.get_mut((3, 2)).unwrap() = 0.3 / bonus_z as f32;
+        }
+        (
+            fidget::wgpu::render3d::RenderConfig { world_to_model },
+            image_size,
+        )
+    }
+
+    /// Post-processes images and sends them to the main thread
+    pub fn finalize(
+        self,
+        mut images: Vec<(fidget::raster::GeometryBuffer, Option<Color>)>,
+    ) {
+        // Compensate for z-flattening
+        let bonus_z = if self.level == 0 { 2 } else { 1 };
+        let z_scale = 2.0 / bonus_z as f32;
+        images.par_iter_mut().for_each(|(image, _)| {
+            *image = image.map(|p| GeometryPixel {
+                depth: p.depth,
+                normal: [p.normal[0], p.normal[1], p.normal[2] / z_scale],
+            });
+        });
+
+        println!(
+            "rendered {:?} {} in {:?}",
+            self.settings.size,
+            self.level,
+            self.start_time.elapsed()
+        );
+        let data = match self.settings.mode {
+            ViewMode3::Heightmap => {
+                let image = HeightmapViewImage {
+                    view: self.settings.view,
+                    size: self.settings.size,
+                    level: self.level,
+                    data: images
+                        .into_par_iter()
+                        .map(|(image, color)| {
+                            image_to_heightmap(image, self.settings.view, color)
+                        })
+                        .collect(),
+                };
+                ViewImage::Heightmap(image)
+            }
+            ViewMode3::Shaded => {
+                let ssao = merged_ssao(&images);
+                let image = ShadedViewImage {
+                    view: self.settings.view,
+                    size: self.settings.size,
+                    level: self.level,
+                    ssao,
+                    data: images
+                        .into_par_iter()
+                        .map(|(image, color)| {
+                            image_to_shaded(image, self.settings.view, color)
+                        })
+                        .collect(),
+                };
+                ViewImage::Shaded(image)
+            }
+        };
+        self.reply.send(Message::RenderView(RenderViewReply {
+            block: self.block,
+            generation: self.generation,
+            start_time: self.start_time,
+            settings: RenderSettings::Voxel(self.settings),
+            data,
+        }))
+    }
+}
+
+/// The GPU worker pool is accessed with an MPMC channel
+pub(crate) struct GpuWorkerPool<N: Notify> {
+    tx: flume::Sender<GpuRenderTask<N>>,
+}
+
+impl<N: Notify> GpuWorkerPool<N> {
+    /// Builds a new worker pool which sends on the given channel
+    pub fn new(tx: flume::Sender<GpuRenderTask<N>>) -> Self {
+        Self { tx }
+    }
+
+    /// Begins a new image rendering task in the GPU global thread pool
+    pub(crate) fn spawn(
+        &self,
+        block: BlockIndex,
+        generation: u64,
+        settings: VoxelRenderSettings,
+        level: usize,
+        reply: MessageGenSender<N>,
+    ) -> RenderTaskHandle {
+        let settings_ = settings.clone();
+        let start_time = Instant::now();
+        let cancel = fidget::render::CancelToken::new();
+        self.tx
+            .send(GpuRenderTask {
+                settings,
+                level,
+                block,
+                generation,
+                reply,
+                start_time,
+            })
+            .unwrap();
+        RenderTaskHandle {
+            kind: RenderTaskKind::Gpu {
+                settings: settings_,
+            },
+            level,
+            cancel,
+        }
     }
 }
 

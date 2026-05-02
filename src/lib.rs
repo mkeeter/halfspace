@@ -354,6 +354,9 @@ pub(crate) struct App<P: Platform> {
     /// Pool of CPU worker threads
     cpu_pool: render::CpuWorkerPool<P::Notify>,
 
+    /// Pool of GPU worker threads
+    gpu_pool: render::GpuWorkerPool<P::Notify>,
+
     /// Show debug options and menu items in native build
     debug: bool,
 
@@ -543,6 +546,7 @@ impl<P: Platform> App<P> {
         let data = World::new();
         let undo = state::Undo::new(&data);
         let cpu_pool = render::CpuWorkerPool::new();
+        let gpu_pool = platform.spawn_gpu_workers();
         Self {
             data,
             library: world::ShapeLibrary::build(),
@@ -557,6 +561,7 @@ impl<P: Platform> App<P> {
             platform,
             rx,
             cpu_pool,
+            gpu_pool,
             debug,
             show_inspection_ui: false,
             modal: None,
@@ -1204,6 +1209,7 @@ impl<P: Platform> App<P> {
             rx: &self.rx,
             out: &mut io_out,
             cpu_pool: &self.cpu_pool,
+            gpu_pool: &self.gpu_pool,
         };
         egui_dock::DockArea::new(&mut self.tree)
             .style(egui_dock::Style::from_egui(ui.global_style().as_ref()))
@@ -1740,7 +1746,7 @@ impl<P: Platform> App<P> {
             }
             Message::RenderView(reply) => {
                 if let Some(e) = self.views.get_mut(&reply.block) {
-                    e.update(reply, &self.rx, &self.cpu_pool)
+                    e.update(reply, &self.rx, &self.cpu_pool, &self.gpu_pool)
                 }
             }
             Message::Loaded { state } => match self.modal {
