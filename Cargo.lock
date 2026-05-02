@@ -1490,7 +1490,7 @@ dependencies = [
 [[package]]
 name = "fidget"
 version = "0.4.4"
-source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#8c34bd1249b685f62a4f8574e8b30479325c8905"
+source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#f455885b369dbd0a081a2735aec81d53c098c5ca"
 dependencies = [
  "document-features",
  "fidget-bytecode",
@@ -1509,7 +1509,7 @@ dependencies = [
 [[package]]
 name = "fidget-bytecode"
 version = "0.4.4"
-source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#8c34bd1249b685f62a4f8574e8b30479325c8905"
+source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#f455885b369dbd0a081a2735aec81d53c098c5ca"
 dependencies = [
  "fidget-core",
  "serde",
@@ -1522,7 +1522,7 @@ dependencies = [
 [[package]]
 name = "fidget-core"
 version = "0.4.4"
-source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#8c34bd1249b685f62a4f8574e8b30479325c8905"
+source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#f455885b369dbd0a081a2735aec81d53c098c5ca"
 dependencies = [
  "facet",
  "getrandom 0.2.17",
@@ -1541,7 +1541,7 @@ dependencies = [
 [[package]]
 name = "fidget-gui"
 version = "0.4.4"
-source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#8c34bd1249b685f62a4f8574e8b30479325c8905"
+source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#f455885b369dbd0a081a2735aec81d53c098c5ca"
 dependencies = [
  "fidget-core",
  "nalgebra",
@@ -1552,7 +1552,7 @@ dependencies = [
 [[package]]
 name = "fidget-jit"
 version = "0.4.4"
-source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#8c34bd1249b685f62a4f8574e8b30479325c8905"
+source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#f455885b369dbd0a081a2735aec81d53c098c5ca"
 dependencies = [
  "arrayvec",
  "dynasmrt",
@@ -1566,7 +1566,7 @@ dependencies = [
 [[package]]
 name = "fidget-mesh"
 version = "0.4.4"
-source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#8c34bd1249b685f62a4f8574e8b30479325c8905"
+source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#f455885b369dbd0a081a2735aec81d53c098c5ca"
 dependencies = [
  "arrayvec",
  "fidget-core",
@@ -1580,7 +1580,7 @@ dependencies = [
 [[package]]
 name = "fidget-raster"
 version = "0.4.4"
-source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#8c34bd1249b685f62a4f8574e8b30479325c8905"
+source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#f455885b369dbd0a081a2735aec81d53c098c5ca"
 dependencies = [
  "fidget-core",
  "nalgebra",
@@ -1595,7 +1595,7 @@ dependencies = [
 [[package]]
 name = "fidget-rhai"
 version = "0.4.4"
-source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#8c34bd1249b685f62a4f8574e8b30479325c8905"
+source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#f455885b369dbd0a081a2735aec81d53c098c5ca"
 dependencies = [
  "enum-map",
  "facet",
@@ -1610,7 +1610,7 @@ dependencies = [
 [[package]]
 name = "fidget-shapes"
 version = "0.4.4"
-source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#8c34bd1249b685f62a4f8574e8b30479325c8905"
+source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#f455885b369dbd0a081a2735aec81d53c098c5ca"
 dependencies = [
  "enum-map",
  "facet",
@@ -1624,7 +1624,7 @@ dependencies = [
 [[package]]
 name = "fidget-solver"
 version = "0.4.4"
-source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#8c34bd1249b685f62a4f8574e8b30479325c8905"
+source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#f455885b369dbd0a081a2735aec81d53c098c5ca"
 dependencies = [
  "fidget-core",
  "nalgebra",
@@ -1636,7 +1636,7 @@ dependencies = [
 [[package]]
 name = "fidget-wgpu"
 version = "0.4.4"
-source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#8c34bd1249b685f62a4f8574e8b30479325c8905"
+source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#f455885b369dbd0a081a2735aec81d53c098c5ca"
 dependencies = [
  "fidget-bytecode",
  "fidget-core",
@@ -5687,7 +5687,7 @@ dependencies = [
 [[package]]
 name = "workspace-hack"
 version = "0.1.0"
-source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#8c34bd1249b685f62a4f8574e8b30479325c8905"
+source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#f455885b369dbd0a081a2735aec81d53c098c5ca"
 dependencies = [
  "ahash",
  "anstream",
