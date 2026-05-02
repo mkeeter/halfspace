@@ -52,7 +52,7 @@ use crate::{
         HeightmapViewImage, SdfImageData, SdfViewImage, ShadedImageData,
         ShadedViewImage, ViewCanvas, ViewImage, ViewMode2, ViewMode3,
     },
-    world::{Color, Scene},
+    world::{Color, Drawable, Scene},
 };
 
 use fidget::{
@@ -61,6 +61,7 @@ use fidget::{
 };
 
 use rayon::prelude::*;
+use std::collections::{BTreeMap, HashMap};
 use web_time::Instant;
 
 #[cfg(all(feature = "jit", not(target_arch = "wasm32")))]
@@ -429,6 +430,112 @@ impl<N: Notify> GpuRenderTask<N> {
             settings: RenderSettings::Voxel(self.settings),
             data,
         }))
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct GpuCache {
+    shape_pool: Cache<
+        *const fidget::context::TreeOp,
+        fidget::wgpu::render3d::RenderShape,
+        16,
+    >,
+    buffer_pool:
+        Cache<fidget::render::VoxelSize, fidget::wgpu::render3d::Buffers, 16>,
+}
+
+/// Simple cache which contains `N` items
+struct Cache<K, V, const N: usize> {
+    /// Map from key to `(recency, value)` tuple
+    ///
+    /// `recency` is an upcounting `u64`, which will never roll over under all
+    /// reasonable circumstances.
+    data: HashMap<K, (u64, V)>,
+
+    /// Map from recency to the relevant key
+    recency: BTreeMap<u64, K>,
+}
+
+impl<K, V, const N: usize> Default for Cache<K, V, N> {
+    fn default() -> Self {
+        Self {
+            data: HashMap::default(),
+            recency: BTreeMap::default(),
+        }
+    }
+}
+
+impl<K, V, const N: usize> Cache<K, V, N>
+where
+    K: Copy + std::hash::Hash + Eq + std::fmt::Debug,
+{
+    /// Gets or inserts a value, keeping the cache to the target size
+    fn get_or_insert_with<F: FnOnce() -> V>(&mut self, k: K, f: F) -> &V {
+        // Raise a compile-time error if the size is invalid
+        const { assert!(N > 0, "cache size N cannot be 0") };
+
+        // Check invariants
+        assert_eq!(self.data.len(), self.recency.len());
+
+        // Find a larger recency value, which we'll use for this key
+        let r = self
+            .recency
+            .last_key_value()
+            .map(|(k, _v)| k)
+            .cloned()
+            .unwrap_or(0)
+            + 1;
+
+        match self.data.entry(k) {
+            std::collections::hash_map::Entry::Vacant(v) => {
+                v.insert((r, f()));
+            }
+            std::collections::hash_map::Entry::Occupied(mut o) => {
+                let k_ = self.recency.remove(&o.get().0).expect("missing key");
+                assert_eq!(k, k_);
+                o.get_mut().0 = r; // update recency
+            }
+        }
+        self.recency.insert(r, k);
+
+        // We won't go below 0 items, to avoid removing the one we just added
+        while self.data.len() > N {
+            if let Some((r, k)) = self.recency.pop_first() {
+                let (r_, _v) = self.data.remove(&k).expect("missing value");
+                assert_eq!(r_, r, "incorrect recency");
+            }
+        }
+
+        &self.data[&k].1
+    }
+}
+
+impl GpuCache {
+    /// Gets a shape and render buffers from the cache
+    ///
+    /// This is a single function because it must take `&mut self`
+    pub(crate) fn get(
+        &mut self,
+        ctx: &mut fidget::wgpu::render3d::Context,
+        d: &Drawable,
+        image_size: fidget::render::VoxelSize,
+    ) -> (
+        &fidget::wgpu::render3d::RenderShape,
+        &fidget::wgpu::render3d::Buffers,
+    ) {
+        let key = d.tree.as_ptr();
+        let shape = self.shape_pool.get_or_insert_with(key, || {
+            let rs = fidget::vm::VmShape::from(d.tree.clone());
+
+            // TODO check for bytecode feasibility earlier?
+            // TODO fallback to CPU renderer
+            let gpu_shape = ctx.shape(&rs).unwrap();
+            gpu_shape
+        });
+        let buffers = self
+            .buffer_pool
+            .get_or_insert_with(image_size, || ctx.buffers(image_size));
+        (shape, buffers)
     }
 }
 

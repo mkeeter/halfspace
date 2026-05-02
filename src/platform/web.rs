@@ -1,8 +1,10 @@
 use crate::{
     App, AppState, Message, MessageReceiver, MessageSender, Modal,
     platform::{self, Platform},
+    render::{GpuCache, GpuRenderTask, GpuWorkerPool},
     state, wgpu_setup,
 };
+use egui_wgpu::wgpu;
 use log::{error, info, warn};
 use wasm_bindgen::prelude::*;
 
@@ -50,39 +52,14 @@ pub fn run() {
     let loading = document.get_element_by_id("loading").unwrap();
     loading.remove();
 
+    // Note that logging is initialized in `init_wgpu_thread_pool`, which is
+    // called before app initialization
+    info!("starting...");
+
     let params = location
         .search()
         .and_then(|s| web_sys::UrlSearchParams::new_with_str(&s))
         .ok();
-
-    // Get an optional `verbose` parameter from the URL string
-    let verbose =
-        if let Some(v) = params.as_ref().and_then(|p| p.get("verbose")) {
-            match v.as_str() {
-                "true" => Ok(true),
-                "false" => Ok(false),
-                _ => Err(v),
-            }
-        } else {
-            Ok(false)
-        };
-
-    // Redirect `log` message to `console.log` and friends:
-    eframe::WebLogger::init(if *verbose.as_ref().unwrap_or(&false) {
-        // TODO this doesn't seem to work?
-        log::LevelFilter::Debug
-    } else {
-        log::LevelFilter::Info
-    })
-    .ok();
-
-    info!("starting...");
-    if let Err(e) = verbose {
-        warn!(
-            "invalid value for 'verbose': {e:?} (expected 'true' or 'false')"
-        );
-    }
-
     let example = params.and_then(|p| p.get("example"));
     wasm_bindgen_futures::spawn_local(async move {
         let canvas = get_canvas();
@@ -276,6 +253,11 @@ impl platform::Platform for WebPlatform {
     fn reset(&mut self) {
         // nothing to do here
     }
+
+    fn spawn_gpu_workers(&mut self) -> GpuWorkerPool<Self::Notify> {
+        let tx = TX_CHANNEL.get().unwrap().clone();
+        GpuWorkerPool::new(tx)
+    }
 }
 
 impl WebPlatform {
@@ -387,4 +369,198 @@ pub(crate) async fn dialog_worker(
         tx.send(r);
     }
     info!("dialog task is exiting");
+}
+
+// Everything below is based on wasm-bindgen-rayon
+
+#[wasm_bindgen(module = "/src/platform/gpuWorkers.js")]
+extern "C" {
+    #[wasm_bindgen(js_name = startWorkers)]
+    fn start_gpu_workers(
+        module: JsValue,
+        memory: JsValue,
+        builder: wbg_wgpu_PoolBuilder,
+    ) -> js_sys::Promise;
+}
+
+#[allow(non_camel_case_types)]
+#[wasm_bindgen]
+#[doc(hidden)]
+struct wbg_wgpu_PoolBuilder {
+    num_threads: usize,
+    rx: flume::Receiver<GpuRenderTask<Notify>>,
+    sender: flume::Sender<StartTask>,
+    receiver: flume::Receiver<StartTask>,
+}
+
+struct StartTask {
+    rx: flume::Receiver<GpuRenderTask<Notify>>,
+    ready: flume::Sender<()>,
+}
+
+/// Global handle for the tx channel, used to submit tasks to GPU workers
+static TX_CHANNEL: std::sync::OnceLock<flume::Sender<GpuRenderTask<Notify>>> =
+    std::sync::OnceLock::new();
+
+// Copied from wasm-bindgen-rayon; see that file for explanatory comments
+#[wasm_bindgen]
+impl wbg_wgpu_PoolBuilder {
+    fn new(num_threads: usize) -> Self {
+        let (sender, receiver) = flume::bounded(num_threads);
+        let (tx, rx) = flume::unbounded();
+        TX_CHANNEL.set(tx).unwrap();
+        Self {
+            num_threads,
+            sender,
+            receiver,
+            rx,
+        }
+    }
+
+    /// Helper to get the main JS file name
+    #[wasm_bindgen(js_name = mainJS)]
+    pub fn main_js(&self) -> js_sys::JsString {
+        #[wasm_bindgen]
+        extern "C" {
+            #[wasm_bindgen(
+                thread_local_v2,
+                js_namespace = ["import", "meta"],
+                js_name = url
+            )]
+            static URL: js_sys::JsString;
+        }
+
+        URL.with(Clone::clone)
+    }
+
+    #[wasm_bindgen(js_name = numThreads)]
+    pub fn num_threads(&self) -> usize {
+        self.num_threads
+    }
+
+    pub fn receiver(&self) -> *const flume::Receiver<StartTask> {
+        &self.receiver
+    }
+
+    pub async fn build(&mut self) {
+        let mut wait_for = Vec::with_capacity(self.num_threads);
+        for i in 0..self.num_threads {
+            let (tx, rx) = flume::bounded(0);
+            self.sender
+                .send(StartTask {
+                    rx: self.rx.clone(),
+                    ready: tx,
+                })
+                .unwrap();
+            wait_for.push(rx);
+        }
+        // We have to keep the builder alive until all of the children are done,
+        // because they're using its memory (accessed through `receiver`).
+        //
+        // Crimes, I tell you, crimes!
+        for r in wait_for {
+            r.recv_async().await.expect("failed to get wait_for rx");
+        }
+    }
+}
+
+// This function is called from JS in application initialization
+#[wasm_bindgen(js_name = initWgpuThreadPool)]
+#[doc(hidden)]
+pub fn init_wgpu_thread_pool(num_threads: usize) -> js_sys::Promise {
+    let window = web_sys::window().expect("No window");
+    let location = window.location();
+    // Get an optional `verbose` parameter from the URL string
+    let params = location
+        .search()
+        .and_then(|s| web_sys::UrlSearchParams::new_with_str(&s))
+        .ok();
+    let verbose =
+        if let Some(v) = params.as_ref().and_then(|p| p.get("verbose")) {
+            match v.as_str() {
+                "true" => Ok(true),
+                "false" => Ok(false),
+                _ => Err(v),
+            }
+        } else {
+            Ok(false)
+        };
+
+    // Redirect `log` message to `console.log` and friends:
+    eframe::WebLogger::init(if *verbose.as_ref().unwrap_or(&false) {
+        // TODO this doesn't seem to work?
+        log::LevelFilter::Debug
+    } else {
+        log::LevelFilter::Info
+    })
+    .ok();
+
+    if let Err(e) = verbose {
+        warn!(
+            "invalid value for 'verbose': {e:?} (expected 'true' or 'false')"
+        );
+    }
+
+    eframe::WebLogger::init(log::LevelFilter::Debug).ok();
+    start_gpu_workers(
+        wasm_bindgen::module(),
+        wasm_bindgen::memory(),
+        wbg_wgpu_PoolBuilder::new(num_threads),
+    )
+}
+
+#[wasm_bindgen]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[doc(hidden)]
+pub async fn wbg_wgpu_start_worker(receiver: *const flume::Receiver<StartTask>)
+where
+    // Statically assert that it's safe to accept `Receiver` from another thread.
+    flume::Receiver<StartTask>: Sync,
+{
+    // This is safe, because we know it came from a reference to PoolBuilder,
+    // allocated on the heap by wasm-bindgen and dropped only once all the
+    // threads are running.
+    //
+    // The only way to violate safety is if someone externally calls
+    // `exports.wbg_rayon_start_worker(garbageValue)`, but then no Rust tools
+    // would prevent us from issues anyway.
+    let receiver = unsafe { &*receiver };
+    let start = receiver
+        .recv_async()
+        .await
+        .expect("you were supposed to send me a receiver");
+
+    // Reply to the builder, telling it that we're done using `receiver`
+    start.ready.send(()).expect("failed to send ready");
+
+    let instance = wgpu::Instance::default();
+    let adapter = instance
+        .request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            ..wgpu::RequestAdapterOptions::default()
+        })
+        .await
+        .expect("failed to get adapter");
+    let (device, queue) = adapter
+        .request_device(&wgpu::DeviceDescriptor::default())
+        .await
+        .expect("failed to get device");
+
+    let mut ctx = fidget::wgpu::render3d::Context::new(device, queue);
+    let mut cache = GpuCache::default();
+
+    while let Ok(task) = start.rx.recv_async().await {
+        info!("got task");
+        let (cfg, image_size) = task.cfg();
+        let scene = task.scene();
+        let mut images = Vec::with_capacity(scene.shapes.len());
+        for shape in &scene.shapes {
+            let (gpu_shape, buffers) = cache.get(&mut ctx, shape, image_size);
+            let start = web_time::Instant::now();
+            let data = ctx.run_async(gpu_shape, buffers, cfg).await;
+            info!("done in {:?}", start.elapsed());
+            images.push((data, shape.color.clone()));
+        }
+        task.finalize(images)
+    }
 }

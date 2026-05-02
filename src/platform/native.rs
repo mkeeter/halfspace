@@ -1,7 +1,7 @@
 use crate::{
     App, AppState, Message, MessageReceiver, MessageSender, Modal,
     platform::{self, Platform},
-    render::{GpuRenderTask, GpuWorkerPool},
+    render::{GpuCache, GpuRenderTask, GpuWorkerPool},
     state, wgpu_setup,
 };
 use egui_wgpu::wgpu;
@@ -180,39 +180,34 @@ impl Platform for NativePlatform {
 
     fn spawn_gpu_workers(&mut self) -> GpuWorkerPool<Self::Notify> {
         let (tx, rx) = flume::unbounded();
-        for _ in 0..8 {
+        for i in 0..8 {
             let rx = rx.clone();
-            std::thread::spawn(|| {
-                let instance = wgpu::Instance::default();
-                let (device, queue) = pollster::block_on(async move {
-                    let adapter = instance
-                        .request_adapter(&wgpu::RequestAdapterOptions {
-                            power_preference:
-                                wgpu::PowerPreference::HighPerformance,
-                            ..wgpu::RequestAdapterOptions::default()
-                        })
-                        .await
-                        .map_err(anyhow::Error::from)?;
-                    let out = adapter
-                        .request_device(&wgpu::DeviceDescriptor::default())
-                        .await?;
-                    Ok::<_, anyhow::Error>(out)
-                })
-                .unwrap();
-                gpu_worker(device, queue, rx)
-            });
+            std::thread::spawn(move || gpu_worker(i, rx));
         }
         GpuWorkerPool::new(tx)
     }
 }
 
 /// Worker thread which receives GPU tasks
-fn gpu_worker(
-    device: egui_wgpu::wgpu::Device,
-    queue: egui_wgpu::wgpu::Queue,
-    rx: flume::Receiver<GpuRenderTask<Notify>>,
-) {
+fn gpu_worker(_index: usize, rx: flume::Receiver<GpuRenderTask<Notify>>) {
+    let instance = wgpu::Instance::default();
+    let (device, queue) = pollster::block_on(async move {
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                ..wgpu::RequestAdapterOptions::default()
+            })
+            .await
+            .map_err(anyhow::Error::from)?;
+        let out = adapter
+            .request_device(&wgpu::DeviceDescriptor::default())
+            .await?;
+        Ok::<_, anyhow::Error>(out)
+    })
+    .unwrap();
+
     let mut ctx = fidget::wgpu::render3d::Context::new(device, queue);
+    let mut cache = GpuCache::default();
     while let Ok(task) = rx.recv() {
         let (cfg, image_size) = task.cfg();
         let images: Vec<_> = task
@@ -220,15 +215,9 @@ fn gpu_worker(
             .shapes
             .iter()
             .map(|shape| {
-                // TODO reuse these buffers
-                let start = std::time::Instant::now();
-                let buffers = ctx.buffers(image_size);
-                let rs = fidget::vm::VmShape::from(shape.tree.clone());
-
-                // TODO check for bytecode feasibility earlier?
-                let gpu_shape = ctx.shape(&rs).unwrap();
-                println!("built buffers in {:?}", start.elapsed());
-                let data = ctx.run(&gpu_shape, &buffers, cfg);
+                let (gpu_shape, buffers) =
+                    cache.get(&mut ctx, shape, image_size);
+                let data = ctx.run(gpu_shape, buffers, cfg);
                 (data, shape.color.clone())
             })
             .collect::<_>();
