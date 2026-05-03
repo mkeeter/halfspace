@@ -13,7 +13,7 @@
             from './halfspace.JSHASH.js';
         await init('./halfspace.WAHASH.wasm');
         await initThreadPool(navigator.hardwareConcurrency);
-        await initWgpuThreadPool(4);
+        await initWgpuThreadPool(1);
         run();
     </script>
     <base href="./" />

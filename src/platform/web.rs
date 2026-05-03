@@ -542,11 +542,14 @@ where
         .await
         .expect("failed to get adapter");
     let (device, queue) = adapter
-        .request_device(&wgpu::DeviceDescriptor::default())
+        .request_device(&wgpu::DeviceDescriptor {
+            required_features: wgpu::Features::TIMESTAMP_QUERY,
+            ..wgpu::DeviceDescriptor::default()
+        })
         .await
         .expect("failed to get device");
 
-    let mut ctx = fidget::wgpu::render3d::Context::new(device, queue);
+    let mut ctx = fidget::wgpu::render3d::Context::new(device, queue).unwrap();
     let mut cache = GpuCache::default();
 
     while let Ok(task) = start.rx.recv_async().await {
@@ -566,7 +569,8 @@ where
         )
         .await;
         for (m, shape) in mapped.into_iter().zip(scene.shapes.iter()) {
-            let data = ctx.read_mapped_image(m);
+            let data = m.image();
+            info!("{:?}", m.time());
             images.push((data, shape.color.clone()));
         }
         info!("done in {:?}", start.elapsed());

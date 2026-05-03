@@ -385,7 +385,7 @@ impl<N: Notify> GpuRenderTask<N> {
             });
         });
 
-        println!(
+        log::info!(
             "rendered {:?} {} in {:?}",
             self.settings.size,
             self.level,
@@ -528,19 +528,21 @@ impl GpuCache {
         &fidget::wgpu::render3d::Buffers,
     ) {
         let key = d.tree.as_ptr();
+        println!("{key:?}, {index}");
         let shape = self.shape_pool.get_or_insert_with((key, index), || {
             let rs = fidget::vm::VmShape::from(d.tree.clone());
 
             // TODO check for bytecode feasibility earlier?
             // TODO fallback to CPU renderer
-            let gpu_shape = ctx.shape(&rs).unwrap();
-            gpu_shape
+            log::info!("  building shape!");
+            ctx.shape(&rs).unwrap()
         });
         let buffers = self
             .buffer_pool
             .get_or_insert_with((image_size, index), || {
                 ctx.buffers(image_size)
             });
+        log::info!("buffers are {} bytes", buffers.size());
         (shape, buffers)
     }
 }

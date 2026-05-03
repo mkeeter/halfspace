@@ -164,7 +164,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "parking_lot",
  "percent-encoding",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
  "x11rb",
 ]
 
@@ -1490,7 +1490,6 @@ dependencies = [
 [[package]]
 name = "fidget"
 version = "0.4.4"
-source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#171be6662b9d9bb85d63d9efc13347ebb826e46e"
 dependencies = [
  "document-features",
  "fidget-bytecode",
@@ -1509,7 +1508,6 @@ dependencies = [
 [[package]]
 name = "fidget-bytecode"
 version = "0.4.4"
-source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#171be6662b9d9bb85d63d9efc13347ebb826e46e"
 dependencies = [
  "fidget-core",
  "serde",
@@ -1522,7 +1520,6 @@ dependencies = [
 [[package]]
 name = "fidget-core"
 version = "0.4.4"
-source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#171be6662b9d9bb85d63d9efc13347ebb826e46e"
 dependencies = [
  "facet",
  "getrandom 0.2.17",
@@ -1541,7 +1538,6 @@ dependencies = [
 [[package]]
 name = "fidget-gui"
 version = "0.4.4"
-source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#171be6662b9d9bb85d63d9efc13347ebb826e46e"
 dependencies = [
  "fidget-core",
  "nalgebra",
@@ -1552,7 +1548,6 @@ dependencies = [
 [[package]]
 name = "fidget-jit"
 version = "0.4.4"
-source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#171be6662b9d9bb85d63d9efc13347ebb826e46e"
 dependencies = [
  "arrayvec",
  "dynasmrt",
@@ -1566,7 +1561,6 @@ dependencies = [
 [[package]]
 name = "fidget-mesh"
 version = "0.4.4"
-source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#171be6662b9d9bb85d63d9efc13347ebb826e46e"
 dependencies = [
  "arrayvec",
  "fidget-core",
@@ -1580,7 +1574,6 @@ dependencies = [
 [[package]]
 name = "fidget-raster"
 version = "0.4.4"
-source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#171be6662b9d9bb85d63d9efc13347ebb826e46e"
 dependencies = [
  "fidget-core",
  "nalgebra",
@@ -1595,7 +1588,6 @@ dependencies = [
 [[package]]
 name = "fidget-rhai"
 version = "0.4.4"
-source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#171be6662b9d9bb85d63d9efc13347ebb826e46e"
 dependencies = [
  "enum-map",
  "facet",
@@ -1610,7 +1602,6 @@ dependencies = [
 [[package]]
 name = "fidget-shapes"
 version = "0.4.4"
-source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#171be6662b9d9bb85d63d9efc13347ebb826e46e"
 dependencies = [
  "enum-map",
  "facet",
@@ -1624,7 +1615,6 @@ dependencies = [
 [[package]]
 name = "fidget-solver"
 version = "0.4.4"
-source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#171be6662b9d9bb85d63d9efc13347ebb826e46e"
 dependencies = [
  "fidget-core",
  "nalgebra",
@@ -1636,7 +1626,6 @@ dependencies = [
 [[package]]
 name = "fidget-wgpu"
 version = "0.4.4"
-source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#171be6662b9d9bb85d63d9efc13347ebb826e46e"
 dependencies = [
  "fidget-bytecode",
  "fidget-core",
@@ -3984,7 +3973,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5643,7 +5632,6 @@ dependencies = [
 [[package]]
 name = "workspace-hack"
 version = "0.1.0"
-source = "git+https://github.com/mkeeter/fidget?branch=fidget-wgpu#171be6662b9d9bb85d63d9efc13347ebb826e46e"
 dependencies = [
  "ahash",
  "anstream",
