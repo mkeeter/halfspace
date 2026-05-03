@@ -58,11 +58,11 @@ env_logger = "0.11.8"
 flume = { version = "0.12", features = ["async"] }
 pollster = "0.4.0"
 rhai = { version = "1.21", features = ["sync", "internals"] }
-pollster = "0.4.0"
 
 # Web-only dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 flume = { version = "0.12", features = ["async", "spin"] }
+futures = "0.3"
 js-sys = "0.3.85"
 rhai = { version = "1.21", features = ["sync", "internals", "wasm-bindgen"] }
 wasm-bindgen = "0.2.114"

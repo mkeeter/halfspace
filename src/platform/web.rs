@@ -393,7 +393,7 @@ struct wbg_wgpu_PoolBuilder {
     receiver: flume::Receiver<StartTask>,
 }
 
-struct StartTask {
+pub struct StartTask {
     rx: flume::Receiver<GpuRenderTask<Notify>>,
     ready: flume::Sender<()>,
 }
@@ -444,7 +444,7 @@ impl wbg_wgpu_PoolBuilder {
 
     pub async fn build(&mut self) {
         let mut wait_for = Vec::with_capacity(self.num_threads);
-        for i in 0..self.num_threads {
+        for _i in 0..self.num_threads {
             let (tx, rx) = flume::bounded(0);
             self.sender
                 .send(StartTask {
@@ -554,13 +554,22 @@ where
         let (cfg, image_size) = task.cfg();
         let scene = task.scene();
         let mut images = Vec::with_capacity(scene.shapes.len());
-        for shape in &scene.shapes {
-            let (gpu_shape, buffers) = cache.get(&mut ctx, shape, image_size);
-            let start = web_time::Instant::now();
-            let data = ctx.run_async(gpu_shape, buffers, cfg).await;
-            info!("done in {:?}", start.elapsed());
+        let mut buffers = Vec::with_capacity(scene.shapes.len());
+        let start = web_time::Instant::now();
+        for (i, shape) in scene.shapes.iter().enumerate() {
+            let (gpu_shape, bufs) = cache.get(&mut ctx, shape, image_size, i);
+            ctx.submit(gpu_shape, bufs, &cfg);
+            buffers.push(bufs.clone());
+        }
+        let mapped = futures::future::join_all(
+            buffers.iter().map(|b| ctx.map_image_async(b)),
+        )
+        .await;
+        for (m, shape) in mapped.into_iter().zip(scene.shapes.iter()) {
+            let data = ctx.read_mapped_image(m);
             images.push((data, shape.color.clone()));
         }
+        info!("done in {:?}", start.elapsed());
         task.finalize(images)
     }
 }

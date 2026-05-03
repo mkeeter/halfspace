@@ -436,12 +436,15 @@ impl<N: Notify> GpuRenderTask<N> {
 #[derive(Default)]
 pub(crate) struct GpuCache {
     shape_pool: Cache<
-        *const fidget::context::TreeOp,
+        (*const fidget::context::TreeOp, usize),
         fidget::wgpu::render3d::RenderShape,
         16,
     >,
-    buffer_pool:
-        Cache<fidget::render::VoxelSize, fidget::wgpu::render3d::Buffers, 16>,
+    buffer_pool: Cache<
+        (fidget::render::VoxelSize, usize),
+        fidget::wgpu::render3d::Buffers,
+        16,
+    >,
 }
 
 /// Simple cache which contains `N` items
@@ -519,12 +522,13 @@ impl GpuCache {
         ctx: &mut fidget::wgpu::render3d::Context,
         d: &Drawable,
         image_size: fidget::render::VoxelSize,
+        index: usize,
     ) -> (
         &fidget::wgpu::render3d::RenderShape,
         &fidget::wgpu::render3d::Buffers,
     ) {
         let key = d.tree.as_ptr();
-        let shape = self.shape_pool.get_or_insert_with(key, || {
+        let shape = self.shape_pool.get_or_insert_with((key, index), || {
             let rs = fidget::vm::VmShape::from(d.tree.clone());
 
             // TODO check for bytecode feasibility earlier?
@@ -534,7 +538,9 @@ impl GpuCache {
         });
         let buffers = self
             .buffer_pool
-            .get_or_insert_with(image_size, || ctx.buffers(image_size));
+            .get_or_insert_with((image_size, index), || {
+                ctx.buffers(image_size)
+            });
         (shape, buffers)
     }
 }

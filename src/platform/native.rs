@@ -214,9 +214,10 @@ fn gpu_worker(_index: usize, rx: flume::Receiver<GpuRenderTask<Notify>>) {
             .scene()
             .shapes
             .iter()
-            .map(|shape| {
+            .enumerate()
+            .map(|(i, shape)| {
                 let (gpu_shape, buffers) =
-                    cache.get(&mut ctx, shape, image_size);
+                    cache.get(&mut ctx, shape, image_size, i);
                 let data = ctx.run(gpu_shape, buffers, cfg);
                 (data, shape.color.clone())
             })
