@@ -210,18 +210,22 @@ fn gpu_worker(_index: usize, rx: flume::Receiver<GpuRenderTask<Notify>>) {
     let mut cache = GpuCache::default();
     while let Ok(task) = rx.recv() {
         let (cfg, image_size) = task.cfg();
-        let images: Vec<_> = task
-            .scene()
-            .shapes
-            .iter()
-            .enumerate()
-            .map(|(i, shape)| {
-                let (gpu_shape, buffers) =
-                    cache.get(&mut ctx, shape, image_size, i);
-                let data = ctx.run(gpu_shape, buffers, cfg);
-                (data, shape.color.clone())
-            })
-            .collect::<_>();
+        let scene = task.scene();
+        let mut images = Vec::with_capacity(scene.shapes.len());
+        let mut buffers = Vec::with_capacity(scene.shapes.len());
+        let start = web_time::Instant::now();
+        for (i, shape) in scene.shapes.iter().enumerate() {
+            let (gpu_shape, bufs) = cache.get(&mut ctx, shape, image_size, i);
+            ctx.submit(gpu_shape, bufs, &cfg);
+            buffers.push(bufs.clone());
+        }
+        let mapped =
+            buffers.iter().map(|b| ctx.map_image(b)).collect::<Vec<_>>();
+        for (m, shape) in mapped.into_iter().zip(scene.shapes.iter()) {
+            let data = ctx.read_mapped_image(m);
+            images.push((data, shape.color.clone()));
+        }
+        info!("done in {:?}", start.elapsed());
         task.finalize(images)
     }
 }
