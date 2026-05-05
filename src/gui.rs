@@ -20,7 +20,7 @@ pub struct WorldView<'a, N: Notify> {
     pub out: &'a mut Vec<(BlockIndex, ViewResponse)>,
     pub rx: &'a MessageReceiver<N>,
     pub cpu_pool: &'a render::CpuWorkerPool<N>,
-    pub gpu_pool: &'a render::GpuWorkerPool<N>,
+    pub gpu_pool: &'a render::GpuWorkerPool,
 }
 
 impl Tab {

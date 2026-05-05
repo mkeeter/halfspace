@@ -1,7 +1,7 @@
 use crate::{
     App, AppState, Message, MessageReceiver, MessageSender, Modal,
     platform::{self, Platform},
-    render::{GpuCache, GpuRenderTask, GpuWorkerPool},
+    render::{GpuCache, GpuRenderShapeTask, GpuWorkerPool},
     state, wgpu_setup,
 };
 use egui_wgpu::wgpu;
@@ -178,9 +178,9 @@ impl Platform for NativePlatform {
             .send_viewport_cmd(egui::ViewportCommand::Title(title.to_owned()));
     }
 
-    fn spawn_gpu_workers(&mut self) -> GpuWorkerPool<Self::Notify> {
+    fn spawn_gpu_workers(&mut self) -> GpuWorkerPool {
         let (tx, rx) = flume::unbounded();
-        for i in 0..4 {
+        for i in 0..1 {
             let rx = rx.clone();
             std::thread::spawn(move || gpu_worker(i, rx));
         }
@@ -189,7 +189,7 @@ impl Platform for NativePlatform {
 }
 
 /// Worker thread which receives GPU tasks
-fn gpu_worker(_index: usize, rx: flume::Receiver<GpuRenderTask<Notify>>) {
+fn gpu_worker(_index: usize, rx: flume::Receiver<GpuRenderShapeTask>) {
     let instance = wgpu::Instance::default();
     let (device, queue) = pollster::block_on(async move {
         let adapter = instance
@@ -211,32 +211,17 @@ fn gpu_worker(_index: usize, rx: flume::Receiver<GpuRenderTask<Notify>>) {
 
     let mut ctx = fidget::wgpu::render3d::Context::new(device, queue).unwrap();
     let mut cache = GpuCache::default();
-    let start = web_time::Instant::now();
+    let mut bufs = ctx.buffers(256.into());
     while let Ok(task) = rx.recv() {
-        let (cfg, image_size) = task.cfg();
-        let scene = task.scene();
-        let mut images = Vec::with_capacity(scene.shapes.len());
-        let mut buffers = Vec::with_capacity(scene.shapes.len());
-
-        // Submit all of the jobs so that the GPU can run them in parallel
-        for (i, shape) in scene.shapes.iter().enumerate() {
-            let (gpu_shape, bufs) = cache.get(&mut ctx, shape, image_size, i);
-            ctx.submit(gpu_shape, bufs, &cfg);
-            buffers.push(bufs.clone());
-        }
+        let (cfg, image_size) = (task.config, task.image_size);
+        ctx.resize_buffers(&mut bufs, image_size);
+        let gpu_shape = cache.get(&mut ctx, &task.shape);
+        ctx.submit(gpu_shape, &bufs, &cfg);
 
         // Wait for work to complete
-        let mapped =
-            buffers.iter().map(|b| ctx.map_image(b)).collect::<Vec<_>>();
-        for (m, shape) in mapped.into_iter().zip(scene.shapes.iter()) {
-            let data = m.image();
-            info!("{:?}", m.time());
-            images.push((data, shape.color.clone()));
-        }
-        info!("done rendering in {:?}", start.elapsed());
-        let start = web_time::Instant::now();
-        task.finalize(images);
-        info!("done finalizing in {:?}", start.elapsed());
+        let mapped = ctx.map_image(&bufs);
+        let data = mapped.image();
+        task.reply.send(data).unwrap();
     }
 }
 

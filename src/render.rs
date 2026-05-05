@@ -52,7 +52,7 @@ use crate::{
         HeightmapViewImage, SdfImageData, SdfViewImage, ShadedImageData,
         ShadedViewImage, ViewCanvas, ViewImage, ViewMode2, ViewMode3,
     },
-    world::{Color, Drawable, Scene},
+    world::{Color, Scene},
 };
 
 use fidget::{
@@ -332,12 +332,15 @@ pub struct GpuRenderTask<N: Notify> {
     reply: MessageGenSender<N>,
 }
 
-impl<N: Notify> GpuRenderTask<N> {
-    /// Accessor function for the [`Scene`] to be rendered
-    pub fn scene(&self) -> &Scene {
-        &self.settings.scene
-    }
+/// Single shape rendering task, which renders a single task then sends it back
+pub(crate) struct GpuRenderShapeTask {
+    pub shape: fidget::context::Tree,
+    pub config: fidget::wgpu::render3d::RenderConfig,
+    pub image_size: fidget::render::VoxelSize,
+    pub reply: flume::Sender<fidget::raster::GeometryBuffer>,
+}
 
+impl<N: Notify> GpuRenderTask<N> {
     /// Returns the render configuration and size
     pub fn cfg(
         &self,
@@ -436,13 +439,8 @@ impl<N: Notify> GpuRenderTask<N> {
 #[derive(Default)]
 pub(crate) struct GpuCache {
     shape_pool: Cache<
-        (*const fidget::context::TreeOp, usize),
+        *const fidget::context::TreeOp,
         fidget::wgpu::render3d::RenderShape,
-        16,
-    >,
-    buffer_pool: Cache<
-        (fidget::render::VoxelSize, usize),
-        fidget::wgpu::render3d::Buffers,
         16,
     >,
 }
@@ -520,46 +518,33 @@ impl GpuCache {
     pub(crate) fn get(
         &mut self,
         ctx: &mut fidget::wgpu::render3d::Context,
-        d: &Drawable,
-        image_size: fidget::render::VoxelSize,
-        index: usize,
-    ) -> (
-        &fidget::wgpu::render3d::RenderShape,
-        &fidget::wgpu::render3d::Buffers,
-    ) {
-        let key = d.tree.as_ptr();
-        println!("{key:?}, {index}");
-        let shape = self.shape_pool.get_or_insert_with((key, index), || {
-            let rs = fidget::vm::VmShape::from(d.tree.clone());
+        d: &fidget::context::Tree,
+    ) -> &fidget::wgpu::render3d::RenderShape {
+        let key = d.as_ptr();
+        self.shape_pool.get_or_insert_with(key, || {
+            let rs = fidget::vm::VmShape::from(d.clone());
 
             // TODO check for bytecode feasibility earlier?
             // TODO fallback to CPU renderer
             log::info!("  building shape!");
             ctx.shape(&rs).unwrap()
-        });
-        let buffers = self
-            .buffer_pool
-            .get_or_insert_with((image_size, index), || {
-                ctx.buffers(image_size)
-            });
-        log::info!("buffers are {} bytes", buffers.size());
-        (shape, buffers)
+        })
     }
 }
 
 /// The GPU worker pool is accessed with an MPMC channel
-pub(crate) struct GpuWorkerPool<N: Notify> {
-    tx: flume::Sender<GpuRenderTask<N>>,
+pub(crate) struct GpuWorkerPool {
+    tx: flume::Sender<GpuRenderShapeTask>,
 }
 
-impl<N: Notify> GpuWorkerPool<N> {
+impl GpuWorkerPool {
     /// Builds a new worker pool which sends on the given channel
-    pub fn new(tx: flume::Sender<GpuRenderTask<N>>) -> Self {
+    pub fn new(tx: flume::Sender<GpuRenderShapeTask>) -> Self {
         Self { tx }
     }
 
     /// Begins a new image rendering task in the GPU global thread pool
-    pub(crate) fn spawn(
+    pub(crate) fn spawn<N: Notify>(
         &self,
         block: BlockIndex,
         generation: u64,
@@ -570,16 +555,38 @@ impl<N: Notify> GpuWorkerPool<N> {
         let settings_ = settings.clone();
         let start_time = Instant::now();
         let cancel = fidget::render::CancelToken::new();
-        self.tx
-            .send(GpuRenderTask {
-                settings,
-                level,
-                block,
-                generation,
-                reply,
-                start_time,
-            })
-            .unwrap();
+        let task = GpuRenderTask {
+            settings,
+            level,
+            block,
+            generation,
+            reply,
+            start_time,
+        };
+        let (config, image_size) = task.cfg();
+        let mut replies = vec![];
+        for drawable in &task.settings.scene.shapes {
+            let (tx, rx) = flume::bounded(0);
+            self.tx
+                .send(GpuRenderShapeTask {
+                    shape: drawable.tree.clone(),
+                    config,
+                    image_size,
+                    reply: tx,
+                })
+                .unwrap();
+            replies.push((rx, drawable.color.clone()));
+        }
+
+        // Wait for the render to complete in the rayon pool
+        rayon::spawn(move || {
+            let images = replies
+                .into_iter()
+                .map(|(rx, color)| (rx.recv().unwrap(), color))
+                .collect::<Vec<_>>();
+            task.finalize(images);
+        });
+
         RenderTaskHandle {
             kind: RenderTaskKind::Gpu {
                 settings: settings_,

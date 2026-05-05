@@ -29,7 +29,7 @@ where
     fn take_rx_channel(&mut self) -> MessageReceiver<Self::Notify>;
 
     /// Initialize the GPU worker pool
-    fn spawn_gpu_workers(&mut self) -> GpuWorkerPool<Self::Notify>;
+    fn spawn_gpu_workers(&mut self) -> GpuWorkerPool;
 
     /// List all file names in local storage
     fn list_local_storage(&self) -> Vec<String>;

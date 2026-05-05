@@ -354,7 +354,7 @@ impl ViewData {
         r: RenderViewReply,
         rx: &MessageReceiver<N>,
         cpu_pool: &CpuWorkerPool<N>,
-        gpu_pool: &GpuWorkerPool<N>,
+        gpu_pool: &GpuWorkerPool,
     ) {
         const TARGET_RENDER_TIME: Duration = Duration::from_millis(33);
         const MAX_LEVEL: usize = 10;
@@ -392,7 +392,7 @@ impl ViewData {
         level: usize,
         rx: &MessageReceiver<N>,
         cpu_pool: &CpuWorkerPool<N>,
-        gpu_pool: &GpuWorkerPool<N>,
+        gpu_pool: &GpuWorkerPool,
     ) {
         self.generation += 1;
         let reply = rx.sender_with_gen();
@@ -417,7 +417,7 @@ impl ViewData {
         scene: Scene,
         rx: &MessageReceiver<N>,
         cpu_pool: &CpuWorkerPool<N>,
-        gpu_pool: &GpuWorkerPool<N>,
+        gpu_pool: &GpuWorkerPool,
     ) -> Option<&ViewImage> {
         let settings = RenderSettings::from_canvas(&self.canvas, scene);
 

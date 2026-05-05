@@ -355,7 +355,7 @@ pub(crate) struct App<P: Platform> {
     cpu_pool: render::CpuWorkerPool<P::Notify>,
 
     /// Pool of GPU worker threads
-    gpu_pool: render::GpuWorkerPool<P::Notify>,
+    gpu_pool: render::GpuWorkerPool,
 
     /// Show debug options and menu items in native build
     debug: bool,
