@@ -81,4 +81,4 @@ naga:
 # Deploy the demo to `mattkeeter.com/projects/halfspace/demo`
 deploy:
     just dist
-    rsync -avz --delete -e ssh {{DIST_DIR}} mkeeter@mattkeeter.com:mattkeeter.com/projects/halfspace/demo
+    rsync -avz --delete -e ssh {{DIST_DIR}}/ mkeeter@mattkeeter.com:mattkeeter.com/projects/halfspace/demo
