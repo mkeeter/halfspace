@@ -549,22 +549,27 @@ where
         .await
         .expect("failed to get device");
 
-    let mut ctx = fidget::wgpu::render3d::Context::new(device, queue).unwrap();
+    let mut ctx = fidget::wgpu::voxel::Context::new(device, queue).unwrap();
     let mut cache = GpuCache::default();
-    let mut bufs = ctx.buffers(256.into());
+    let mut bufs = ctx.buffers(256.into()).unwrap();
 
     while let Ok(task) = start.rx.recv_async().await {
         info!("got task");
         let (cfg, image_size) = (task.config, task.image_size);
         let start = web_time::Instant::now();
-        ctx.resize_buffers(&mut bufs, image_size);
+        ctx.set_buffers_image_size(&mut bufs, image_size).unwrap();
         let gpu_shape = cache.get(&mut ctx, &task.shape);
-        ctx.submit(gpu_shape, &bufs, &cfg);
+        ctx.submit(gpu_shape, &mut bufs, &cfg);
 
         // Wait for work to complete
-        let mapped = ctx.map_image_async(&bufs).await;
+        info!("submitted in {:?}", start.elapsed());
+        let mapped = ctx.map_image_async(&mut bufs).await;
         let data = mapped.image();
         task.reply.send(data).unwrap();
-        info!("done in {:?}", start.elapsed());
+        info!(
+            "done in {:?} (compute pass time {:?})",
+            start.elapsed(),
+            mapped.time()
+        );
     }
 }

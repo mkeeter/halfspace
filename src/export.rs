@@ -1,5 +1,5 @@
 use crate::{
-    render::{RenderFunction, RenderShape, image_to_bitfield},
+    render::{RenderShape, image_to_bitfield},
     world::Scene,
 };
 
@@ -8,8 +8,8 @@ use zerocopy::IntoBytes;
 use fidget::{
     context::Tree,
     mesh::{Octree, Settings},
-    raster::ImageRenderConfig,
-    render::{ImageSize, RenderHints, ThreadPool},
+    raster::pixel,
+    render::{ImageSize, ThreadPool},
     shapes::{
         Box, Intersection,
         types::{Vec2, Vec3},
@@ -144,7 +144,7 @@ pub(crate) fn image_settings(
     lower: Vec2,
     upper: Vec2,
     resolution: f64,
-) -> Result<ImageRenderConfig<'static>, ExportError> {
+) -> Result<pixel::RenderConfig<'static>, ExportError> {
     let view = image_view(lower, upper, resolution)?;
 
     let size = (upper - lower) * resolution;
@@ -156,11 +156,9 @@ pub(crate) fn image_settings(
     let width = size.x as u32;
     let height = size.y as u32;
 
-    let settings = ImageRenderConfig {
+    let settings = pixel::RenderConfig {
         image_size: ImageSize::new(width, height),
         world_to_model: view.world_to_model(),
-        threads: Some(&ThreadPool::Global),
-        tile_sizes: RenderFunction::tile_sizes_2d(),
         ..Default::default()
     };
     Ok(settings)

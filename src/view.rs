@@ -9,6 +9,7 @@ use crate::{
 };
 use std::sync::Arc;
 
+use fidget::raster::pixel::DistancePixel;
 pub use state::{ViewMode2, ViewMode3};
 use web_time::Duration;
 
@@ -211,14 +212,14 @@ impl BitfieldViewImage {
     /// neighbors, to reduce visual glitches when rendering lower-than-native
     /// resolution images.
     pub fn denoise(
-        image: fidget::raster::Image<fidget::raster::DistancePixel>,
+        image: fidget::raster::pixel::Image,
         threads: Option<&fidget::render::ThreadPool>,
     ) -> fidget::raster::Image<f32> {
         let mut out = fidget::raster::Image::new(image.size());
         out.apply_effect(
-            |x, y| match image[(y, x)].distance() {
-                Ok(v) => v,
-                Err(f) => {
+            |x, y| match image[(y, x)].unpack() {
+                DistancePixel::Value(v) => v,
+                DistancePixel::Fill { inside, .. } => {
                     // Replace fill pixels with the average of their
                     // actual-distance neighbors, falling back to infinity if
                     // that fails.  This prevents glitchiness on the edges of
@@ -244,7 +245,9 @@ impl BitfieldViewImage {
                             if y >= image.height() {
                                 continue;
                             }
-                            if let Ok(d) = image[(y, x)].distance() {
+                            if let DistancePixel::Value(d) =
+                                image[(y, x)].unpack()
+                            {
                                 if d < 0.0 {
                                     inside_avg += d;
                                     inside_count += 1;
@@ -255,14 +258,14 @@ impl BitfieldViewImage {
                             }
                         }
                     }
-                    if f.inside && inside_count > 0 {
+                    if inside && inside_count > 0 {
                         inside_avg / inside_count as f32
-                    } else if !f.inside && outside_count > 0 {
+                    } else if !inside && outside_count > 0 {
                         outside_avg / outside_count as f32
                     } else if inside_count + outside_count > 0 {
                         (inside_avg + outside_avg)
                             / (inside_count + outside_count) as f32
-                    } else if f.inside {
+                    } else if inside {
                         -f32::INFINITY
                     } else {
                         f32::INFINITY
@@ -304,7 +307,7 @@ pub struct ShadedViewImage {
 /// Single shaded image to be drawn to the screen
 #[derive(Clone)]
 pub struct ShadedImageData {
-    pub pixels: Arc<[fidget::raster::GeometryPixel]>,
+    pub pixels: Arc<[fidget::raster::voxel::GeometryPixel]>,
     pub color: Arc<[[u8; 4]]>,
 }
 

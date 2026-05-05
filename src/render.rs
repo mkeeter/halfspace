@@ -57,7 +57,7 @@ use crate::{
 
 use fidget::{
     eval::{BulkEvaluator, Function, MathFunction},
-    raster::{GeometryPixel, effects},
+    raster::{effects, pixel::DistancePixel, voxel::GeometryPixel},
 };
 
 use rayon::prelude::*;
@@ -184,7 +184,7 @@ impl CpuRenderTask {
                     (size.width() / scale).max(1),
                     (size.height() / scale).max(1),
                 );
-                let cfg = fidget::raster::ImageRenderConfig {
+                let cfg = fidget::raster::pixel::RenderConfig {
                     image_size,
                     world_to_model: view.world_to_model(),
                     cancel,
@@ -258,7 +258,7 @@ impl CpuRenderTask {
                     *world_to_model.get_mut((3, 2)).unwrap() =
                         0.3 / bonus_z as f32;
                 }
-                let cfg = fidget::raster::VoxelRenderConfig {
+                let cfg = fidget::raster::voxel::RenderConfig {
                     image_size,
                     world_to_model,
                     cancel,
@@ -335,19 +335,16 @@ pub struct GpuRenderTask<N: Notify> {
 /// Single shape rendering task, which renders a single task then sends it back
 pub(crate) struct GpuRenderShapeTask {
     pub shape: fidget::context::Tree,
-    pub config: fidget::wgpu::render3d::RenderConfig,
+    pub config: fidget::wgpu::voxel::RenderConfig,
     pub image_size: fidget::render::VoxelSize,
-    pub reply: flume::Sender<fidget::raster::GeometryBuffer>,
+    pub reply: flume::Sender<fidget::raster::voxel::Image>,
 }
 
 impl<N: Notify> GpuRenderTask<N> {
     /// Returns the render configuration and size
     pub fn cfg(
         &self,
-    ) -> (
-        fidget::wgpu::render3d::RenderConfig,
-        fidget::render::VoxelSize,
-    ) {
+    ) -> (fidget::wgpu::voxel::RenderConfig, fidget::render::VoxelSize) {
         let scale = 1 << self.level;
 
         // If this is our final rendering level, then do oversampling in
@@ -368,7 +365,7 @@ impl<N: Notify> GpuRenderTask<N> {
             *world_to_model.get_mut((3, 2)).unwrap() = 0.3 / bonus_z as f32;
         }
         (
-            fidget::wgpu::render3d::RenderConfig { world_to_model },
+            fidget::wgpu::voxel::RenderConfig { world_to_model },
             image_size,
         )
     }
@@ -376,7 +373,7 @@ impl<N: Notify> GpuRenderTask<N> {
     /// Post-processes images and sends them to the main thread
     pub fn finalize(
         self,
-        mut images: Vec<(fidget::raster::GeometryBuffer, Option<Color>)>,
+        mut images: Vec<(fidget::raster::voxel::Image, Option<Color>)>,
     ) {
         // Compensate for z-flattening
         let bonus_z = if self.level == 0 { 2 } else { 1 };
@@ -440,7 +437,7 @@ impl<N: Notify> GpuRenderTask<N> {
 pub(crate) struct GpuCache {
     shape_pool: Cache<
         *const fidget::context::TreeOp,
-        fidget::wgpu::render3d::RenderShape,
+        fidget::wgpu::voxel::RenderShape,
         16,
     >,
 }
@@ -517,9 +514,9 @@ impl GpuCache {
     /// This is a single function because it must take `&mut self`
     pub(crate) fn get(
         &mut self,
-        ctx: &mut fidget::wgpu::render3d::Context,
+        ctx: &mut fidget::wgpu::voxel::Context,
         d: &fidget::context::Tree,
-    ) -> &fidget::wgpu::render3d::RenderShape {
+    ) -> &fidget::wgpu::voxel::RenderShape {
         let key = d.as_ptr();
         self.shape_pool.get_or_insert_with(key, || {
             let rs = fidget::vm::VmShape::from(d.clone());
@@ -656,7 +653,7 @@ impl RenderSettings {
 }
 
 fn image_to_sdf(
-    image: fidget::raster::Image<fidget::raster::DistancePixel>,
+    image: fidget::raster::pixel::Image,
     view: fidget::gui::View2,
     color: Option<Color>,
 ) -> SdfImageData {
@@ -670,12 +667,16 @@ fn image_to_sdf(
         .into()
     });
     let distance = image
-        .map(|d| {
-            let d = d.distance().unwrap();
-            if d.is_infinite() {
-                1e12f32.copysign(d)
-            } else {
-                d
+        .map(|d| match d.unpack() {
+            DistancePixel::Value(d) => {
+                if d.is_infinite() {
+                    1e12f32.copysign(d)
+                } else {
+                    d
+                }
+            }
+            DistancePixel::Fill { .. } => {
+                panic!("expected all `Value` pixels")
             }
         })
         .take()
@@ -686,7 +687,7 @@ fn image_to_sdf(
 }
 
 pub(crate) fn image_to_bitfield(
-    image: fidget::raster::Image<fidget::raster::DistancePixel>,
+    image: fidget::raster::pixel::Image,
     view: fidget::gui::View2,
     color: Option<Color>,
 ) -> BitfieldImageData {
@@ -706,7 +707,7 @@ pub(crate) fn image_to_bitfield(
 
 fn image_to_heightmap(
     image: fidget::raster::Image<
-        fidget::raster::GeometryPixel,
+        fidget::raster::voxel::GeometryPixel,
         fidget::render::VoxelSize,
     >,
     view: fidget::gui::View3,
@@ -726,9 +727,9 @@ fn image_to_heightmap(
 }
 
 fn merged_ssao(
-    images: &[(fidget::raster::GeometryBuffer, Option<Color>)],
+    images: &[(fidget::raster::voxel::Image, Option<Color>)],
 ) -> std::sync::Arc<[f32]> {
-    let mut out = fidget::raster::GeometryBuffer::new(images[0].0.size());
+    let mut out = fidget::raster::voxel::Image::new(images[0].0.size());
     let threads = Some(&fidget::render::ThreadPool::Global);
     out.apply_effect(
         |x, y| {
@@ -749,7 +750,7 @@ fn merged_ssao(
 }
 
 fn image_to_shaded(
-    image: fidget::raster::GeometryBuffer,
+    image: fidget::raster::voxel::Image,
     view: fidget::gui::View3,
     color: Option<Color>,
 ) -> ShadedImageData {
@@ -796,7 +797,7 @@ pub(crate) fn hsl_to_rgb(hsl: [u8; 4]) -> [u8; 4] {
 }
 
 fn render_hsl_2d(
-    image: &fidget::raster::Image<fidget::raster::DistancePixel>,
+    image: &fidget::raster::pixel::Image,
     view: fidget::gui::View2,
     hsl: [fidget::context::Tree; 3],
 ) -> fidget::raster::Image<[u8; 4]> {
@@ -813,7 +814,7 @@ fn render_hsl_2d(
 }
 
 pub(crate) fn render_colors_2d(
-    image: &fidget::raster::Image<fidget::raster::DistancePixel>,
+    image: &fidget::raster::pixel::Image,
     view: fidget::gui::View2,
     colors: [fidget::context::Tree; 3],
 ) -> fidget::raster::Image<[u8; 4]> {
@@ -923,10 +924,7 @@ pub(crate) fn render_colors_2d(
 }
 
 fn render_hsl_3d(
-    image: &fidget::raster::Image<
-        fidget::raster::GeometryPixel,
-        fidget::render::VoxelSize,
-    >,
+    image: &fidget::raster::voxel::Image,
     view: fidget::gui::View3,
     hsl: [fidget::context::Tree; 3],
 ) -> fidget::raster::Image<[u8; 4], fidget::render::VoxelSize> {
@@ -943,10 +941,7 @@ fn render_hsl_3d(
 }
 
 fn render_colors_3d(
-    image: &fidget::raster::Image<
-        fidget::raster::GeometryPixel,
-        fidget::render::VoxelSize,
-    >,
+    image: &fidget::raster::voxel::Image,
     view: fidget::gui::View3,
     colors: [fidget::context::Tree; 3],
 ) -> fidget::raster::Image<[u8; 4], fidget::render::VoxelSize> {

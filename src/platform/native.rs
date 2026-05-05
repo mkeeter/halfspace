@@ -209,17 +209,17 @@ fn gpu_worker(_index: usize, rx: flume::Receiver<GpuRenderShapeTask>) {
     })
     .unwrap();
 
-    let mut ctx = fidget::wgpu::render3d::Context::new(device, queue).unwrap();
+    let mut ctx = fidget::wgpu::voxel::Context::new(device, queue).unwrap();
     let mut cache = GpuCache::default();
-    let mut bufs = ctx.buffers(256.into());
+    let mut bufs = ctx.buffers(256.into()).unwrap();
     while let Ok(task) = rx.recv() {
         let (cfg, image_size) = (task.config, task.image_size);
-        ctx.resize_buffers(&mut bufs, image_size);
+        ctx.set_buffers_image_size(&mut bufs, image_size).unwrap();
         let gpu_shape = cache.get(&mut ctx, &task.shape);
         ctx.submit(gpu_shape, &bufs, &cfg);
 
         // Wait for work to complete
-        let mapped = ctx.map_image(&bufs);
+        let mapped = ctx.map_image(&mut bufs);
         let data = mapped.image();
         task.reply.send(data).unwrap();
     }

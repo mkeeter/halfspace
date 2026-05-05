@@ -7,7 +7,7 @@ use eframe::{
     egui,
     egui_wgpu::{self, wgpu},
 };
-use fidget::raster::GeometryPixel;
+use fidget::raster::voxel::GeometryPixel;
 use std::{collections::HashMap, sync::Arc};
 use zerocopy::IntoBytes;
 
