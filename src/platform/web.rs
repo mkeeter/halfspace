@@ -1,7 +1,7 @@
 use crate::{
     App, AppState, Message, MessageReceiver, MessageSender, Modal,
     platform::{self, Platform},
-    render::{GpuCache, GpuRenderTask, GpuWorkerPool},
+    render::{GpuCache, GpuRenderShapeTask, GpuWorkerPool},
     state, wgpu_setup,
 };
 use egui_wgpu::wgpu;
@@ -254,7 +254,7 @@ impl platform::Platform for WebPlatform {
         // nothing to do here
     }
 
-    fn spawn_gpu_workers(&mut self) -> GpuWorkerPool<Self::Notify> {
+    fn spawn_gpu_workers(&mut self) -> GpuWorkerPool {
         let tx = TX_CHANNEL.get().unwrap().clone();
         GpuWorkerPool::new(tx)
     }
@@ -388,18 +388,18 @@ extern "C" {
 #[doc(hidden)]
 struct wbg_wgpu_PoolBuilder {
     num_threads: usize,
-    rx: flume::Receiver<GpuRenderTask<Notify>>,
+    rx: flume::Receiver<GpuRenderShapeTask>,
     sender: flume::Sender<StartTask>,
     receiver: flume::Receiver<StartTask>,
 }
 
 pub struct StartTask {
-    rx: flume::Receiver<GpuRenderTask<Notify>>,
+    rx: flume::Receiver<GpuRenderShapeTask>,
     ready: flume::Sender<()>,
 }
 
 /// Global handle for the tx channel, used to submit tasks to GPU workers
-static TX_CHANNEL: std::sync::OnceLock<flume::Sender<GpuRenderTask<Notify>>> =
+static TX_CHANNEL: std::sync::OnceLock<flume::Sender<GpuRenderShapeTask>> =
     std::sync::OnceLock::new();
 
 // Copied from wasm-bindgen-rayon; see that file for explanatory comments
@@ -551,29 +551,20 @@ where
 
     let mut ctx = fidget::wgpu::render3d::Context::new(device, queue).unwrap();
     let mut cache = GpuCache::default();
+    let mut bufs = ctx.buffers(256.into());
 
     while let Ok(task) = start.rx.recv_async().await {
         info!("got task");
-        let (cfg, image_size) = task.cfg();
-        let scene = task.scene();
-        let mut images = Vec::with_capacity(scene.shapes.len());
-        let mut buffers = Vec::with_capacity(scene.shapes.len());
+        let (cfg, image_size) = (task.config, task.image_size);
         let start = web_time::Instant::now();
-        for (i, shape) in scene.shapes.iter().enumerate() {
-            let (gpu_shape, bufs) = cache.get(&mut ctx, shape, image_size, i);
-            ctx.submit(gpu_shape, bufs, &cfg);
-            buffers.push(bufs.clone());
-        }
-        let mapped = futures::future::join_all(
-            buffers.iter().map(|b| ctx.map_image_async(b)),
-        )
-        .await;
-        for (m, shape) in mapped.into_iter().zip(scene.shapes.iter()) {
-            let data = m.image();
-            info!("{:?}", m.time());
-            images.push((data, shape.color.clone()));
-        }
+        ctx.resize_buffers(&mut bufs, image_size);
+        let gpu_shape = cache.get(&mut ctx, &task.shape);
+        ctx.submit(gpu_shape, &bufs, &cfg);
+
+        // Wait for work to complete
+        let mapped = ctx.map_image_async(&bufs).await;
+        let data = mapped.image();
+        task.reply.send(data).unwrap();
         info!("done in {:?}", start.elapsed());
-        task.finalize(images)
     }
 }
