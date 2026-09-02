@@ -7,7 +7,6 @@ use eframe::{
     egui,
     egui_wgpu::{self, wgpu},
 };
-use fidget::raster::GeometryPixel;
 use std::{collections::HashMap, sync::Arc};
 use zerocopy::IntoBytes;
 
@@ -313,7 +312,7 @@ impl ShadedResources {
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("shaded image bind group layout"),
                 entries: &[
-                    // GeometryPixel texture and sampler
+                    // [depth, dx, dy, dz] texture and sampler
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
                         visibility: wgpu::ShaderStages::FRAGMENT,
@@ -598,10 +597,10 @@ struct ShadedBundleData {
 
 /// Resources used to render a single shaded image
 struct ShadedData {
-    /// Image stored in the pixel texture
-    pixel_image: Arc<[GeometryPixel]>,
+    /// Image stored in the pixel texture as `[depth, dx, dy, dz]`
+    pixel_image: Arc<[[f32; 4]]>,
 
-    /// GeometryPixel texture to render
+    /// Normal + depth texture to render
     pixel_texture: wgpu::Texture,
 
     /// Image stored in the color texture

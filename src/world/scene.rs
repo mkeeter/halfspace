@@ -89,7 +89,7 @@ impl rhai::CustomType for Color {
                  g: rhai::Dynamic,
                  b: rhai::Dynamic|
                  -> Result<Color, Box<rhai::EvalAltResult>> {
-                    const TWO_PI: f64 = std::f64::consts::PI * 2.0;
+                    const TWO_PI: f32 = std::f32::consts::PI * 2.0;
                     // Wrap into the 0-2π range, then scale to 0-1.0
                     let h = fidget::context::Tree::from_dynamic(&ctx, r, None)?
                         .modulo(TWO_PI)

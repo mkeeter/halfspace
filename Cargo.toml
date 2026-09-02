@@ -28,12 +28,12 @@ egui_dnd = "0.15.0"
 egui_dock = { version = "0.19.1", features = ["serde"] }
 egui_extras = { version = "0.34.1", features = ["syntect"] }
 facet = "0.46"
-fidget = { git = "https://github.com/mkeeter/fidget", branch = "fidget-wgpu" } # { version = "0.4.3" }
+fidget = { git = "https://github.com/mkeeter/fidget" } # { version = "0.4.3" }
 git-version = "0.3.9"
 heck = "0.5"
 image = { version = "0.25", default-features = false, features = ["png"] }
 log = "0.4.27"
-nalgebra = "0.34"
+nalgebra = { version = "0.35", features = ["serde", "serde-serialize"] }
 nonempty = "0.12.0"
 ordered-float = "5.1.0"
 palette = "0.7.6"

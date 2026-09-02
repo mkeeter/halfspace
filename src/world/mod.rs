@@ -757,13 +757,13 @@ pub enum ExportRequest {
         tree: fidget::context::Tree,
         min: fidget::shapes::types::Vec3,
         max: fidget::shapes::types::Vec3,
-        feature_size: f64,
+        feature_size: f32,
     },
     Image {
         scene: Scene,
         min: fidget::shapes::types::Vec2,
         max: fidget::shapes::types::Vec2,
-        resolution: f64,
+        resolution: f32,
     },
 }
 
@@ -966,7 +966,7 @@ impl BlockEvalData {
                   tree: fidget::context::Tree,
                   min: fidget::shapes::types::Vec3,
                   max: fidget::shapes::types::Vec3,
-                  feature_size: f64|
+                  feature_size: f32|
                   -> Result<(), Box<rhai::EvalAltResult>> {
                 let mut eval_data = eval_data_.write().unwrap();
                 if eval_data.export.is_some() {
@@ -992,7 +992,7 @@ impl BlockEvalData {
                   scene: Scene,
                   min: fidget::shapes::types::Vec2,
                   max: fidget::shapes::types::Vec2,
-                  resolution: f64|
+                  resolution: f32|
                   -> Result<(), Box<rhai::EvalAltResult>> {
                 let mut eval_data = eval_data_.write().unwrap();
                 if eval_data.export.is_some() {

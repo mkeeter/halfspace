@@ -1061,15 +1061,15 @@ impl DraggableInputValue {
             }
             Self::Vec2(mut v) => {
                 let out = mat * offset;
-                v.x += out.x as f64;
-                v.y += out.y as f64;
+                v.x += out.x;
+                v.y += out.y;
                 format!("[{:.*}, {:.*}]", d, v.x, d, v.y)
             }
             Self::Vec3(mut v) => {
                 let out = mat * offset;
-                v.x += out.x as f64;
-                v.y += out.y as f64;
-                v.z += out.z as f64;
+                v.x += out.x;
+                v.y += out.y;
+                v.z += out.z;
                 format!("[{:.*}, {:.*}, {:.*}]", d, v.x, d, v.y, d, v.z)
             }
         }

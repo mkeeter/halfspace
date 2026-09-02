@@ -57,7 +57,7 @@ use crate::{
 
 use fidget::{
     eval::{BulkEvaluator, Function, MathFunction},
-    raster::{GeometryPixel, effects},
+    raster::{effects, voxel::GeometryPixel},
 };
 
 use rayon::prelude::*;
@@ -175,11 +175,15 @@ impl CpuRenderTask {
                     (size.width() / scale).max(1),
                     (size.height() / scale).max(1),
                 );
-                let cfg = fidget::raster::ImageRenderConfig {
+                let render_cfg = fidget::raster::pixel::RenderConfig {
                     image_size,
                     world_to_model: view.world_to_model(),
-                    cancel,
                     pixel_perfect: matches!(mode, ViewMode2::Sdf),
+                    z: 0.0,
+                };
+
+                let eval_cfg = fidget::raster::pixel::EvalConfig {
+                    cancel,
                     ..Default::default()
                 };
                 let images: Vec<_> = scene
@@ -187,7 +191,11 @@ impl CpuRenderTask {
                     .iter()
                     .map(|shape| {
                         let rs = RenderShape::from(shape.tree.clone());
-                        let data = cfg.run(rs)?;
+                        let data = fidget::raster::pixel::render(
+                            rs.try_into().expect("no vars allowed"),
+                            &render_cfg,
+                            &eval_cfg,
+                        )?;
                         Some((data, shape.color.clone()))
                     })
                     .collect::<Option<_>>()?;
@@ -249,9 +257,11 @@ impl CpuRenderTask {
                     *world_to_model.get_mut((3, 2)).unwrap() =
                         0.3 / bonus_z as f32;
                 }
-                let cfg = fidget::raster::VoxelRenderConfig {
+                let render_cfg = fidget::raster::voxel::RenderConfig {
                     image_size,
                     world_to_model,
+                };
+                let eval_cfg = fidget::raster::voxel::EvalConfig {
                     cancel,
                     ..Default::default()
                 };
@@ -260,7 +270,11 @@ impl CpuRenderTask {
                     .par_iter()
                     .map(|shape| {
                         let rs = RenderShape::from(shape.tree.clone());
-                        let data = cfg.run(rs)?;
+                        let data = fidget::raster::voxel::render(
+                            rs.try_into().expect("no vars allowed"),
+                            &render_cfg,
+                            &eval_cfg,
+                        )?;
                         let data = data.map(|p| GeometryPixel {
                             depth: p.depth,
                             normal: [
@@ -369,7 +383,7 @@ impl RenderSettings {
 }
 
 fn image_to_sdf(
-    image: fidget::raster::Image<fidget::raster::DistancePixel>,
+    image: fidget::raster::pixel::Image,
     view: fidget::gui::View2,
     color: Option<Color>,
 ) -> SdfImageData {
@@ -399,7 +413,7 @@ fn image_to_sdf(
 }
 
 pub(crate) fn image_to_bitfield(
-    image: fidget::raster::Image<fidget::raster::DistancePixel>,
+    image: fidget::raster::pixel::Image,
     view: fidget::gui::View2,
     color: Option<Color>,
 ) -> BitfieldImageData {
@@ -418,10 +432,7 @@ pub(crate) fn image_to_bitfield(
 }
 
 fn image_to_heightmap(
-    image: fidget::raster::Image<
-        fidget::raster::GeometryPixel,
-        fidget::render::VoxelSize,
-    >,
+    image: fidget::raster::voxel::Image,
     view: fidget::gui::View3,
     color: Option<Color>,
 ) -> HeightmapImageData {
@@ -434,23 +445,23 @@ fn image_to_heightmap(
         .0
         .into()
     });
-    let depth = image.map(|v| v.depth).take().0.into();
+    let depth = image.map(|v| v.depth as f32).take().0.into();
     HeightmapImageData { depth, color }
 }
 
 fn merged_ssao(
-    images: &[(fidget::raster::GeometryBuffer, Option<Color>)],
+    images: &[(fidget::raster::voxel::Image, Option<Color>)],
 ) -> std::sync::Arc<[f32]> {
-    let mut out = fidget::raster::GeometryBuffer::new(images[0].0.size());
+    let mut out = fidget::raster::voxel::Image::new(images[0].0.size());
     let threads = Some(&fidget::render::ThreadPool::Global);
     out.apply_effect(
         |x, y| {
             images
                 .iter()
                 .map(|(i, _c)| i[(y, x)])
-                .max_by_key(|p| ordered_float::OrderedFloat(p.depth))
+                .max_by_key(|p| p.depth)
                 .unwrap_or(GeometryPixel {
-                    depth: 0.0,
+                    depth: 0,
                     normal: [0.0; 3],
                 })
         },
@@ -462,7 +473,7 @@ fn merged_ssao(
 }
 
 fn image_to_shaded(
-    image: fidget::raster::GeometryBuffer,
+    image: fidget::raster::voxel::Image,
     view: fidget::gui::View3,
     color: Option<Color>,
 ) -> ShadedImageData {
@@ -486,7 +497,11 @@ fn image_to_shaded(
 
     // XXX this should all happen on the GPU, probably!
     let image = effects::denoise_normals(&image, threads);
-    let pixels = image.take().0.into();
+    let pixels = image
+        .map(|gp| [gp.depth as f32, gp.normal[0], gp.normal[1], gp.normal[2]])
+        .take()
+        .0
+        .into();
     ShadedImageData { pixels, color }
 }
 
@@ -509,7 +524,7 @@ pub(crate) fn hsl_to_rgb(hsl: [u8; 4]) -> [u8; 4] {
 }
 
 fn render_hsl_2d(
-    image: &fidget::raster::Image<fidget::raster::DistancePixel>,
+    image: &fidget::raster::pixel::Image,
     view: fidget::gui::View2,
     hsl: [fidget::context::Tree; 3],
 ) -> fidget::raster::Image<[u8; 4]> {
@@ -526,7 +541,7 @@ fn render_hsl_2d(
 }
 
 pub(crate) fn render_colors_2d(
-    image: &fidget::raster::Image<fidget::raster::DistancePixel>,
+    image: &fidget::raster::pixel::Image,
     view: fidget::gui::View2,
     colors: [fidget::context::Tree; 3],
 ) -> fidget::raster::Image<[u8; 4]> {
@@ -636,10 +651,7 @@ pub(crate) fn render_colors_2d(
 }
 
 fn render_hsl_3d(
-    image: &fidget::raster::Image<
-        fidget::raster::GeometryPixel,
-        fidget::render::VoxelSize,
-    >,
+    image: &fidget::raster::voxel::Image,
     view: fidget::gui::View3,
     hsl: [fidget::context::Tree; 3],
 ) -> fidget::raster::Image<[u8; 4], fidget::render::VoxelSize> {
@@ -656,10 +668,7 @@ fn render_hsl_3d(
 }
 
 fn render_colors_3d(
-    image: &fidget::raster::Image<
-        fidget::raster::GeometryPixel,
-        fidget::render::VoxelSize,
-    >,
+    image: &fidget::raster::voxel::Image,
     view: fidget::gui::View3,
     colors: [fidget::context::Tree; 3],
 ) -> fidget::raster::Image<[u8; 4], fidget::render::VoxelSize> {
@@ -689,7 +698,7 @@ fn render_colors_3d(
                     if y >= image_size.height() {
                         continue;
                     }
-                    if image[(y as usize, x as usize)].depth != 0.0 {
+                    if image[(y as usize, x as usize)].depth != 0 {
                         any_inside = true;
                         break 'outer;
                     }
@@ -723,10 +732,10 @@ fn render_colors_3d(
                         let pz = if py < image.height() && px < image.width() {
                             image[(py, px)].depth
                         } else {
-                            0.0
+                            0
                         };
                         let pos = mat.transform_point(&nalgebra::Point3::new(
-                            px as f32, py as f32, pz,
+                            px as f32, py as f32, pz as f32,
                         ));
                         xs[i] = pos.x;
                         ys[i] = pos.y;

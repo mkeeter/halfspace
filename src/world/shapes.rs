@@ -140,17 +140,19 @@ let upper = input("upper");
 let resolution = input("resolution");
 export_image(scene(scene), vec2(lower), vec2(upper), resolution.to_float());"#;
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum ShapeCategory {
     Halfspace,
     Fidget,
 }
 
+#[derive(Debug)]
 pub struct ShapeInput {
     pub ty: Option<facet::ConstTypeId>,
     pub text: String,
 }
 
+#[derive(Debug)]
 pub struct ShapeDefinition {
     /// Name of the shape type (typically capitalized)
     pub name: String,
@@ -164,6 +166,7 @@ pub struct ShapeDefinition {
     pub category: ShapeCategory,
 }
 
+#[derive(Debug)]
 pub enum ShapeKind {
     Script {
         /// Script to use when building this shape as a block
@@ -271,7 +274,7 @@ fn get_input_field(f: &facet::Field) -> ShapeInput {
                     "[0, 0, 0, 0]",
                 )
             })
-            .or_else(|| get_field_as::<f64>(f, |v| v.to_string(), "0"))
+            .or_else(|| get_field_as::<f32>(f, |v| v.to_string(), "0"))
             .or_else(|| {
                 get_field_as::<fidget::context::Tree>(
                     f,
@@ -350,7 +353,7 @@ mod test {
             panic!()
         };
         let r = &inputs["radius"];
-        assert_eq!(r.ty, Some(f64::SHAPE.id));
+        assert_eq!(r.ty, Some(f32::SHAPE.id));
         assert_eq!(r.text, "1");
         let center = &inputs["center"];
         assert_eq!(center.ty, Some(Vec3::SHAPE.id));

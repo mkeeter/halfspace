@@ -1,5 +1,5 @@
 use crate::{
-    render::{RenderFunction, RenderShape, image_to_bitfield},
+    render::{RenderShape, image_to_bitfield},
     world::Scene,
 };
 
@@ -8,8 +8,8 @@ use zerocopy::IntoBytes;
 use fidget::{
     context::Tree,
     mesh::{Octree, Settings},
-    raster::ImageRenderConfig,
-    render::{ImageSize, RenderHints, ThreadPool},
+    raster::pixel::{EvalConfig, RenderConfig},
+    render::{ImageSize, ThreadPool},
     shapes::{
         Box, Intersection,
         types::{Vec2, Vec3},
@@ -25,7 +25,7 @@ pub enum ExportError {
     BoundsAreTooSmall,
 
     #[error("min feature {0} is invalid")]
-    InvalidMinFeature(f64),
+    InvalidMinFeature(f32),
 
     #[error("min feature is too small")]
     MinFeatureIsTooSmall,
@@ -34,13 +34,13 @@ pub enum ExportError {
     Cancelled,
 
     #[error("resolution {0} is invalid")]
-    InvalidResolution(f64),
+    InvalidResolution(f32),
 
     #[error("width {0} is invalid; must be positive")]
-    InvalidWidth(f64),
+    InvalidWidth(f32),
 
     #[error("height {0} is invalid; must be positive")]
-    InvalidHeight(f64),
+    InvalidHeight(f32),
 
     #[error("image error")]
     ImageError(#[from] image::ImageError),
@@ -49,7 +49,7 @@ pub enum ExportError {
 pub(crate) fn mesh_settings(
     lower: Vec3,
     upper: Vec3,
-    feature_size: f64,
+    feature_size: f32,
 ) -> Result<fidget::mesh::Settings<'static>, ExportError> {
     let center = (lower + upper) / 2.0;
     let scale_xyz = (upper - center).abs().max((lower - center).abs());
@@ -58,18 +58,14 @@ pub(crate) fn mesh_settings(
         return Err(ExportError::InvalidMinFeature(feature_size));
     }
     let mut depth = 0u8;
-    while scale * 2.0 / 2f64.powi(i32::from(depth)) >= feature_size {
+    while scale * 2.0 / 2f32.powi(i32::from(depth)) >= feature_size {
         depth += 1;
         if depth >= 20 {
             return Err(ExportError::MinFeatureIsTooSmall);
         }
     }
 
-    let center = nalgebra::Vector3::new(
-        center.x as f32,
-        center.y as f32,
-        center.z as f32,
-    );
+    let center = nalgebra::Vector3::new(center.x, center.y, center.z);
     if center.x.is_nan() || center.y.is_nan() || center.z.is_nan() {
         return Err(ExportError::InvalidBounds);
     }
@@ -77,7 +73,7 @@ pub(crate) fn mesh_settings(
         return Err(ExportError::BoundsAreTooSmall);
     }
 
-    let view = fidget::gui::View3::from_center_and_scale(center, scale as f32);
+    let view = fidget::gui::View3::from_center_and_scale(center, scale);
     let settings = Settings {
         depth,
         world_to_model: view.world_to_model(),
@@ -92,7 +88,7 @@ pub(crate) fn build_stl(
     tree: Tree,
     lower: Vec3,
     upper: Vec3,
-    feature_size: f64,
+    feature_size: f32,
     cancel_token: fidget::render::CancelToken,
 ) -> Result<Vec<u8>, ExportError> {
     // We intersect the shape with the render bounds, then render with slightly
@@ -108,7 +104,11 @@ pub(crate) fn build_stl(
     let mut settings = mesh_settings(lower, upper, feature_size)?;
     settings.cancel = cancel_token;
 
-    let o = Octree::build(&shape, &settings).ok_or(ExportError::Cancelled)?;
+    let o = Octree::build(
+        &shape.try_into().expect("no variables allowed"),
+        &settings,
+    )
+    .ok_or(ExportError::Cancelled)?;
     let mesh = o.walk_dual();
     let mut stl = vec![];
     mesh.write_stl(&mut stl).unwrap();
@@ -118,7 +118,7 @@ pub(crate) fn build_stl(
 fn image_view(
     lower: Vec2,
     upper: Vec2,
-    resolution: f64,
+    resolution: f32,
 ) -> Result<fidget::gui::View2, ExportError> {
     let center = (lower + upper) / 2.0;
     let scale_xyz = (upper - center).abs().max((lower - center).abs());
@@ -127,24 +127,21 @@ fn image_view(
         return Err(ExportError::InvalidResolution(resolution));
     }
 
-    let center = nalgebra::Vector2::new(center.x as f32, center.y as f32);
+    let center = nalgebra::Vector2::new(center.x, center.y);
     if center.x.is_nan() || center.y.is_nan() {
         return Err(ExportError::InvalidBounds);
     }
     if scale.is_nan() || scale < 1e-8 {
         return Err(ExportError::BoundsAreTooSmall);
     }
-    Ok(fidget::gui::View2::from_center_and_scale(
-        center,
-        scale as f32,
-    ))
+    Ok(fidget::gui::View2::from_center_and_scale(center, scale))
 }
 
 pub(crate) fn image_settings(
     lower: Vec2,
     upper: Vec2,
-    resolution: f64,
-) -> Result<ImageRenderConfig<'static>, ExportError> {
+    resolution: f32,
+) -> Result<RenderConfig, ExportError> {
     let view = image_view(lower, upper, resolution)?;
 
     let size = (upper - lower) * resolution;
@@ -156,12 +153,9 @@ pub(crate) fn image_settings(
     let width = size.x as u32;
     let height = size.y as u32;
 
-    let settings = ImageRenderConfig {
-        image_size: ImageSize::new(width, height),
+    let settings = RenderConfig {
         world_to_model: view.world_to_model(),
-        threads: Some(&ThreadPool::Global),
-        tile_sizes: RenderFunction::tile_sizes_2d(),
-        ..Default::default()
+        ..RenderConfig::from_size(ImageSize::new(width, height))
     };
     Ok(settings)
 }
@@ -170,29 +164,36 @@ pub(crate) fn build_image(
     scene: Scene,
     lower: Vec2,
     upper: Vec2,
-    resolution: f64,
+    resolution: f32,
     cancel_token: fidget::render::CancelToken,
 ) -> Result<Vec<u8>, ExportError> {
     // Some duplicated work here, oh well
     let view = image_view(lower, upper, resolution)?;
-    let mut cfg = image_settings(lower, upper, resolution)?;
-    cfg.cancel = cancel_token;
+    let render_cfg = image_settings(lower, upper, resolution)?;
+    let eval_cfg = EvalConfig {
+        cancel: cancel_token,
+        ..EvalConfig::default()
+    };
 
     let images: Vec<_> = scene
         .shapes
         .iter()
         .map(|shape| {
             let rs = RenderShape::from(shape.tree.clone());
-            let data = cfg.run(rs)?;
+            let data = fidget::raster::pixel::render(
+                rs.try_into().expect("no vars allowed"),
+                &render_cfg,
+                &eval_cfg,
+            )?;
             Some(image_to_bitfield(data, view, shape.color.clone()))
         })
         .collect::<Option<_>>()
         .ok_or(ExportError::Cancelled)?;
 
-    let mut out = fidget::raster::Image::<[u8; 4]>::new(cfg.image_size);
+    let mut out = fidget::raster::Image::<[u8; 4]>::new(render_cfg.image_size);
     out.apply_effect(
         |x, y| {
-            let pos = y * cfg.image_size.width() as usize + x;
+            let pos = y * render_cfg.image_size.width() as usize + x;
             for i in images.iter().rev() {
                 if i.distance[pos] < 0.0 {
                     let c = i
@@ -210,14 +211,14 @@ pub(crate) fn build_image(
             }
             [0; 4]
         },
-        cfg.threads,
+        eval_cfg.threads,
     );
     let mut bytes = vec![];
     image::write_buffer_with_format(
         &mut std::io::Cursor::new(&mut bytes),
         out.take().0.as_bytes(),
-        cfg.image_size.width(),
-        cfg.image_size.height(),
+        render_cfg.image_size.width(),
+        render_cfg.image_size.height(),
         image::ColorType::Rgba8,
         image::ImageFormat::Png,
     )?;
