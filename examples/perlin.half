@@ -1,9 +1,10 @@
 {
   "tag": "halfspace",
-  "major": 1,
-  "minor": 2,
+  "major": 3,
+  "minor": 0,
   "meta": {
-    "description": "Closed-form Perlin noise"
+    "description": "Closed-form Perlin noise",
+    "name": null
   },
   "world": {
     "next_index": 2,
@@ -13,18 +14,22 @@
     ],
     "blocks": {
       "1": {
-        "name": "gen",
-        "script": "let shape = input(\"shape\");\nlet s = input(\"scale\");\nlet w = input(\"weight\");\noutput(\"out\", shape + shape.scale([s, s]) * w);",
-        "inputs": {
-          "scale": "0.4",
-          "weight": "0.8",
-          "shape": "noise"
+        "Script": {
+          "name": "gen",
+          "script": "let shape = input(\"shape\");\nlet s = input(\"scale\");\nlet w = input(\"weight\");\noutput(\"out\", shape + shape.scale([s, s]) * w);",
+          "inputs": {
+            "scale": "0.4",
+            "weight": "0.8",
+            "shape": "noise"
+          }
         }
       },
       "0": {
-        "name": "noise",
-        "script": "let fx = floor(x);\nlet fy = floor(y);\n\n/// Pseudo-random seeded value between 0 and 1\nfn rand(a, b) {\n    (sin(a * 12.9898 + b * 78.233) * 43758.5453) % 1.0\n}\n\nfn weight(ix, iy) {\n\tlet fx = floor(x) + ix;\n\tlet fy = floor(y) + iy;\n    let dx = x - fx;\n    let dy = y - fy;\n\tlet angle = rand(fx, fy) * 2.0 * PI;\n\tlet dir_x = cos(angle);\n\tlet dir_y = sin(angle);\n\tdx * dir_x + dy * dir_y\n}\n\nfn smoothstep(edge0, edge1, x) {\n    let t = min(max((x - edge0) / (edge1 - edge0), 0.0), 1.0);\n    return t * t * (3.0 - 2.0 * t);\n}\n\nlet wa = weight(0, 0);\nlet wb = weight(1, 0);\nlet wc = weight(0, 1);\nlet wd = weight(1, 1);\n\nlet wab = wa + smoothstep(floor(x), floor(x) + 1, x) * (wb - wa);\nlet wcd = wc + smoothstep(floor(x), floor(x) + 1, x) * (wd - wc);\nlet w = wab + smoothstep(floor(y), floor(y) + 1, y) * (wcd - wab);\n\noutput(\"out\", w)",
-        "inputs": {}
+        "Script": {
+          "name": "noise",
+          "script": "/// Closed-form Perlin noise\nfn weight(ix, iy) {\n    let fx = floor(x) + ix;\n    let fy = floor(y) + iy;\n    let dx = x - fx;\n    let dy = y - fy;\n    let angle = rand(mix(fx, fy)) * 2.0 * PI;\n    let dir_x = cos(angle);\n    let dir_y = sin(angle);\n    dx * dir_x + dy * dir_y\n}\n\nfn smoothstep(v) {\n    let t = v - floor(v);\n    return t * t * (3.0 - 2.0 * t);\n}\n\nlet wa = weight(0, 0);\nlet wb = weight(1, 0);\nlet wc = weight(0, 1);\nlet wd = weight(1, 1);\n\nlet wab = wa  + smoothstep(x) * (wb  - wa);\nlet wcd = wc  + smoothstep(x) * (wd  - wc);\nlet w   = wab + smoothstep(y) * (wcd - wab);\n\noutput(\"out\", w)\n",
+          "inputs": {}
+        }
       }
     }
   },
