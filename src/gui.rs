@@ -80,7 +80,6 @@ impl<'a, N: Notify> WorldView<'a, N> {
         // Does that entry have a valid image?
         //
         // Many things to consider...
-        let mut out = ViewResponse::empty();
         let block = &self.world[index];
         let block_view = block.get_view();
         let rect = ui.clip_rect();
@@ -94,15 +93,14 @@ impl<'a, N: Notify> WorldView<'a, N> {
         if block_view.is_none()
             && matches!(entry, std::collections::hash_map::Entry::Vacant(..))
         {
-            return out
-                | view::fallback_ui(
-                    ui,
-                    index,
-                    None,
-                    size,
-                    ERROR,
-                    Some("block has errors and no previous view"),
-                );
+            return view::fallback_ui(
+                ui,
+                index,
+                None,
+                size,
+                ERROR,
+                Some("block has errors and no previous view"),
+            );
         }
 
         // At this point, either we have a block view, or we have a previous
@@ -178,30 +176,28 @@ impl<'a, N: Notify> WorldView<'a, N> {
                 self.rx,
                 self.cpu_pool,
             ) else {
-                return out
-                    | view::fallback_ui(
-                        ui,
-                        index,
-                        Some(entry),
-                        size,
-                        HOURGLASS,
-                        None,
-                    );
+                return view::fallback_ui(
+                    ui,
+                    index,
+                    Some(entry),
+                    size,
+                    HOURGLASS,
+                    None,
+                );
             };
             (image, true)
         } else if let Some(prev_image) = entry.prev_image() {
             (prev_image, false)
         } else {
             // XXX can we actually get here?
-            return out
-                | view::fallback_ui(
-                    ui,
-                    index,
-                    Some(entry),
-                    size,
-                    ERROR,
-                    Some("block has errors and no previous image"),
-                );
+            return view::fallback_ui(
+                ui,
+                index,
+                Some(entry),
+                size,
+                ERROR,
+                Some("block has errors and no previous image"),
+            );
         };
 
         // This is the magic that triggers the GPU callback.  We pick a render
@@ -278,32 +274,32 @@ impl<'a, N: Notify> WorldView<'a, N> {
                 ));
             }
             _ => {
-                return out
-                    | if entry.task.as_ref().is_some() {
-                        view::fallback_ui(
-                            ui,
-                            index,
-                            Some(entry),
-                            size,
-                            HOURGLASS,
-                            None,
-                        )
-                    } else {
-                        view::fallback_ui(
-                            ui,
-                            index,
-                            Some(entry),
-                            size,
-                            ERROR,
-                            Some(
-                                "block has errors and no previous \
+                return if entry.task.as_ref().is_some() {
+                    view::fallback_ui(
+                        ui,
+                        index,
+                        Some(entry),
+                        size,
+                        HOURGLASS,
+                        None,
+                    )
+                } else {
+                    view::fallback_ui(
+                        ui,
+                        index,
+                        Some(entry),
+                        size,
+                        ERROR,
+                        Some(
+                            "block has errors and no previous \
                                  image in this mode",
-                            ),
-                        )
-                    };
+                        ),
+                    )
+                };
             }
         }
 
+        let mut out = ViewResponse::empty();
         if render_changed {
             out |= ViewResponse::REDRAW;
         }
