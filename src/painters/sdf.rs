@@ -1,7 +1,7 @@
-use super::{WgpuResources, blit::BlitData};
+use super::WgpuResources;
 
 /// Painter drawing SDFs
-use crate::{view::SdfViewImage, world::BlockIndex};
+use crate::{view::PixelImage, world::BlockIndex};
 use eframe::{
     egui,
     egui_wgpu::{self, wgpu},
@@ -29,8 +29,8 @@ pub struct WgpuSdfPainter {
     /// Index of the block being rendered
     index: BlockIndex,
 
-    /// Image(s) to draw to the screen
-    image: SdfViewImage,
+    /// Image to render
+    image: PixelImage,
 }
 
 impl WgpuSdfPainter {
@@ -40,15 +40,15 @@ impl WgpuSdfPainter {
     /// quad; the `image` contains its own size and view transforms.
     pub fn new(
         index: BlockIndex,
-        image: SdfViewImage,
+        image: PixelImage,
         size: fidget::render::ImageSize,
         view: fidget::gui::View2,
     ) -> Self {
         Self {
             index,
-            image,
             size,
             view,
+            image,
         }
     }
 }
@@ -56,11 +56,14 @@ impl WgpuSdfPainter {
 pub(crate) struct SdfResources {
     pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
-    bound_data: HashMap<BlockIndex, SdfBundleData>,
+    bound_data: HashMap<BlockIndex, SdfData>,
 }
 
 impl SdfResources {
-    pub fn new(device: &wgpu::Device) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        target_format: wgpu::TextureFormat,
+    ) -> Self {
         // Create SDF shader module
         let shader =
             device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -159,7 +162,7 @@ impl SdfResources {
                     module: &shader,
                     entry_point: Some("fs_main"),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::Bgra8Unorm,
+                        format: target_format,
                         blend: Some(wgpu::BlendState {
                             color: wgpu::BlendComponent::OVER,
                             alpha: wgpu::BlendComponent::OVER,
@@ -303,22 +306,14 @@ impl SdfResources {
         }
     }
 
-    pub fn paint(&self, render_pass: &mut wgpu::RenderPass, index: BlockIndex) {
+    pub fn paint(&self, render_pass: &mut wgpu::RenderPass, sdf: &SdfData) {
         render_pass.set_pipeline(&self.pipeline);
-        for b in &self.bound_data[&index].images {
-            render_pass.set_bind_group(0, &b.bind_group, &[]);
-            render_pass.draw(0..6, 0..1);
-        }
+        render_pass.set_bind_group(0, &sdf.bind_group, &[]);
+        render_pass.draw(0..6, 0..1);
     }
 }
 
-/// Resources used to render a view of SDF images
-struct SdfBundleData {
-    blit: BlitData,
-    images: Vec<SdfData>,
-}
-
-/// Resources used to render a single SDF
+/// Resources used to render a SDF
 struct SdfData {
     /// Distance texture (`f32`)
     distance_texture: wgpu::Texture,
@@ -339,7 +334,7 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         _screen_descriptor: &egui_wgpu::ScreenDescriptor,
-        egui_encoder: &mut wgpu::CommandEncoder,
+        _egui_encoder: &mut wgpu::CommandEncoder,
         resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
         let gr: &mut WgpuResources = resources.get_mut().unwrap();
@@ -362,34 +357,40 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
         // TODO compute this off-thread?
         let mut min_distance = f32::INFINITY;
         let mut max_distance = -f32::INFINITY;
-        for d in self.image.data.iter().flat_map(|i| i.distance.iter()) {
+        for d in self.image.distance.iter() {
             max_distance = max_distance.max(*d);
             min_distance = min_distance.min(*d);
         }
-        let any_color = self.image.data.iter().any(|i| i.color.is_some());
+        let any_color = self.image.color.is_some();
 
-        let blit =
-            BlitData::new(device, &gr.blit.bind_group_layout, texture_size);
-        gr.sdf.bound_data.insert(
-            self.index,
-            SdfBundleData {
-                blit,
-                images: vec![],
+        let data = gr.sdf.get_data(device, texture_size);
+
+        // Upload SDF image data
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &data.distance_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
             },
+            self.image.distance.as_bytes(),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * width),
+                rows_per_image: Some(height),
+            },
+            texture_size,
         );
 
-        for image in self.image.data.iter() {
-            let data = gr.sdf.get_data(device, texture_size);
-
-            // Upload SDF image data
+        let has_color = if let Some(color) = &self.image.color {
             queue.write_texture(
                 wgpu::TexelCopyTextureInfo {
-                    texture: &data.distance_texture,
+                    texture: &data.color_texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d::ZERO,
                     aspect: wgpu::TextureAspect::All,
                 },
-                image.distance.as_bytes(),
+                color.as_bytes(),
                 wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(4 * width),
@@ -397,60 +398,33 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
                 },
                 texture_size,
             );
+            true
+        } else {
+            false
+        };
 
-            let has_color = if let Some(color) = &image.color {
-                queue.write_texture(
-                    wgpu::TexelCopyTextureInfo {
-                        texture: &data.color_texture,
-                        mip_level: 0,
-                        origin: wgpu::Origin3d::ZERO,
-                        aspect: wgpu::TextureAspect::All,
-                    },
-                    color.as_bytes(),
-                    wgpu::TexelCopyBufferLayout {
-                        offset: 0,
-                        bytes_per_row: Some(4 * width),
-                        rows_per_image: Some(height),
-                    },
-                    texture_size,
-                );
-                true
-            } else {
-                false
-            };
-
-            let uniforms = Uniforms {
-                transform: transform.into(),
-                has_color: u32::from(has_color),
-                any_color: u32::from(any_color),
-                min_distance,
-                max_distance,
-            };
-            {
-                let mut writer = queue
-                    .write_buffer_with(
-                        &data.uniform_buffer,
-                        0,
-                        (std::mem::size_of_val(&uniforms) as u64)
-                            .try_into()
-                            .unwrap(),
-                    )
-                    .unwrap();
-                writer.copy_from_slice(uniforms.as_bytes());
-            }
-
-            gr.sdf
-                .bound_data
-                .get_mut(&self.index)
-                .unwrap()
-                .images
-                .push(data);
+        let uniforms = Uniforms {
+            transform: transform.into(),
+            has_color: u32::from(has_color),
+            any_color: u32::from(any_color),
+            min_distance,
+            max_distance,
+        };
+        {
+            let mut writer = queue
+                .write_buffer_with(
+                    &data.uniform_buffer,
+                    0,
+                    (std::mem::size_of_val(&uniforms) as u64)
+                        .try_into()
+                        .unwrap(),
+                )
+                .unwrap();
+            writer.copy_from_slice(uniforms.as_bytes());
         }
 
-        // Do deferred painting (with depth buffer) in a separate render pass
-        let data = &gr.sdf.bound_data[&self.index];
-        let mut render_pass = data.blit.begin_render_pass(egui_encoder);
-        gr.sdf.paint(&mut render_pass, self.index);
+        let prev = gr.sdf.bound_data.insert(self.index, data);
+        assert!(prev.is_none());
 
         Vec::new()
     }
@@ -465,6 +439,6 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
         let data = &rs.sdf.bound_data[&self.index];
 
         rs.clear.paint(render_pass);
-        rs.blit.paint(render_pass, &data.blit);
+        rs.sdf.paint(render_pass, &data);
     }
 }

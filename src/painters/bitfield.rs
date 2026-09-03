@@ -1,6 +1,6 @@
 //! Painter drawing bitfield bitmaps in a 2D view
 use super::WgpuResources;
-use crate::{view::BitfieldViewImage, world::BlockIndex};
+use crate::{view::PixelImage, world::BlockIndex};
 use eframe::{
     egui,
     egui_wgpu::{self, wgpu},
@@ -17,6 +17,9 @@ struct Uniforms {
     _padding: [u8; 12],
 }
 
+// TODO merge this and WgpuSdfPainter, since they store the same data (just pick
+// a different pipeline at the end)
+
 /// GPU callback
 pub struct WgpuBitfieldPainter {
     /// Current view, which may differ from the image's view
@@ -26,8 +29,8 @@ pub struct WgpuBitfieldPainter {
     /// Index of the block being rendered
     index: BlockIndex,
 
-    /// Image(s) to draw to the screen
-    image: BitfieldViewImage,
+    /// Image to render
+    image: PixelImage,
 }
 
 impl WgpuBitfieldPainter {
@@ -37,14 +40,14 @@ impl WgpuBitfieldPainter {
     /// quad; the `image` contains its own size and view transforms.
     pub fn new(
         index: BlockIndex,
-        image: BitfieldViewImage,
+        image: PixelImage,
         size: fidget::render::ImageSize,
         view: fidget::gui::View2,
     ) -> Self {
         Self {
             index,
-            image,
             size,
+            image,
             view,
         }
     }
@@ -54,8 +57,8 @@ pub(crate) struct BitfieldResources {
     pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
 
-    /// Each block is bound to one or more objects to render (in order)
-    bound_data: HashMap<BlockIndex, Vec<BitfieldData>>,
+    /// Each block is bound to data which should be rendered
+    bound_data: HashMap<BlockIndex, BitfieldData>,
 }
 
 impl BitfieldResources {
@@ -163,7 +166,7 @@ impl BitfieldResources {
                     module: &shader,
                     entry_point: Some("fs_main"),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: target_format,
+                        format: target_format, // TODO is this necessary?
                         blend: Some(wgpu::BlendState {
                             color: wgpu::BlendComponent::OVER,
                             alpha: wgpu::BlendComponent::OVER,
@@ -306,12 +309,14 @@ impl BitfieldResources {
 
     pub fn paint(&self, render_pass: &mut wgpu::RenderPass, index: BlockIndex) {
         render_pass.set_pipeline(&self.pipeline);
-        for b in &self.bound_data[&index] {
-            render_pass.set_bind_group(0, &b.bind_group, &[]);
-            render_pass.draw(0..6, 0..1);
-        }
+        let b = &self.bound_data[&index];
+        render_pass.set_bind_group(0, &b.bind_group, &[]);
+        render_pass.draw(0..6, 0..1);
     }
 }
+
+// TODO merge this and SdfData, since they store the same data (just pick
+// a different pipeline at the end)
 
 /// Resources used to render a single bitfield
 struct BitfieldData {
@@ -354,18 +359,33 @@ impl egui_wgpu::CallbackTrait for WgpuBitfieldPainter {
             self.view,
             self.size,
         );
-        for image in self.image.data.iter() {
-            let data = gr.bitfield.get_data(device, texture_size);
+        let data = gr.bitfield.get_data(device, texture_size);
 
-            // Copy data to textures
+        // Copy data to textures
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &data.distance_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            self.image.distance.as_bytes(),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * width),
+                rows_per_image: Some(height),
+            },
+            texture_size,
+        );
+        let has_color = if let Some(color) = &self.image.color {
             queue.write_texture(
                 wgpu::TexelCopyTextureInfo {
-                    texture: &data.distance_texture,
+                    texture: &data.color_texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d::ZERO,
                     aspect: wgpu::TextureAspect::All,
                 },
-                image.distance.as_bytes(),
+                color.as_bytes(),
                 wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(4 * width),
@@ -373,52 +393,32 @@ impl egui_wgpu::CallbackTrait for WgpuBitfieldPainter {
                 },
                 texture_size,
             );
-            let has_color = if let Some(color) = &image.color {
-                queue.write_texture(
-                    wgpu::TexelCopyTextureInfo {
-                        texture: &data.color_texture,
-                        mip_level: 0,
-                        origin: wgpu::Origin3d::ZERO,
-                        aspect: wgpu::TextureAspect::All,
-                    },
-                    color.as_bytes(),
-                    wgpu::TexelCopyBufferLayout {
-                        offset: 0,
-                        bytes_per_row: Some(4 * width),
-                        rows_per_image: Some(height),
-                    },
-                    texture_size,
-                );
-                true
-            } else {
-                false
+            true
+        } else {
+            false
+        };
+
+        // Build and write the uniform buffer
+        {
+            let uniforms = Uniforms {
+                transform: transform.into(),
+                has_color: u32::from(has_color),
+                _padding: Default::default(),
             };
-
-            // Build and write the uniform buffer
-            {
-                let uniforms = Uniforms {
-                    transform: transform.into(),
-                    has_color: u32::from(has_color),
-                    _padding: Default::default(),
-                };
-                let mut writer = queue
-                    .write_buffer_with(
-                        &data.uniform_buffer,
-                        0,
-                        (std::mem::size_of_val(&uniforms) as u64)
-                            .try_into()
-                            .unwrap(),
-                    )
-                    .unwrap();
-                writer.copy_from_slice(uniforms.as_bytes());
-            }
-
-            gr.bitfield
-                .bound_data
-                .entry(self.index)
-                .or_default()
-                .push(data);
+            let mut writer = queue
+                .write_buffer_with(
+                    &data.uniform_buffer,
+                    0,
+                    (std::mem::size_of_val(&uniforms) as u64)
+                        .try_into()
+                        .unwrap(),
+                )
+                .unwrap();
+            writer.copy_from_slice(uniforms.as_bytes());
         }
+
+        let prev = gr.bitfield.bound_data.insert(self.index, data);
+        assert!(prev.is_none());
 
         Vec::new()
     }

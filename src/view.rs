@@ -167,167 +167,52 @@ impl From<ViewState> for ViewCanvas {
     }
 }
 
-/// Set of SDF images, along with their position and metadata
 #[derive(Clone)]
-pub struct SdfViewImage {
-    pub data: Vec<SdfImageData>,
+pub struct PixelImage {
+    pub distance: Arc<[f32]>,
+    pub color: Option<Arc<[[u8; 4]]>>,
     pub view: fidget::gui::View2,
     pub size: fidget::render::ImageSize,
     pub level: usize,
 }
 
-/// Single SDF image to be drawn to the screen
 #[derive(Clone)]
-pub struct SdfImageData {
-    pub distance: Arc<[f32]>,
-    pub color: Option<Arc<[[u8; 4]]>>,
-}
-
-/// Set of bitfield images, along with their position and metadata
-#[derive(Clone)]
-pub struct BitfieldViewImage {
-    pub data: Vec<BitfieldImageData>,
-    pub view: fidget::gui::View2,
-    pub size: fidget::render::ImageSize,
-    pub level: usize,
-}
-
-/// Single bitfield image to be drawn to the screen
-#[derive(Clone)]
-pub struct BitfieldImageData {
-    pub distance: Arc<[f32]>,
-    pub color: Option<Arc<[[u8; 4]]>>,
-}
-
-impl BitfieldViewImage {
-    /// Convert a distance image into a bitfield image, with denoising
+pub struct RgbaImage {
+    /// Pre-baked color
     ///
-    /// Filled pixels are normally converted to ±∞, but this can cause glitches
-    /// if they're on the edge of the model: linear interpolation in the texture
-    /// unit means that any pixel touching the infinite pixel will also be
-    /// infinite.
-    ///
-    /// Denoising converts those infinite pixels into the average of their
-    /// neighbors, to reduce visual glitches when rendering lower-than-native
-    /// resolution images.
-    pub fn denoise(
-        image: fidget::raster::pixel::Image,
-        threads: Option<&fidget::render::ThreadPool>,
-    ) -> fidget::raster::Image<f32> {
-        let mut out = fidget::raster::Image::new(image.size());
-        out.apply_effect(
-            |x: usize, y: usize| match image[(y, x)].unpack() {
-                fidget::raster::pixel::DistancePixel::Value(v) => v,
-                fidget::raster::pixel::DistancePixel::Fill {
-                    inside, ..
-                } => {
-                    // Replace fill pixels with the average of their
-                    // actual-distance neighbors, falling back to infinity if
-                    // that fails.  This prevents glitchiness on the edges of
-                    // models.  If a fill pixel is exactly at the edge of a
-                    // model, linear interpolation in the texture means that
-                    // every pixel interpolated with the infinite pixel is also
-                    // infinite.
-                    let mut inside_count = 0;
-                    let mut inside_avg = 0.0;
-                    let mut outside_count = 0;
-                    let mut outside_avg = 0.0;
-                    for dx in [-1, 0, 1] {
-                        let Some(x) = x.checked_add_signed(dx) else {
-                            continue;
-                        };
-                        if x >= image.width() {
-                            continue;
-                        }
-                        for dy in [-1, 0, 1] {
-                            let Some(y) = y.checked_add_signed(dy) else {
-                                continue;
-                            };
-                            if y >= image.height() {
-                                continue;
-                            }
-                            if let Some(d) = image[(y, x)].distance() {
-                                if d < 0.0 {
-                                    inside_avg += d;
-                                    inside_count += 1;
-                                } else if d > 0.0 {
-                                    outside_avg += d;
-                                    outside_count += 1;
-                                }
-                            }
-                        }
-                    }
-                    if inside && inside_count > 0 {
-                        inside_avg / inside_count as f32
-                    } else if !inside && outside_count > 0 {
-                        outside_avg / outside_count as f32
-                    } else if inside_count + outside_count > 0 {
-                        (inside_avg + outside_avg)
-                            / (inside_count + outside_count) as f32
-                    } else if inside {
-                        -f32::INFINITY
-                    } else {
-                        f32::INFINITY
-                    }
-                }
-            },
-            threads,
-        );
-        out
-    }
-}
-
-/// Set of heightmap images, along with their position and metadata
-#[derive(Clone)]
-pub struct HeightmapViewImage {
-    pub data: Vec<HeightmapImageData>,
-    pub view: fidget::gui::View3,
-    pub size: fidget::render::VoxelSize,
-    pub level: usize,
-}
-
-/// Single heightmap image to be drawn to the screen
-#[derive(Clone)]
-pub struct HeightmapImageData {
-    pub depth: Arc<[f32]>,
-    pub color: Option<Arc<[[u8; 4]]>>,
-}
-
-/// Set of shaded images, along with their position and metadata
-#[derive(Clone)]
-pub struct ShadedViewImage {
-    pub data: Vec<ShadedImageData>,
-    pub ssao: Arc<[f32]>,
-    pub view: fidget::gui::View3,
-    pub size: fidget::render::VoxelSize,
-    pub level: usize,
-}
-
-/// Single shaded image to be drawn to the screen
-#[derive(Clone)]
-pub struct ShadedImageData {
-    /// [depth, dx, dy, dz] as floating-point values
-    pub pixels: Arc<[[f32; 4]]>,
+    /// This is greyscale for a heightmap rendering, or RGB for shaded
     pub color: Arc<[[u8; 4]]>,
+    pub view: fidget::gui::View3,
+    pub size: fidget::render::VoxelSize,
+    pub level: usize,
 }
 
 /// Rendered image(s) to be drawn, along with the settings that generated it
-#[derive(Clone, strum::EnumDiscriminants)]
-#[strum_discriminants(name(ViewCanvasType))]
+#[derive(Clone)]
 pub enum ViewImage {
-    Sdf(SdfViewImage),
-    Bitfield(BitfieldViewImage),
-    Heightmap(HeightmapViewImage),
-    Shaded(ShadedViewImage),
+    Pixel { mode: ViewMode2, image: PixelImage },
+    Voxel { mode: ViewMode3, image: RgbaImage },
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum ViewCanvasType {
+    Bitfield,
+    Sdf,
+    Heightmap,
+    Shaded,
 }
 
 impl ViewImage {
     pub fn level(&self) -> usize {
         match self {
-            ViewImage::Sdf(i) => i.level,
-            ViewImage::Bitfield(i) => i.level,
-            ViewImage::Heightmap(i) => i.level,
-            ViewImage::Shaded(i) => i.level,
+            ViewImage::Pixel {
+                image: PixelImage { level, .. },
+                ..
+            }
+            | ViewImage::Voxel {
+                image: RgbaImage { level, .. },
+                ..
+            } => *level,
         }
     }
 }

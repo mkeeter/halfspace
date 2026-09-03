@@ -204,7 +204,10 @@ impl<'a, N: Notify> WorldView<'a, N> {
         // mode based on the selected image's settings
         match (&image, current_canvas) {
             (
-                ViewImage::Bitfield(image),
+                ViewImage::Pixel {
+                    mode: ViewMode2::Bitfield,
+                    image,
+                },
                 ViewCanvas::Canvas2 {
                     mode: ViewMode2::Bitfield,
                     canvas,
@@ -221,7 +224,10 @@ impl<'a, N: Notify> WorldView<'a, N> {
                 ));
             }
             (
-                ViewImage::Sdf(image),
+                ViewImage::Pixel {
+                    mode: ViewMode2::Sdf,
+                    image,
+                },
                 ViewCanvas::Canvas2 {
                     mode: ViewMode2::Sdf,
                     canvas,
@@ -237,26 +243,23 @@ impl<'a, N: Notify> WorldView<'a, N> {
                     ),
                 ));
             }
+            // Both heightmap and shaded images are drawn by the RGBA painter
             (
-                ViewImage::Heightmap(image),
+                ViewImage::Voxel {
+                    mode: ViewMode3::Heightmap,
+                    image,
+                },
                 ViewCanvas::Canvas3 {
                     mode: ViewMode3::Heightmap,
                     canvas,
                     ..
                 },
-            ) => {
-                ui.painter().add(egui_wgpu::Callback::new_paint_callback(
-                    rect,
-                    crate::painters::WgpuHeightmapPainter::new(
-                        index,
-                        image.clone(),
-                        size,
-                        canvas.view(),
-                    ),
-                ));
-            }
-            (
-                ViewImage::Shaded(image),
+            )
+            | (
+                ViewImage::Voxel {
+                    mode: ViewMode3::Shaded,
+                    image,
+                },
                 ViewCanvas::Canvas3 {
                     mode: ViewMode3::Shaded,
                     canvas,
@@ -265,7 +268,7 @@ impl<'a, N: Notify> WorldView<'a, N> {
             ) => {
                 ui.painter().add(egui_wgpu::Callback::new_paint_callback(
                     rect,
-                    crate::painters::WgpuShadedPainter::new(
+                    crate::painters::WgpuRgbaPainter::new(
                         index,
                         image.clone(),
                         size,
