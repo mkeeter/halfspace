@@ -321,11 +321,7 @@ impl CpuRenderTask {
 ///
 /// Returns `true` if we should swap (i.e. replace `a` with `b`)
 fn compare_distance_pixel(a: RawDistancePixel, b: RawDistancePixel) -> bool {
-    match (a.inside(), b.inside()) {
-        (true, false) => false,
-        (false, true) => true,
-        (true, true) | (false, false) => false,
-    }
+    !a.inside() || b.inside()
 }
 
 pub(crate) fn merge_and_color(
