@@ -321,42 +321,11 @@ impl CpuRenderTask {
 ///
 /// Returns `true` if we should swap (i.e. replace `a` with `b`)
 fn compare_distance_pixel(a: RawDistancePixel, b: RawDistancePixel) -> bool {
-    let a_inside = a.inside();
-    let a_inf = a.distance().is_some_and(|d| d.is_infinite());
-    let a_fill = !a.is_distance();
-    let b_inside = b.inside();
-    let b_fill = b.distance().is_some_and(|d| d.is_infinite());
-    let b_inf = !b.is_distance();
-
-    // If either side is inside, then prefer it.
-    if a_inside && !b_inside {
-        return false;
-    } else if b_inside && !a_inside {
-        return true;
+    match (a.inside(), b.inside()) {
+        (true, false) => false,
+        (false, true) => true,
+        (true, true) | (false, false) => false,
     }
-
-    // If both sides are fills, prefer A (arbitrarily); otherwise, prefer the
-    // non-fill side (since it's a truer value).
-    if a_fill && b_fill {
-        return false;
-    } else if a_fill && !b_fill {
-        return true;
-    } else if b_fill && !a_fill {
-        return false;
-    }
-
-    // If both sides are infinite, then prefer A (arbitrarily); otherwise,
-    // prefer the non-infinite value (same idea as above)
-    if a_inf && b_inf {
-        return false;
-    } else if a_inf && !b_inf {
-        return true;
-    } else if b_inf && !a_inf {
-        return false;
-    }
-
-    // Otherwise, do a straight distance comparison.
-    a.distance().unwrap() >= b.distance().unwrap()
 }
 
 pub(crate) fn merge_and_color(
