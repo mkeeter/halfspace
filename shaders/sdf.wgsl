@@ -143,4 +143,3 @@ fn fs_main(@location(0) tex_coords: vec2<f32>) -> RgbaDepth {
     }
     return RgbaDepth(color, depth);
 }
-

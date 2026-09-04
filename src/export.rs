@@ -1,7 +1,4 @@
-use crate::{
-    render::{RenderShape, image_to_bitfield},
-    world::Scene,
-};
+use crate::{render::RenderShape, world::Scene};
 
 use zerocopy::IntoBytes;
 
@@ -185,31 +182,23 @@ pub(crate) fn build_image(
                 &render_cfg,
                 &eval_cfg,
             )?;
-            Some(image_to_bitfield(data, view, shape.color.clone()))
+            Some((data, shape.color.clone()))
         })
         .collect::<Option<_>>()
         .ok_or(ExportError::Cancelled)?;
+
+    let (distance, color) =
+        crate::render::merge_and_color(render_cfg.image_size, view, images);
 
     let mut out = fidget::raster::Image::<[u8; 4]>::new(render_cfg.image_size);
     out.apply_effect(
         |x, y| {
             let pos = y * render_cfg.image_size.width() as usize + x;
-            for i in images.iter().rev() {
-                if i.distance[pos] < 0.0 {
-                    let c = i
-                        .color
-                        .as_ref()
-                        .map(|c| c[pos])
-                        .unwrap_or([u8::MAX; 4]);
-                    if c[3] == 0 {
-                        // XXX awkward special cases, otherwise we have
-                        // transparent pixels in the utopian example.
-                        continue;
-                    }
-                    return c;
-                }
+            if distance[pos].0.inside() {
+                color.as_ref().map(|c| c[pos]).unwrap_or([u8::MAX; 4])
+            } else {
+                [0; 4]
             }
-            [0; 4]
         },
         eval_cfg.threads,
     );

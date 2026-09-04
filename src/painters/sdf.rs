@@ -306,7 +306,7 @@ impl SdfResources {
         }
     }
 
-    pub fn paint(&self, render_pass: &mut wgpu::RenderPass, sdf: &SdfData) {
+    fn paint(&self, render_pass: &mut wgpu::RenderPass, sdf: &SdfData) {
         render_pass.set_pipeline(&self.pipeline);
         render_pass.set_bind_group(0, &sdf.bind_group, &[]);
         render_pass.draw(0..6, 0..1);
@@ -361,7 +361,6 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
             max_distance = max_distance.max(*d);
             min_distance = min_distance.min(*d);
         }
-        let any_color = self.image.color.is_some();
 
         let data = gr.sdf.get_data(device, texture_size);
 
@@ -381,7 +380,6 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
             },
             texture_size,
         );
-
         let has_color = if let Some(color) = &self.image.color {
             queue.write_texture(
                 wgpu::TexelCopyTextureInfo {
@@ -406,7 +404,7 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
         let uniforms = Uniforms {
             transform: transform.into(),
             has_color: u32::from(has_color),
-            any_color: u32::from(any_color),
+            any_color: u32::from(has_color), // TODO delete this
             min_distance,
             max_distance,
         };
@@ -439,6 +437,6 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
         let data = &rs.sdf.bound_data[&self.index];
 
         rs.clear.paint(render_pass);
-        rs.sdf.paint(render_pass, &data);
+        rs.sdf.paint(render_pass, data);
     }
 }
