@@ -1,8 +1,8 @@
 // Uniform buffer containing the transform matrix
 struct Uniforms {
     transform: mat4x4<f32>,
-    min_distance: f32,
-    max_distance: f32,
+    min_distance: f32, // TODO unused
+    max_distance: f32, // TODO unused
     has_color: u32,
     any_color: u32,
 };
@@ -111,24 +111,15 @@ fn color_stripe(f: f32) -> f32 {
     return run(base, f_abs, dim, bands);
 }
 
-struct RgbaDepth {
+struct Rgba {
   @location(0) color: vec4<f32>,
-  @builtin(frag_depth) depth: f32
 }
 
 // Fragment shader
 @fragment
-fn fs_main(@location(0) tex_coords: vec2<f32>) -> RgbaDepth {
+fn fs_main(@location(0) tex_coords: vec2<f32>) -> Rgba {
     let d = textureSample(t_distance, s_distance, tex_coords).r;
 
-    var depth: f32;
-    if (d < 0.0) {
-        depth = 0.5;
-    } else {
-        depth = 0.5 + (d - uniforms.min_distance) /
-            (uniforms.max_distance - uniforms.min_distance)
-            / 2.0;
-    }
     var color: vec4<f32>;
     if (uniforms.any_color != 0) {
         let stripes = color_stripe(d + 1.0 / 140.0);
@@ -141,5 +132,5 @@ fn fs_main(@location(0) tex_coords: vec2<f32>) -> RgbaDepth {
     } else {
         color = color_orange_to_blue(d);
     }
-    return RgbaDepth(color, depth);
+    return Rgba(color);
 }

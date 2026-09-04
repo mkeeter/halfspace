@@ -689,15 +689,15 @@ pub(crate) fn render_colors_2d(
                 let p = iter.next().unwrap();
                 let x = x + dx;
                 let y = y + dy;
-                if x < image_size.width()
-                    && y < image_size.height()
-                    && image[(y as usize, x as usize)].1 == index
-                {
-                    let p = p.map(|p| (p.clamp(0.0, 1.0) * 255.0) as u8);
-                    out[(y as usize, x as usize)] = match mode {
-                        ColorMode::Rgb => p,
-                        ColorMode::Hsl => hsl_to_rgb(p),
-                    };
+                if x < image_size.width() && y < image_size.height() {
+                    let d = image[(y as usize, x as usize)];
+                    if d.0.inside() && d.1 == index {
+                        let p = p.map(|p| (p.clamp(0.0, 1.0) * 255.0) as u8);
+                        out[(y as usize, x as usize)] = match mode {
+                            ColorMode::Rgb => p,
+                            ColorMode::Hsl => hsl_to_rgb(p),
+                        };
+                    }
                 }
             }
         }
