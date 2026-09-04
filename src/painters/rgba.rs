@@ -299,7 +299,7 @@ impl RgbaResources {
         });
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("shaded image bind group"),
+            label: Some("rgba bind group"),
             layout: &self.bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
@@ -313,7 +313,7 @@ impl RgbaResources {
                     resource: wgpu::BindingResource::Sampler(&rgba_sampler),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 3,
+                    binding: 2,
                     resource: uniform_buffer.as_entire_binding(),
                 },
             ],
