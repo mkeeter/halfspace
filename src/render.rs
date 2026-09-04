@@ -868,8 +868,15 @@ fn denoise_2d(
                 } else if !inside && outside_count > 0 {
                     outside_avg / outside_count as f32
                 } else if inside_count + outside_count > 0 {
-                    (inside_avg + outside_avg)
-                        / (inside_count + outside_count) as f32
+                    let avg = (inside_avg + outside_avg)
+                        / (inside_count + outside_count) as f32;
+                    if (avg < 0.0) == inside {
+                        avg
+                    } else if inside {
+                        -f32::INFINITY
+                    } else {
+                        f32::INFINITY
+                    }
                 } else if inside {
                     -f32::INFINITY
                 } else {
