@@ -477,7 +477,7 @@ fn image_to_heightmap(
                 // Scale based on height, but not all the way to black
                 let brightness = (image[(y, x)].depth as f32
                     - min_depth as f32)
-                    / (max_depth - min_depth) as f32
+                    / (max_depth - min_depth).max(1) as f32
                     * 0.7
                     + 0.3;
                 let mut out =
@@ -526,8 +526,8 @@ fn image_to_shaded(
             } else {
                 // TODO(fidget) intensity is the same for all channels
                 let brightness = shaded[(y, x)][0] as u16;
-                let mut out =
-                    color[(y, x)].map(|i| ((i as u16 * brightness) >> 8) as u8);
+                let mut out = color[(y, x)]
+                    .map(|i| ((i as u16 * brightness) / u8::MAX as u16) as u8);
                 out[3] = 255; // don't attenuate alpha
                 out
             }
