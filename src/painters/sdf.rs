@@ -63,7 +63,12 @@ pub(crate) struct SdfResources {
     sdf_pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     bound_data: HashMap<BlockIndex, SdfData>,
+
+    /// Empty texture used when we don't have a color channel
     dummy_color_texture: wgpu::Texture,
+
+    /// Pool of buffers which are sized to fit a [`Uniforms`] object
+    config_buf_pool: Vec<wgpu::Buffer>,
 }
 
 impl SdfResources {
@@ -271,11 +276,15 @@ impl SdfResources {
             bind_group_layout,
             bound_data: HashMap::new(),
             dummy_color_texture,
+            config_buf_pool: vec![],
         }
     }
 
     pub fn reset(&mut self) {
-        self.bound_data.clear();
+        self.config_buf_pool.clear();
+        for (_index, data) in self.bound_data.drain() {
+            self.config_buf_pool.push(data.uniform_buffer);
+        }
     }
 
     fn get_data(
@@ -374,11 +383,14 @@ impl SdfResources {
             ..Default::default()
         });
 
-        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("uniform buffer"),
-            size: std::mem::size_of::<Uniforms>() as u64,
-            mapped_at_creation: false,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        let uniform_buffer = self.config_buf_pool.pop().unwrap_or_else(|| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("uniform buffer"),
+                size: std::mem::size_of::<Uniforms>() as u64,
+                mapped_at_creation: false,
+                usage: wgpu::BufferUsages::UNIFORM
+                    | wgpu::BufferUsages::COPY_DST,
+            })
         });
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
