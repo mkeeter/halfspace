@@ -135,6 +135,8 @@ pub(crate) struct RgbaResources {
     bind_group_layout: wgpu::BindGroupLayout,
     bound_data: HashMap<BlockIndex, RgbaData>,
     cache: WgpuTextureCache<[[u8; 4]]>,
+    config_buf_pool: Vec<wgpu::Buffer>,
+    rgba_sampler: wgpu::Sampler,
 }
 
 impl RgbaResources {
@@ -245,22 +247,37 @@ impl RgbaResources {
                 multiview_mask: None,
             });
 
+        let rgba_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("rgba sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            ..Default::default()
+        });
+
         Self {
             pipeline,
             bind_group_layout,
             bound_data: HashMap::new(),
             cache: WgpuTextureCache::new(),
+            config_buf_pool: vec![],
+            rgba_sampler,
         }
     }
 
     pub fn reset(&mut self) {
         // Empty out the cache of textures that weren't used last frame.
         self.cache.clear();
+        self.config_buf_pool.clear();
 
         // Move bound data into the cache, for possible reuse.  If it's not used
         // in the next frame, then it's cleared next frame (above).
         for (_index, data) in self.bound_data.drain() {
             self.cache.insert(data.image, data.rgba_texture);
+            self.config_buf_pool.push(data.uniform_buffer);
         }
     }
 
@@ -292,23 +309,16 @@ impl RgbaResources {
         };
 
         let rgba_texture_view = rgba_texture.create_view(&Default::default());
-        let rgba_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("rgba sampler"),
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
-            ..Default::default()
-        });
 
-        // Create the buffer
-        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("bitfield uniform buffer"),
-            size: std::mem::size_of::<Uniforms>() as u64,
-            mapped_at_creation: false,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        // Create the uniform buffer for config data
+        let uniform_buffer = self.config_buf_pool.pop().unwrap_or_else(|| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("bitfield uniform buffer"),
+                size: std::mem::size_of::<Uniforms>() as u64,
+                mapped_at_creation: false,
+                usage: wgpu::BufferUsages::UNIFORM
+                    | wgpu::BufferUsages::COPY_DST,
+            })
         });
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -323,7 +333,9 @@ impl RgbaResources {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&rgba_sampler),
+                    resource: wgpu::BindingResource::Sampler(
+                        &self.rgba_sampler,
+                    ),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
