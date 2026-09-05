@@ -21,6 +21,7 @@
 use eframe::egui_wgpu::wgpu;
 
 mod bitfield;
+mod cache;
 mod clear;
 mod rgba;
 mod sdf;
