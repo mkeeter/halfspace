@@ -287,7 +287,7 @@ impl CpuRenderTask {
                             images.iter().enumerate().skip(1)
                         {
                             let q = img[(y, x)];
-                            if p.depth < q.depth {
+                            if p.depth <= q.depth {
                                 p = q;
                                 shape_index = i;
                             }
