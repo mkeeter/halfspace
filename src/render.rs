@@ -310,8 +310,9 @@ impl CpuRenderTask {
                     size: *size,
                     level,
                     color,
+                    mode: *mode,
                 };
-                ViewImage::Voxel { mode: *mode, image }
+                ViewImage::Voxel(image)
             }
         };
         Some(data)

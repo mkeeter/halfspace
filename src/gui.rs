@@ -7,7 +7,8 @@ use crate::{
     platform::Notify,
     render,
     view::{
-        self, PixelImage, ViewCanvas, ViewData, ViewImage, ViewMode2, ViewMode3,
+        self, PixelImage, RgbaImage, ViewCanvas, ViewData, ViewImage,
+        ViewMode2, ViewMode3,
     },
     world::{
         Block, BlockError, BlockIndex, IoValue, ScriptBlock, ValueBlock, World,
@@ -251,10 +252,12 @@ impl<'a, N: Notify> WorldView<'a, N> {
             }
             // Both heightmap and shaded images are drawn by the RGBA painter
             (
-                ViewImage::Voxel {
-                    mode: ViewMode3::Heightmap,
-                    image,
-                },
+                ViewImage::Voxel(
+                    image @ RgbaImage {
+                        mode: ViewMode3::Heightmap,
+                        ..
+                    },
+                ),
                 ViewCanvas::Canvas3 {
                     mode: ViewMode3::Heightmap,
                     canvas,
@@ -262,10 +265,12 @@ impl<'a, N: Notify> WorldView<'a, N> {
                 },
             )
             | (
-                ViewImage::Voxel {
-                    mode: ViewMode3::Shaded,
-                    image,
-                },
+                ViewImage::Voxel(
+                    image @ RgbaImage {
+                        mode: ViewMode3::Shaded,
+                        ..
+                    },
+                ),
                 ViewCanvas::Canvas3 {
                     mode: ViewMode3::Shaded,
                     canvas,

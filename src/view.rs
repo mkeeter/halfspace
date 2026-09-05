@@ -186,13 +186,14 @@ pub struct RgbaImage {
     pub view: fidget::gui::View3,
     pub size: fidget::render::VoxelSize,
     pub level: usize,
+    pub mode: ViewMode3,
 }
 
 /// Rendered image(s) to be drawn, along with the settings that generated it
 #[derive(Clone)]
 pub enum ViewImage {
     Pixel(PixelImage),
-    Voxel { mode: ViewMode3, image: RgbaImage },
+    Voxel(RgbaImage),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -207,10 +208,7 @@ impl ViewImage {
     pub fn level(&self) -> usize {
         match self {
             ViewImage::Pixel(PixelImage { level, .. })
-            | ViewImage::Voxel {
-                image: RgbaImage { level, .. },
-                ..
-            } => *level,
+            | ViewImage::Voxel(RgbaImage { level, .. }) => *level,
         }
     }
 }
