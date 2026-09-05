@@ -1,7 +1,10 @@
+//! Painter drawing SDFs and bitfields in a 2D view
 use super::WgpuResources;
 
-/// Painter drawing SDFs
-use crate::{view::PixelImage, world::BlockIndex};
+use crate::{
+    view::{PixelImage, ViewMode2},
+    world::BlockIndex,
+};
 use eframe::{
     egui,
     egui_wgpu::{self, wgpu},
@@ -14,10 +17,8 @@ use zerocopy::IntoBytes;
 #[derive(Copy, Clone, zerocopy::IntoBytes, zerocopy::Immutable)]
 struct Uniforms {
     transform: [[f32; 4]; 4],
-    min_distance: f32,
-    max_distance: f32,
     has_color: u32,
-    any_color: u32,
+    _pad: [u32; 3],
 }
 
 /// GPU callback
@@ -54,7 +55,8 @@ impl WgpuSdfPainter {
 }
 
 pub(crate) struct SdfResources {
-    pipeline: wgpu::RenderPipeline,
+    bitfield_pipeline: wgpu::RenderPipeline,
+    sdf_pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     bound_data: HashMap<BlockIndex, SdfData>,
 }
@@ -64,20 +66,7 @@ impl SdfResources {
         device: &wgpu::Device,
         target_format: wgpu::TextureFormat,
     ) -> Self {
-        // Create SDF shader module
-        let shader =
-            device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("sdf shader"),
-                source: wgpu::ShaderSource::Wgsl(
-                    include_str!(concat!(
-                        env!("CARGO_MANIFEST_DIR"),
-                        "/shaders/sdf.wgsl"
-                    ))
-                    .into(),
-                ),
-            });
-
-        // Create bind group layout
+        // Create bind group layout (same for bitfield and SDF rendering)
         let bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("sdf bind group layout"),
@@ -147,19 +136,84 @@ impl SdfResources {
             });
 
         // Create the SDF render pipeline
-        let pipeline =
+        let sdf_shader =
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("sdf shader"),
+                source: wgpu::ShaderSource::Wgsl(
+                    include_str!(concat!(
+                        env!("CARGO_MANIFEST_DIR"),
+                        "/shaders/sdf.wgsl"
+                    ))
+                    .into(),
+                ),
+            });
+        let sdf_pipeline =
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("sdf render pipeline"),
                 layout: Some(&pipeline_layout),
                 cache: None,
                 vertex: wgpu::VertexState {
-                    module: &shader,
+                    module: &sdf_shader,
                     entry_point: Some("vs_main"),
                     buffers: &[],
                     compilation_options: Default::default(),
                 },
                 fragment: Some(wgpu::FragmentState {
-                    module: &shader,
+                    module: &sdf_shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: target_format,
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent::OVER,
+                            alpha: wgpu::BlendComponent::OVER,
+                        }),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    unclipped_depth: false,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview_mask: None,
+            });
+
+        // Create the bitfield render pipeline
+        let bitfield_shader =
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("bitfield shader"),
+                source: wgpu::ShaderSource::Wgsl(
+                    include_str!(concat!(
+                        env!("CARGO_MANIFEST_DIR"),
+                        "/shaders/bitfield.wgsl"
+                    ))
+                    .into(),
+                ),
+            });
+        let bitfield_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("bitfield render pipeline"),
+                layout: Some(&pipeline_layout),
+                cache: None,
+                vertex: wgpu::VertexState {
+                    module: &bitfield_shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &bitfield_shader,
                     entry_point: Some("fs_main"),
                     targets: &[Some(wgpu::ColorTargetState {
                         format: target_format,
@@ -190,7 +244,8 @@ impl SdfResources {
             });
 
         Self {
-            pipeline,
+            sdf_pipeline,
+            bitfield_pipeline,
             bind_group_layout,
             bound_data: HashMap::new(),
         }
@@ -204,6 +259,7 @@ impl SdfResources {
         &mut self,
         device: &wgpu::Device,
         size: wgpu::Extent3d,
+        mode: ViewMode2,
     ) -> SdfData {
         let distance_texture =
             device.create_texture(&wgpu::TextureDescriptor {
@@ -297,11 +353,22 @@ impl SdfResources {
             color_texture,
             bind_group,
             uniform_buffer,
+            mode,
         }
     }
 
-    fn paint(&self, render_pass: &mut wgpu::RenderPass, sdf: &SdfData) {
-        render_pass.set_pipeline(&self.pipeline);
+    fn paint_sdf(&self, render_pass: &mut wgpu::RenderPass, sdf: &SdfData) {
+        render_pass.set_pipeline(&self.sdf_pipeline);
+        render_pass.set_bind_group(0, &sdf.bind_group, &[]);
+        render_pass.draw(0..6, 0..1);
+    }
+
+    fn paint_bitfield(
+        &self,
+        render_pass: &mut wgpu::RenderPass,
+        sdf: &SdfData,
+    ) {
+        render_pass.set_pipeline(&self.bitfield_pipeline);
         render_pass.set_bind_group(0, &sdf.bind_group, &[]);
         render_pass.draw(0..6, 0..1);
     }
@@ -320,6 +387,9 @@ struct SdfData {
 
     /// Bind group for SDF rendering
     bind_group: wgpu::BindGroup,
+
+    /// View mode (either bitfield or SDF)
+    mode: ViewMode2,
 }
 
 impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
@@ -348,15 +418,7 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
             self.size,
         );
 
-        // TODO compute this off-thread?
-        let mut min_distance = f32::INFINITY;
-        let mut max_distance = -f32::INFINITY;
-        for d in self.image.distance.iter() {
-            max_distance = max_distance.max(*d);
-            min_distance = min_distance.min(*d);
-        }
-
-        let data = gr.sdf.get_data(device, texture_size);
+        let data = gr.sdf.get_data(device, texture_size, self.image.mode);
 
         // Upload SDF image data
         queue.write_texture(
@@ -398,9 +460,7 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
         let uniforms = Uniforms {
             transform: transform.into(),
             has_color: u32::from(has_color),
-            any_color: u32::from(has_color), // TODO delete this
-            min_distance,
-            max_distance,
+            _pad: [0; _],
         };
         {
             let mut writer = queue
@@ -431,6 +491,9 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
         let data = &rs.sdf.bound_data[&self.index];
 
         rs.clear.paint(render_pass);
-        rs.sdf.paint(render_pass, data);
+        match data.mode {
+            ViewMode2::Sdf => rs.sdf.paint_sdf(render_pass, data),
+            ViewMode2::Bitfield => rs.sdf.paint_bitfield(render_pass, data),
+        }
     }
 }

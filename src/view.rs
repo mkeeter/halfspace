@@ -174,6 +174,7 @@ pub struct PixelImage {
     pub view: fidget::gui::View2,
     pub size: fidget::render::ImageSize,
     pub level: usize,
+    pub mode: ViewMode2,
 }
 
 #[derive(Clone)]
@@ -190,7 +191,7 @@ pub struct RgbaImage {
 /// Rendered image(s) to be drawn, along with the settings that generated it
 #[derive(Clone)]
 pub enum ViewImage {
-    Pixel { mode: ViewMode2, image: PixelImage },
+    Pixel(PixelImage),
     Voxel { mode: ViewMode3, image: RgbaImage },
 }
 
@@ -205,10 +206,7 @@ pub enum ViewCanvasType {
 impl ViewImage {
     pub fn level(&self) -> usize {
         match self {
-            ViewImage::Pixel {
-                image: PixelImage { level, .. },
-                ..
-            }
+            ViewImage::Pixel(PixelImage { level, .. })
             | ViewImage::Voxel {
                 image: RgbaImage { level, .. },
                 ..

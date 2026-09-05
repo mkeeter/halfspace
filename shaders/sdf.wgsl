@@ -1,10 +1,7 @@
 // Uniform buffer containing the transform matrix
 struct Uniforms {
     transform: mat4x4<f32>,
-    min_distance: f32, // TODO unused
-    max_distance: f32, // TODO unused
     has_color: u32,
-    any_color: u32,
 };
 
 @group(0) @binding(0) var t_distance: texture_2d<f32>;
@@ -121,7 +118,7 @@ fn fs_main(@location(0) tex_coords: vec2<f32>) -> Rgba {
     let d = textureSample(t_distance, s_distance, tex_coords).r;
 
     var color: vec4<f32>;
-    if (uniforms.any_color != 0) {
+    if (uniforms.has_color != 0) {
         let stripes = color_stripe(d + 1.0 / 140.0);
         if (uniforms.has_color != 0) {
             var rgb = textureSample(t_color, s_color, tex_coords).rgb;

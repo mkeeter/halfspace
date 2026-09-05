@@ -20,13 +20,11 @@
 
 use eframe::egui_wgpu::wgpu;
 
-mod bitfield;
 mod cache;
 mod clear;
 mod rgba;
 mod sdf;
 
-pub use bitfield::WgpuBitfieldPainter;
 pub use rgba::WgpuRgbaPainter;
 pub use sdf::WgpuSdfPainter;
 
@@ -39,7 +37,6 @@ pub struct WgpuResources {
     /// Render pipeline which clears the screen, drawing a grey checkerboard
     clear: clear::ClearResources,
 
-    bitfield: bitfield::BitfieldResources,
     rgba: rgba::RgbaResources,
     sdf: sdf::SdfResources,
 }
@@ -47,7 +44,6 @@ pub struct WgpuResources {
 impl WgpuResources {
     pub fn reset(&mut self) {
         // clear doesn't store persistent data
-        self.bitfield.reset();
         self.rgba.reset();
         self.sdf.reset();
     }
@@ -67,14 +63,8 @@ impl WgpuResources {
 
         let rgba = rgba::RgbaResources::new(device, target_format);
         let sdf = sdf::SdfResources::new(device, target_format);
-        let bitfield = bitfield::BitfieldResources::new(device, target_format);
 
-        WgpuResources {
-            clear,
-            rgba,
-            bitfield,
-            sdf,
-        }
+        WgpuResources { clear, rgba, sdf }
     }
 }
 

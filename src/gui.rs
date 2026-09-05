@@ -6,7 +6,9 @@ use crate::{
     BlockResponse, MessageReceiver, ViewResponse, export,
     platform::Notify,
     render,
-    view::{self, ViewCanvas, ViewData, ViewImage, ViewMode2, ViewMode3},
+    view::{
+        self, PixelImage, ViewCanvas, ViewData, ViewImage, ViewMode2, ViewMode3,
+    },
     world::{
         Block, BlockError, BlockIndex, IoValue, ScriptBlock, ValueBlock, World,
     },
@@ -204,10 +206,12 @@ impl<'a, N: Notify> WorldView<'a, N> {
         // mode based on the selected image's settings
         match (&image, current_canvas) {
             (
-                ViewImage::Pixel {
-                    mode: ViewMode2::Bitfield,
-                    image,
-                },
+                ViewImage::Pixel(
+                    image @ PixelImage {
+                        mode: ViewMode2::Bitfield,
+                        ..
+                    },
+                ),
                 ViewCanvas::Canvas2 {
                     mode: ViewMode2::Bitfield,
                     canvas,
@@ -215,7 +219,7 @@ impl<'a, N: Notify> WorldView<'a, N> {
             ) => {
                 ui.painter().add(egui_wgpu::Callback::new_paint_callback(
                     rect,
-                    crate::painters::WgpuBitfieldPainter::new(
+                    crate::painters::WgpuSdfPainter::new(
                         index,
                         image.clone(),
                         size,
@@ -224,10 +228,12 @@ impl<'a, N: Notify> WorldView<'a, N> {
                 ));
             }
             (
-                ViewImage::Pixel {
-                    mode: ViewMode2::Sdf,
-                    image,
-                },
+                ViewImage::Pixel(
+                    image @ PixelImage {
+                        mode: ViewMode2::Sdf,
+                        ..
+                    },
+                ),
                 ViewCanvas::Canvas2 {
                     mode: ViewMode2::Sdf,
                     canvas,

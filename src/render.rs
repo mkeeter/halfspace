@@ -214,8 +214,9 @@ impl CpuRenderTask {
                     level,
                     distance,
                     color: color.map(|c| c.take().0.into()),
+                    mode: *mode,
                 };
-                ViewImage::Pixel { image, mode: *mode }
+                ViewImage::Pixel(image)
             }
             RenderSettings::Voxel(VoxelRenderSettings {
                 scene,
