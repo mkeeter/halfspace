@@ -133,8 +133,15 @@ impl egui_wgpu::CallbackTrait for WgpuRgbaPainter {
 pub(crate) struct RgbaResources {
     pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
-    bound_data: HashMap<BlockIndex, RgbaData>,
     cache: WgpuTextureCache<[[u8; 4]]>,
+
+    /// Per-frame bound data
+    ///
+    /// This is cleared at the start of the frame, populated in
+    /// [`WgpuRgbaPainter::prepare`], and used in [`RgbaResources::paint`]
+    bound_data: HashMap<BlockIndex, RgbaData>,
+
+    /// Pool of buffers which are sized to fit a [`Uniforms`] object
     config_buf_pool: Vec<wgpu::Buffer>,
     rgba_sampler: wgpu::Sampler,
 }
@@ -273,8 +280,8 @@ impl RgbaResources {
         self.cache.clear();
         self.config_buf_pool.clear();
 
-        // Move bound data into the cache, for possible reuse.  If it's not used
-        // in the next frame, then it's cleared next frame (above).
+        // Move bound data into the caches, for possible reuse.  If it's not
+        // used in the next frame, then it's cleared next frame (above).
         for (_index, data) in self.bound_data.drain() {
             self.cache.insert(data.image, data.rgba_texture);
             self.config_buf_pool.push(data.uniform_buffer);
