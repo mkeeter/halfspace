@@ -322,7 +322,22 @@ impl CpuRenderTask {
 ///
 /// Returns `true` if we should swap (i.e. replace `a` with `b`)
 fn compare_distance_pixel(a: RawDistancePixel, b: RawDistancePixel) -> bool {
-    !a.inside() || b.inside()
+    // For inside pixels, prefer `b` over `a` so that the last image wins
+    if b.inside() {
+        true
+    } else if a.inside() {
+        false
+    } else if let (Some(da), Some(db)) = (a.distance(), b.distance()) {
+        // Outside pixels are only rendered in SDF mode, which is pixel-perfect
+        // (so we should always have distance values).  In this case, we'll do a
+        // true `min` for outside pixels, instead of the `b`-over-`a` logic
+        // which is used for inside pixels
+        db < da
+    } else {
+        // Otherwise, just prefer `b`; we are presumably in a non-SDF mode which
+        // skips outside pixels anyways.
+        true
+    }
 }
 
 pub(crate) fn merge_and_color(
