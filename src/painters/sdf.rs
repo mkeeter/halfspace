@@ -2,6 +2,7 @@
 use super::WgpuResources;
 
 use crate::{
+    painters::cache::{CacheHit, WgpuTextureCache},
     view::{PixelImage, ViewMode2},
     world::BlockIndex,
 };
@@ -63,6 +64,9 @@ pub(crate) struct SdfResources {
     sdf_pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     bound_data: HashMap<BlockIndex, SdfData>,
+
+    color_cache: WgpuTextureCache<[[u8; 4]]>,
+    distance_cache: WgpuTextureCache<[f32]>,
 
     /// Empty texture used when we don't have a color channel
     dummy_color_texture: wgpu::Texture,
@@ -275,14 +279,28 @@ impl SdfResources {
             bitfield_pipeline,
             bind_group_layout,
             bound_data: HashMap::new(),
+            distance_cache: WgpuTextureCache::new(),
+            color_cache: WgpuTextureCache::new(),
             dummy_color_texture,
             config_buf_pool: vec![],
         }
     }
 
     pub fn reset(&mut self) {
+        // Empty out the texture / buffer cache that weren't used last frame
+        // (anything used last frame is in bound_data instead)
+        self.color_cache.clear();
+        self.distance_cache.clear();
         self.config_buf_pool.clear();
+
+        // Move bound data into the caches, for possible reuse.  If it's not
+        // used in the upcoming frame, then it's cleared next frame (above).
         for (_index, data) in self.bound_data.drain() {
+            if let Some(c) = data.image.color {
+                self.color_cache.insert(c, data.color_texture);
+            }
+            self.distance_cache
+                .insert(data.image.distance, data.distance_texture);
             self.config_buf_pool.push(data.uniform_buffer);
         }
     }
@@ -294,33 +312,42 @@ impl SdfResources {
         queue: &wgpu::Queue,
         size: wgpu::Extent3d,
     ) -> SdfData {
-        let distance_texture =
-            device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("sdf distance texture"),
+        let (distance_texture, needs_write) =
+            match self.distance_cache.get(&image.distance, size) {
+                Some(CacheHit::DataMatch(tex)) => (tex, false),
+                Some(CacheHit::SizeMatch(tex)) => (tex, true),
+                None => (
+                    device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some("sdf distance texture"),
+                        size,
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: wgpu::TextureFormat::R32Float,
+                        usage: wgpu::TextureUsages::TEXTURE_BINDING
+                            | wgpu::TextureUsages::COPY_DST,
+                        view_formats: &[],
+                    }),
+                    true,
+                ),
+            };
+        if needs_write {
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &distance_texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                image.distance.as_bytes(),
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(4 * size.width),
+                    rows_per_image: Some(size.height),
+                },
                 size,
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::R32Float,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING
-                    | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            });
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &distance_texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            image.distance.as_bytes(),
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(4 * size.width),
-                rows_per_image: Some(size.height),
-            },
-            size,
-        );
+            );
+        }
         let distance_texture_view =
             distance_texture.create_view(&Default::default());
         let distance_sampler =
@@ -339,33 +366,42 @@ impl SdfResources {
         // otherwise, just return the dummy texture (which will be unused in the
         // shader itself).
         let color_texture = if let Some(color) = &image.color {
-            let color_texture =
-                device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("sdf color texture"),
+            let (color_texture, needs_write) =
+                match self.color_cache.get(color, size) {
+                    Some(CacheHit::DataMatch(tex)) => (tex, false),
+                    Some(CacheHit::SizeMatch(tex)) => (tex, true),
+                    None => (
+                        device.create_texture(&wgpu::TextureDescriptor {
+                            label: Some("sdf color texture"),
+                            size,
+                            mip_level_count: 1,
+                            sample_count: 1,
+                            dimension: wgpu::TextureDimension::D2,
+                            format: wgpu::TextureFormat::Rgba8Unorm,
+                            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                                | wgpu::TextureUsages::COPY_DST,
+                            view_formats: &[],
+                        }),
+                        true,
+                    ),
+                };
+            if needs_write {
+                queue.write_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &color_texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    color.as_bytes(),
+                    wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(4 * size.width),
+                        rows_per_image: Some(size.height),
+                    },
                     size,
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Rgba8Unorm,
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING
-                        | wgpu::TextureUsages::COPY_DST,
-                    view_formats: &[],
-                });
-            queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &color_texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                color.as_bytes(),
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(4 * size.width),
-                    rows_per_image: Some(size.height),
-                },
-                size,
-            );
+                );
+            }
             color_texture
         } else {
             self.dummy_color_texture.clone()

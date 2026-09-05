@@ -276,12 +276,13 @@ impl RgbaResources {
     }
 
     pub fn reset(&mut self) {
-        // Empty out the cache of textures that weren't used last frame.
+        // Empty out the texture / buffer cache that weren't used last frame
+        // (anything used last frame is in bound_data instead)
         self.cache.clear();
         self.config_buf_pool.clear();
 
         // Move bound data into the caches, for possible reuse.  If it's not
-        // used in the next frame, then it's cleared next frame (above).
+        // used in the upcoming frame, then it's cleared next frame (above).
         for (_index, data) in self.bound_data.drain() {
             self.cache.insert(data.image, data.rgba_texture);
             self.config_buf_pool.push(data.uniform_buffer);
@@ -298,21 +299,20 @@ impl RgbaResources {
         let (rgba_texture, needs_write) = match self.cache.get(data, size) {
             Some(CacheHit::DataMatch(tex)) => (tex, false),
             Some(CacheHit::SizeMatch(tex)) => (tex, true),
-            None => {
-                let rgba_texture =
-                    device.create_texture(&wgpu::TextureDescriptor {
-                        label: Some("rgba texture"),
-                        size,
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: wgpu::TextureDimension::D2,
-                        format: wgpu::TextureFormat::Rgba8Unorm,
-                        usage: wgpu::TextureUsages::TEXTURE_BINDING
-                            | wgpu::TextureUsages::COPY_DST,
-                        view_formats: &[],
-                    });
-                (rgba_texture, true)
-            }
+            None => (
+                device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("rgba texture"),
+                    size,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING
+                        | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
+                }),
+                true,
+            ),
         };
 
         let rgba_texture_view = rgba_texture.create_view(&Default::default());
