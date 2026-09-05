@@ -130,6 +130,7 @@ impl egui_wgpu::CallbackTrait for WgpuRgbaPainter {
         resources: &egui_wgpu::CallbackResources,
     ) {
         let rs: &WgpuResources = resources.get().unwrap();
+        rs.clear.paint(render_pass);
         rs.rgba.paint(render_pass, self.index);
     }
 }
