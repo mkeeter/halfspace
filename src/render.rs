@@ -75,7 +75,7 @@ pub(crate) type RenderShape = fidget::shape::Shape<RenderFunction>;
 /// This lives in the main thread; the work itself lives in a closure in the
 /// `rayon` or WGPU thread pool.
 pub struct RenderTaskHandle {
-    kind: RenderTaskKind,
+    settings: RenderSettings,
     level: usize,
     cancel: fidget::render::CancelToken,
 }
@@ -86,17 +86,13 @@ impl Drop for RenderTaskHandle {
     }
 }
 
-pub enum RenderTaskKind {
-    Cpu { settings: RenderSettings },
-}
-
 /// CPU worker pool, which dispatches to the (global) Rayon thread pool
-pub(crate) struct CpuWorkerPool<N: Notify> {
+pub(crate) struct RenderWorkerPool<N: Notify> {
     // TODO actually make an explicit Rayon pool here?
     _marker: std::marker::PhantomData<N>,
 }
 
-impl<N: Notify> CpuWorkerPool<N> {
+impl<N: Notify> RenderWorkerPool<N> {
     pub(crate) fn new() -> Self {
         Self {
             _marker: std::marker::PhantomData,
@@ -113,22 +109,25 @@ impl<N: Notify> CpuWorkerPool<N> {
         tx: MessageGenSender<N>,
     ) -> RenderTaskHandle {
         let cancel = fidget::render::CancelToken::new();
-        let cancel_ = cancel.clone();
-        let settings_ = settings.clone();
         let start_time = Instant::now();
+        let task = RenderTask {
+            settings: settings.clone(),
+            level,
+            cancel: cancel.clone(),
+        };
         rayon::spawn(move || {
-            if let Some(data) = CpuRenderTask::run(&settings_, level, cancel_) {
+            if let Some(data) = task.run() {
                 tx.send(Message::RenderView(RenderViewReply {
                     block,
                     generation,
                     start_time,
                     data,
-                    settings: settings_,
+                    settings: task.settings,
                 }))
             }
         });
         RenderTaskHandle {
-            kind: RenderTaskKind::Cpu { settings },
+            settings,
             cancel,
             level,
         }
@@ -145,25 +144,23 @@ impl RenderTaskHandle {
         other: &RenderSettings,
         max_level: usize,
     ) -> bool {
-        let settings_changed = match &self.kind {
-            RenderTaskKind::Cpu { settings, .. } => settings != other,
-        };
+        let settings_changed = &self.settings != other;
         settings_changed && self.level != max_level
     }
 }
 
 /// Dummy object representing a CPU render task
-struct CpuRenderTask;
+struct RenderTask {
+    settings: RenderSettings,
+    level: usize,
+    cancel: fidget::render::CancelToken,
+}
 
-impl CpuRenderTask {
+impl RenderTask {
     /// Function which actually renders images (off-thread)
-    pub fn run(
-        settings: &RenderSettings,
-        level: usize,
-        cancel: fidget::render::CancelToken,
-    ) -> Option<ViewImage> {
-        let scale = 1 << level;
-        let data = match settings {
+    pub fn run(&self) -> Option<ViewImage> {
+        let scale = 1 << self.level;
+        let data = match &self.settings {
             RenderSettings::Image(ImageRenderSettings {
                 scene,
                 mode,
@@ -183,7 +180,7 @@ impl CpuRenderTask {
                 };
 
                 let eval_cfg = fidget::raster::pixel::EvalConfig {
-                    cancel,
+                    cancel: self.cancel.clone(),
                     ..Default::default()
                 };
                 let images: Vec<_> = scene
@@ -211,7 +208,7 @@ impl CpuRenderTask {
                 let image = PixelImage {
                     view: *view,
                     size: *size,
-                    level,
+                    level: self.level,
                     distance,
                     color: color.map(|c| c.take().0.into()),
                     mode: *mode,
@@ -229,7 +226,7 @@ impl CpuRenderTask {
                 // the Z direction for better rendering of edges.  XXX if you
                 // change this, then you also need to edit `shaded.rs` to adjust
                 // the `max_depth` passed into the shader.
-                let bonus_z = if level == 0 { 2 } else { 1 };
+                let bonus_z = if self.level == 0 { 2 } else { 1 };
                 let image_size = fidget::render::VoxelSize::new(
                     (size.width() / scale).max(1),
                     (size.height() / scale).max(1),
@@ -248,7 +245,7 @@ impl CpuRenderTask {
                     world_to_model,
                 };
                 let eval_cfg = fidget::raster::voxel::EvalConfig {
-                    cancel,
+                    cancel: self.cancel.clone(),
                     ..Default::default()
                 };
                 let images: Vec<_> = scene
@@ -308,7 +305,7 @@ impl CpuRenderTask {
                 let image = RgbaImage {
                     view: *view,
                     size: *size,
-                    level,
+                    level: self.level,
                     color,
                     mode: *mode,
                 };
@@ -402,7 +399,7 @@ pub enum RenderSettings {
 
 #[derive(Clone, PartialEq)]
 pub struct ImageRenderSettings {
-    scene: Scene,
+    scene: Scene, // TODO cloning scenes can be expensive
     mode: ViewMode2,
     view: fidget::gui::View2,
     size: fidget::render::ImageSize,

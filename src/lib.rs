@@ -352,7 +352,7 @@ pub(crate) struct App<P: Platform> {
     platform: P,
 
     /// Pool of CPU worker threads
-    cpu_pool: render::CpuWorkerPool<P::Notify>,
+    render_pool: render::RenderWorkerPool<P::Notify>,
 
     /// Show debug options and menu items in native build
     debug: bool,
@@ -542,7 +542,7 @@ impl<P: Platform> App<P> {
         let rx = platform.take_rx_channel();
         let data = World::new();
         let undo = state::Undo::new(&data);
-        let cpu_pool = render::CpuWorkerPool::new();
+        let render_pool = render::RenderWorkerPool::new();
         Self {
             data,
             library: world::ShapeLibrary::build(),
@@ -556,7 +556,7 @@ impl<P: Platform> App<P> {
             generation: std::sync::Arc::new(0.into()),
             platform,
             rx,
-            cpu_pool,
+            render_pool,
             debug,
             show_inspection_ui: false,
             modal: None,
@@ -1203,7 +1203,7 @@ impl<P: Platform> App<P> {
             views: &mut self.views,
             rx: &self.rx,
             out: &mut io_out,
-            cpu_pool: &self.cpu_pool,
+            render_pool: &self.render_pool,
         };
         egui_dock::DockArea::new(&mut self.tree)
             .style(egui_dock::Style::from_egui(ui.global_style().as_ref()))
@@ -1740,7 +1740,7 @@ impl<P: Platform> App<P> {
             }
             Message::RenderView(reply) => {
                 if let Some(e) = self.views.get_mut(&reply.block) {
-                    e.update(reply, &self.rx, &self.cpu_pool)
+                    e.update(reply, &self.rx, &self.render_pool)
                 }
             }
             Message::Loaded { state } => match self.modal {

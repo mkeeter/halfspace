@@ -2,7 +2,7 @@ use crate::{
     BlockIndex, MessageReceiver, RenderViewReply, ViewResponse,
     gui::{CAMERA, WARN},
     platform::Notify,
-    render::{CpuWorkerPool, RenderSettings, RenderTaskHandle},
+    render::{RenderSettings, RenderTaskHandle, RenderWorkerPool},
     state,
     state::ViewState,
     world::Scene,
@@ -237,7 +237,7 @@ impl ViewData {
         &mut self,
         r: RenderViewReply,
         rx: &MessageReceiver<N>,
-        cpu_pool: &CpuWorkerPool<N>,
+        render_pool: &RenderWorkerPool<N>,
     ) {
         const TARGET_RENDER_TIME: Duration = Duration::from_millis(33);
         const MAX_LEVEL: usize = 10;
@@ -259,7 +259,7 @@ impl ViewData {
                     r.settings.clone(),
                     next,
                     rx,
-                    cpu_pool,
+                    render_pool,
                 );
             }
             self.image = Some((r.settings, r.data));
@@ -273,10 +273,10 @@ impl ViewData {
         settings: RenderSettings,
         level: usize,
         rx: &MessageReceiver<N>,
-        cpu_pool: &CpuWorkerPool<N>,
+        render_pool: &RenderWorkerPool<N>,
     ) {
         self.generation += 1;
-        self.task = Some(cpu_pool.spawn(
+        self.task = Some(render_pool.spawn(
             block,
             self.generation,
             settings,
@@ -294,7 +294,7 @@ impl ViewData {
         block: BlockIndex,
         scene: Scene,
         rx: &MessageReceiver<N>,
-        cpu_pool: &CpuWorkerPool<N>,
+        render_pool: &RenderWorkerPool<N>,
     ) -> Option<&ViewImage> {
         let settings = RenderSettings::from_canvas(&self.canvas, scene);
 
@@ -322,7 +322,7 @@ impl ViewData {
                 settings,
                 self.start_level,
                 rx,
-                cpu_pool,
+                render_pool,
             );
         }
         self.image.as_ref().map(|(_, image)| image)

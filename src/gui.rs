@@ -22,7 +22,7 @@ pub struct WorldView<'a, N: Notify> {
     pub views: &'a mut HashMap<BlockIndex, ViewData>,
     pub out: &'a mut Vec<(BlockIndex, ViewResponse)>,
     pub rx: &'a MessageReceiver<N>,
-    pub cpu_pool: &'a render::CpuWorkerPool<N>,
+    pub render_pool: &'a render::RenderWorkerPool<N>,
 }
 
 impl Tab {
@@ -177,7 +177,7 @@ impl<'a, N: Notify> WorldView<'a, N> {
                 index,
                 block_view.scene.clone(),
                 self.rx,
-                self.cpu_pool,
+                self.render_pool,
             ) else {
                 return view::fallback_ui(
                     ui,
