@@ -48,19 +48,18 @@ use crate::{
     BlockIndex, Message, MessageGenSender, RenderViewReply,
     platform::Notify,
     view::{
-        BitfieldImageData, BitfieldViewImage, HeightmapImageData,
-        HeightmapViewImage, SdfImageData, SdfViewImage, ShadedImageData,
-        ShadedViewImage, ViewCanvas, ViewImage, ViewMode2, ViewMode3,
+        PixelImage, RgbaImage, ViewCanvas, ViewImage, ViewMode2, ViewMode3,
     },
     world::{Color, Scene},
 };
 
 use fidget::{
     eval::{BulkEvaluator, Function, MathFunction},
-    raster::{effects, voxel::GeometryPixel},
+    raster::{effects, pixel::RawDistancePixel, voxel::GeometryPixel},
 };
 
 use rayon::prelude::*;
+use std::sync::Arc;
 use web_time::Instant;
 
 #[cfg(all(feature = "jit", not(target_arch = "wasm32")))]
@@ -171,6 +170,7 @@ impl CpuRenderTask {
                 view,
                 size,
             }) => {
+                let threads = Some(&fidget::render::ThreadPool::Global);
                 let image_size = fidget::render::ImageSize::new(
                     (size.width() / scale).max(1),
                     (size.height() / scale).max(1),
@@ -199,38 +199,24 @@ impl CpuRenderTask {
                         Some((data, shape.color.clone()))
                     })
                     .collect::<Option<_>>()?;
+                let (merged, color) =
+                    merge_and_color(image_size, *view, images);
 
-                match mode {
-                    ViewMode2::Bitfield => {
-                        let image = BitfieldViewImage {
-                            view: *view,
-                            size: *size,
-                            level,
-                            data: images
-                                .into_iter()
-                                .map(|(image, color)| {
-                                    image_to_bitfield(image, *view, color)
-                                })
-                                .collect(),
-                        };
-                        ViewImage::Bitfield(image)
-                    }
+                // Denoising replaces NaN values with floats.  This is innocuous
+                // for an SDF render (which are already pixel-perfect), but is
+                // helpful for deglitching bitfield rendering when rendered at
+                // non-native resolution.
+                let distance = denoise_2d(merged, threads).take().0.into();
 
-                    ViewMode2::Sdf => {
-                        let image = SdfViewImage {
-                            view: *view,
-                            size: *size,
-                            level,
-                            data: images
-                                .into_iter()
-                                .map(|(image, color)| {
-                                    image_to_sdf(image, *view, color)
-                                })
-                                .collect(),
-                        };
-                        ViewImage::Sdf(image)
-                    }
-                }
+                let image = PixelImage {
+                    view: *view,
+                    size: *size,
+                    level,
+                    distance,
+                    color: color.map(|c| c.take().0.into()),
+                    mode: *mode,
+                };
+                ViewImage::Pixel(image)
             }
             RenderSettings::Voxel(VoxelRenderSettings {
                 scene,
@@ -286,43 +272,126 @@ impl CpuRenderTask {
                         Some((data, shape.color.clone()))
                     })
                     .collect::<Option<_>>()?;
-                match mode {
+                // Merge into a single `(GeometryPixel, shape index)` image for
+                // additional post-processing
+                let mut merged = TaggedGeometryPixelImage::new(image_size);
+                merged.apply_effect(
+                    |x, y| {
+                        let Some(mut p) =
+                            images.first().map(|(img, _c)| img[(y, x)])
+                        else {
+                            return Default::default();
+                        };
+                        let mut shape_index = 0;
+                        for (i, (img, _color)) in
+                            images.iter().enumerate().skip(1)
+                        {
+                            let q = img[(y, x)];
+                            if p.depth <= q.depth {
+                                p = q;
+                                shape_index = i;
+                            }
+                        }
+                        (p, shape_index)
+                    },
+                    Some(&fidget::render::ThreadPool::Global),
+                );
+                let colors =
+                    images.into_iter().map(|(_img, c)| c).collect::<Vec<_>>();
+
+                let color = match mode {
                     ViewMode3::Heightmap => {
-                        let image = HeightmapViewImage {
-                            view: *view,
-                            size: *size,
-                            level,
-                            data: images
-                                .into_par_iter()
-                                .map(|(image, color)| {
-                                    image_to_heightmap(image, *view, color)
-                                })
-                                .collect(),
-                        };
-                        ViewImage::Heightmap(image)
+                        image_to_heightmap(merged, *view, colors)
                     }
-                    ViewMode3::Shaded => {
-                        let ssao = merged_ssao(&images);
-                        let image = ShadedViewImage {
-                            view: *view,
-                            size: *size,
-                            level,
-                            ssao,
-                            data: images
-                                .into_par_iter()
-                                .map(|(image, color)| {
-                                    image_to_shaded(image, *view, color)
-                                })
-                                .collect(),
-                        };
-                        ViewImage::Shaded(image)
-                    }
-                }
+                    ViewMode3::Shaded => image_to_shaded(merged, *view, colors),
+                };
+                let image = RgbaImage {
+                    view: *view,
+                    size: *size,
+                    level,
+                    color,
+                    mode: *mode,
+                };
+                ViewImage::Voxel(image)
             }
         };
         Some(data)
     }
 }
+
+/// Compares two distance pixels
+///
+/// Returns `true` if we should swap (i.e. replace `a` with `b`)
+fn compare_distance_pixel(a: RawDistancePixel, b: RawDistancePixel) -> bool {
+    // For inside pixels, prefer `b` over `a` so that the last image wins
+    if b.inside() {
+        true
+    } else if a.inside() {
+        false
+    } else if let (Some(da), Some(db)) = (a.distance(), b.distance()) {
+        // Outside pixels are only rendered in SDF mode, which is pixel-perfect
+        // (so we should always have distance values).  In this case, we'll do a
+        // true `min` for outside pixels, instead of the `b`-over-`a` logic
+        // which is used for inside pixels
+        db < da
+    } else {
+        // Otherwise, just prefer `b`; we are presumably in a non-SDF mode which
+        // skips outside pixels anyways.
+        true
+    }
+}
+
+pub(crate) fn merge_and_color(
+    image_size: fidget::render::ImageSize,
+    view: fidget::gui::View2,
+    images: Vec<(fidget::raster::pixel::Image, Option<Color>)>,
+) -> (TaggedDistancePixelImage, Option<fidget::raster::RgbaImage>) {
+    let mut merged = TaggedDistancePixelImage::new(image_size);
+    merged.apply_effect(
+        |x, y| {
+            let Some(mut p) = images.first().map(|(img, _c)| img[(y, x)])
+            else {
+                return Default::default();
+            };
+            let mut shape_index = 0;
+            // TODO(fidget) add this merge to `effects`?
+            for (i, (img, _color)) in images.iter().enumerate().skip(1) {
+                let q = img[(y, x)];
+                if compare_distance_pixel(p, q) {
+                    p = q;
+                    shape_index = i;
+                }
+            }
+            (p, shape_index)
+        },
+        Some(&fidget::render::ThreadPool::Global),
+    );
+
+    let colors = images.into_iter().map(|(_img, c)| c).collect::<Vec<_>>();
+    let color = if colors.iter().any(|c| c.is_some()) {
+        let mut color = fidget::raster::Image::new(merged.size());
+        for y in 0..merged.size().height() {
+            for x in 0..merged.size().width() {
+                color[(y as usize, x as usize)] = [0xFF; 4];
+            }
+        }
+        for (i, c) in colors.iter().enumerate() {
+            let Some(c) = c else {
+                continue;
+            };
+            render_colors_2d(&merged, i, view, c, &mut color);
+        }
+        Some(color)
+    } else {
+        None
+    };
+    (merged, color)
+}
+
+type TaggedGeometryPixelImage =
+    fidget::raster::Image<(GeometryPixel, usize), fidget::render::VoxelSize>;
+type TaggedDistancePixelImage =
+    fidget::raster::Image<(RawDistancePixel, usize), fidget::render::ImageSize>;
 
 /// Settings for rendering an image
 #[derive(Clone, PartialEq)]
@@ -382,127 +451,106 @@ impl RenderSettings {
     }
 }
 
-fn image_to_sdf(
-    image: fidget::raster::pixel::Image,
-    view: fidget::gui::View2,
-    color: Option<Color>,
-) -> SdfImageData {
-    let color = color.map(|c| {
-        match c {
-            Color::Rgb(rgb) => render_colors_2d(&image, view, rgb),
-            Color::Hsl(hsl) => render_hsl_2d(&image, view, hsl),
-        }
-        .take()
-        .0
-        .into()
-    });
-    let distance = image
-        .map(|d| {
-            let d = d.distance().unwrap();
-            if d.is_infinite() {
-                1e12f32.copysign(d)
-            } else {
-                d
-            }
-        })
-        .take()
-        .0
-        .into();
-
-    SdfImageData { distance, color }
-}
-
-pub(crate) fn image_to_bitfield(
-    image: fidget::raster::pixel::Image,
-    view: fidget::gui::View2,
-    color: Option<Color>,
-) -> BitfieldImageData {
-    let threads = Some(&fidget::render::ThreadPool::Global);
-    let color = color.map(|c| {
-        match c {
-            Color::Rgb(rgb) => render_colors_2d(&image, view, rgb),
-            Color::Hsl(hsl) => render_hsl_2d(&image, view, hsl),
-        }
-        .take()
-        .0
-        .into()
-    });
-    let distance = BitfieldViewImage::denoise(image, threads).take().0.into();
-    BitfieldImageData { distance, color }
-}
-
 fn image_to_heightmap(
-    image: fidget::raster::voxel::Image,
+    image: TaggedGeometryPixelImage,
     view: fidget::gui::View3,
-    color: Option<Color>,
-) -> HeightmapImageData {
-    let color = color.map(|c| {
-        match c {
-            Color::Rgb(rgb) => render_colors_3d(&image, view, rgb),
-            Color::Hsl(hsl) => render_hsl_3d(&image, view, hsl),
-        }
-        .take()
-        .0
-        .into()
-    });
-    let depth = image.map(|v| v.depth as f32).take().0.into();
-    HeightmapImageData { depth, color }
-}
-
-fn merged_ssao(
-    images: &[(fidget::raster::voxel::Image, Option<Color>)],
-) -> std::sync::Arc<[f32]> {
-    let mut out = fidget::raster::voxel::Image::new(images[0].0.size());
+    colors: Vec<Option<Color>>,
+) -> Arc<[[u8; 4]]> {
     let threads = Some(&fidget::render::ThreadPool::Global);
+
+    // Build an accumulated color image, starting with all white
+    // TODO(fidget) better way of doing this?
+    let mut color = fidget::raster::Image::new(image.size());
+    let mut max_depth = 1;
+    let mut min_depth = u32::MAX;
+    for y in 0..image.size().height() {
+        for x in 0..image.size().width() {
+            color[(y as usize, x as usize)] = [0xFF; 4];
+            let d = image[(y as usize, x as usize)].0.depth;
+            max_depth = max_depth.max(d);
+            if d != 0 {
+                min_depth = min_depth.min(d);
+            }
+        }
+    }
+    for (i, c) in colors.iter().enumerate() {
+        let Some(c) = c else {
+            continue;
+        };
+        render_colors_3d(&image, i, view, c, &mut color);
+    }
+
+    // Strip shape index
+    let image = image.map(|f| f.0);
+
+    // Apply brightness based on depth
+    let mut out = fidget::raster::Image::new(image.size());
     out.apply_effect(
         |x, y| {
-            images
-                .iter()
-                .map(|(i, _c)| i[(y, x)])
-                .max_by_key(|p| p.depth)
-                .unwrap_or(GeometryPixel {
-                    depth: 0,
-                    normal: [0.0; 3],
-                })
+            if image[(y, x)].depth == 0 {
+                [0; 4]
+            } else {
+                // Scale based on height, but not all the way to black
+                let brightness = (image[(y, x)].depth as f32
+                    - min_depth as f32)
+                    / (max_depth - min_depth).max(1) as f32
+                    * 0.7
+                    + 0.3;
+                let mut out =
+                    color[(y, x)].map(|i| (i as f32 * brightness) as u8);
+                out[3] = 255; // don't attenuate alpha
+                out
+            }
         },
         threads,
     );
-    let ssao =
-        effects::blur_ssao(&effects::compute_ssao(&out, threads), threads);
-    ssao.take().0.into()
+    out.take().0.into()
 }
 
 fn image_to_shaded(
-    image: fidget::raster::voxel::Image,
+    image: TaggedGeometryPixelImage,
     view: fidget::gui::View3,
-    color: Option<Color>,
-) -> ShadedImageData {
+    colors: Vec<Option<Color>>,
+) -> Arc<[[u8; 4]]> {
     let threads = Some(&fidget::render::ThreadPool::Global);
 
-    let color = color
-        .map(|c| {
-            match c {
-                Color::Rgb(rgb) => render_colors_3d(&image, view, rgb),
-                Color::Hsl(hsl) => render_hsl_3d(&image, view, hsl),
-            }
-            .take()
-            .0
-            .into()
-        })
-        .unwrap_or_else(|| {
-            let pixel_count =
-                image.size().width() as usize * image.size().height() as usize;
-            vec![[u8::MAX; 4]; pixel_count].into()
-        });
+    // Build an accumulated color image, starting with all white
+    // TODO(fidget) better way of doing this?
+    let mut color = fidget::raster::Image::new(image.size());
+    for y in 0..image.size().height() {
+        for x in 0..image.size().width() {
+            color[(y as usize, x as usize)] = [0xFF; 4];
+        }
+    }
+    for (i, c) in colors.iter().enumerate() {
+        let Some(c) = c else {
+            continue;
+        };
+        render_colors_3d(&image, i, view, c, &mut color);
+    }
 
-    // XXX this should all happen on the GPU, probably!
+    // Strip shape index
+    let image = image.map(|f| f.0);
     let image = effects::denoise_normals(&image, threads);
-    let pixels = image
-        .map(|gp| [gp.depth as f32, gp.normal[0], gp.normal[1], gp.normal[2]])
-        .take()
-        .0
-        .into();
-    ShadedImageData { pixels, color }
+
+    let shaded = effects::apply_shading(&image, true, threads);
+    let mut out = fidget::raster::Image::new(image.size());
+    out.apply_effect(
+        |x, y| {
+            if image[(y, x)].depth == 0 {
+                [0; 4]
+            } else {
+                // TODO(fidget) intensity is the same for all channels
+                let brightness = shaded[(y, x)][0] as u16;
+                let mut out = color[(y, x)]
+                    .map(|i| ((i as u16 * brightness) / u8::MAX as u16) as u8);
+                out[3] = 255; // don't attenuate alpha
+                out
+            }
+        },
+        threads,
+    );
+    out.take().0.into()
 }
 
 pub(crate) fn hsl_to_rgb(hsl: [u8; 4]) -> [u8; 4] {
@@ -523,29 +571,18 @@ pub(crate) fn hsl_to_rgb(hsl: [u8; 4]) -> [u8; 4] {
     ]
 }
 
-fn render_hsl_2d(
-    image: &fidget::raster::pixel::Image,
-    view: fidget::gui::View2,
-    hsl: [fidget::context::Tree; 3],
-) -> fidget::raster::Image<[u8; 4]> {
-    let image = render_colors_2d(image, view, hsl);
-    let mut out = fidget::raster::Image::new(image.size());
-    out.apply_effect(
-        |x, y| {
-            let hsl = image[(y, x)];
-            hsl_to_rgb(hsl)
-        },
-        Some(&fidget::render::ThreadPool::Global),
-    );
-    out
-}
-
 pub(crate) fn render_colors_2d(
-    image: &fidget::raster::pixel::Image,
+    image: &TaggedDistancePixelImage,
+    index: usize,
     view: fidget::gui::View2,
-    colors: [fidget::context::Tree; 3],
-) -> fidget::raster::Image<[u8; 4]> {
+    colors: &Color,
+    out: &mut fidget::raster::Image<[u8; 4], fidget::render::ImageSize>,
+) {
     let mat = view.world_to_model() * image.size().screen_to_world();
+    let (colors, mode) = match colors {
+        Color::Rgb(ts) => (ts.clone(), ColorMode::Rgb),
+        Color::Hsl(ts) => (ts.clone(), ColorMode::Hsl),
+    };
 
     let image_size = image.size();
     let mut ctx = fidget::Context::new();
@@ -571,7 +608,8 @@ pub(crate) fn render_colors_2d(
                     if y >= image_size.height() {
                         continue;
                     }
-                    if image[(y as usize, x as usize)].inside() {
+                    let p = image[(y as usize, x as usize)];
+                    if p.1 == index && p.0.inside() {
                         any_inside = true;
                         break 'outer;
                     }
@@ -632,7 +670,6 @@ pub(crate) fn render_colors_2d(
         )
         .collect::<Vec<_>>();
 
-    let mut out = fidget::raster::Image::new(image_size);
     for (x, y, data) in tiles {
         let mut iter = data.iter();
         for dy in 0..TILE_SIZE {
@@ -641,38 +678,38 @@ pub(crate) fn render_colors_2d(
                 let x = x + dx;
                 let y = y + dy;
                 if x < image_size.width() && y < image_size.height() {
-                    out[(y as usize, x as usize)] =
-                        p.map(|p| (p.clamp(0.0, 1.0) * 255.0) as u8);
+                    let d = image[(y as usize, x as usize)];
+                    if d.0.inside() && d.1 == index {
+                        let p = p.map(|p| (p.clamp(0.0, 1.0) * 255.0) as u8);
+                        out[(y as usize, x as usize)] = match mode {
+                            ColorMode::Rgb => p,
+                            ColorMode::Hsl => hsl_to_rgb(p),
+                        };
+                    }
                 }
             }
         }
     }
-    out
 }
 
-fn render_hsl_3d(
-    image: &fidget::raster::voxel::Image,
-    view: fidget::gui::View3,
-    hsl: [fidget::context::Tree; 3],
-) -> fidget::raster::Image<[u8; 4], fidget::render::VoxelSize> {
-    let image = render_colors_3d(image, view, hsl);
-    let mut out = fidget::raster::Image::new(image.size());
-    out.apply_effect(
-        |x, y| {
-            let hsl = image[(y, x)];
-            hsl_to_rgb(hsl)
-        },
-        Some(&fidget::render::ThreadPool::Global),
-    );
-    out
+enum ColorMode {
+    Rgb,
+    Hsl,
 }
 
+/// Renders and accumulates a single index worth of colors
 fn render_colors_3d(
-    image: &fidget::raster::voxel::Image,
+    image: &TaggedGeometryPixelImage,
+    index: usize,
     view: fidget::gui::View3,
-    colors: [fidget::context::Tree; 3],
-) -> fidget::raster::Image<[u8; 4], fidget::render::VoxelSize> {
+    colors: &Color,
+    out: &mut fidget::raster::Image<[u8; 4], fidget::render::VoxelSize>,
+) {
     let mat = view.world_to_model() * image.size().screen_to_world();
+    let (colors, mode) = match colors {
+        Color::Rgb(ts) => (ts.clone(), ColorMode::Rgb),
+        Color::Hsl(ts) => (ts.clone(), ColorMode::Hsl),
+    };
 
     let image_size = image.size();
     let mut ctx = fidget::Context::new();
@@ -698,7 +735,8 @@ fn render_colors_3d(
                     if y >= image_size.height() {
                         continue;
                     }
-                    if image[(y as usize, x as usize)].depth != 0 {
+                    let p = image[(y as usize, x as usize)];
+                    if p.1 == index && p.0.depth != 0 {
                         any_inside = true;
                         break 'outer;
                     }
@@ -730,7 +768,7 @@ fn render_colors_3d(
                         let px = (px + dx) as usize;
                         let py = (py + dy) as usize;
                         let pz = if py < image.height() && px < image.width() {
-                            image[(py, px)].depth
+                            image[(py, px)].0.depth
                         } else {
                             0
                         };
@@ -766,7 +804,6 @@ fn render_colors_3d(
         )
         .collect::<Vec<_>>();
 
-    let mut out = fidget::raster::Image::new(image_size);
     for (x, y, data) in tiles {
         let mut iter = data.iter();
         for dy in 0..TILE_SIZE {
@@ -774,12 +811,99 @@ fn render_colors_3d(
                 let p = iter.next().unwrap();
                 let x = x + dx;
                 let y = y + dy;
-                if x < image_size.width() && y < image_size.height() {
-                    out[(y as usize, x as usize)] =
-                        p.map(|p| (p.clamp(0.0, 1.0) * 255.0) as u8);
+                if x < image_size.width()
+                    && y < image_size.height()
+                    && image[(y as usize, x as usize)].1 == index
+                {
+                    let p = p.map(|p| (p.clamp(0.0, 1.0) * 255.0) as u8);
+                    out[(y as usize, x as usize)] = match mode {
+                        ColorMode::Rgb => p,
+                        ColorMode::Hsl => hsl_to_rgb(p),
+                    };
                 }
             }
         }
     }
+}
+
+/// Convert a distance image into a bitfield image, with denoising
+///
+/// Filled pixels are normally converted to ±∞, but this can cause glitches
+/// if they're on the edge of the model: linear interpolation in the texture
+/// unit means that any pixel touching the infinite pixel will also be
+/// infinite.
+///
+/// Denoising converts those infinite pixels into the average of their
+/// neighbors, to reduce visual glitches when rendering lower-than-native
+/// resolution images.
+// TODO(fidget) Add this to effects?
+fn denoise_2d(
+    image: TaggedDistancePixelImage,
+    threads: Option<&fidget::render::ThreadPool>,
+) -> fidget::raster::Image<f32> {
+    let mut out = fidget::raster::Image::new(image.size());
+    out.apply_effect(
+        |x: usize, y: usize| match image[(y, x)].0.unpack() {
+            fidget::raster::pixel::DistancePixel::Value(v) => v,
+            fidget::raster::pixel::DistancePixel::Fill { inside, .. } => {
+                // Replace fill pixels with the average of their
+                // actual-distance neighbors, falling back to infinity if
+                // that fails.  This prevents glitchiness on the edges of
+                // models.  If a fill pixel is exactly at the edge of a
+                // model, linear interpolation in the texture means that
+                // every pixel interpolated with the infinite pixel is also
+                // infinite.
+                let mut inside_count = 0;
+                let mut inside_avg = 0.0;
+                let mut outside_count = 0;
+                let mut outside_avg = 0.0;
+                for dx in [-1, 0, 1] {
+                    let Some(x) = x.checked_add_signed(dx) else {
+                        continue;
+                    };
+                    if x >= image.width() {
+                        continue;
+                    }
+                    for dy in [-1, 0, 1] {
+                        let Some(y) = y.checked_add_signed(dy) else {
+                            continue;
+                        };
+                        if y >= image.height() {
+                            continue;
+                        }
+                        if let Some(d) = image[(y, x)].0.distance() {
+                            if d < 0.0 {
+                                inside_avg += d;
+                                inside_count += 1;
+                            } else if d > 0.0 {
+                                outside_avg += d;
+                                outside_count += 1;
+                            }
+                        }
+                    }
+                }
+                if inside && inside_count > 0 {
+                    inside_avg / inside_count as f32
+                } else if !inside && outside_count > 0 {
+                    outside_avg / outside_count as f32
+                } else if inside_count + outside_count > 0 {
+                    let avg = (inside_avg + outside_avg)
+                        / (inside_count + outside_count) as f32;
+                    if (avg < 0.0) == inside {
+                        avg
+                    } else if inside {
+                        -f32::INFINITY
+                    } else {
+                        f32::INFINITY
+                    }
+                } else if inside {
+                    -f32::INFINITY
+                } else {
+                    f32::INFINITY
+                }
+            }
+        },
+        threads,
+    );
     out
 }
