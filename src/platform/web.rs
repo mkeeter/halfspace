@@ -1,6 +1,7 @@
 use crate::{
     App, AppState, Message, MessageReceiver, MessageSender, Modal,
     platform::{self, Platform},
+    render::{RenderTask, RenderWorkerPool},
     state, wgpu_setup,
 };
 use log::{error, info, warn};
@@ -85,6 +86,14 @@ pub fn run() {
 
     let example = params.and_then(|p| p.get("example"));
     wasm_bindgen_futures::spawn_local(async move {
+        // Start the render workers before doing any other work
+        start_workers(
+            wasm_bindgen::module(),
+            wasm_bindgen::memory(),
+            wbg_RenderPoolBuilder::new(16),
+        )
+        .await
+        .expect("failed to start workers");
         let canvas = get_canvas();
         let mut web_options = eframe::WebOptions::default();
         web_options.wgpu_options.wgpu_setup = match wgpu_setup().await {
@@ -276,6 +285,11 @@ impl platform::Platform for WebPlatform {
     fn reset(&mut self) {
         // nothing to do here
     }
+
+    fn spawn_render_workers(&mut self) -> RenderWorkerPool<Notify> {
+        let tx = TX_CHANNEL.get().unwrap().clone();
+        RenderWorkerPool::new(tx)
+    }
 }
 
 impl WebPlatform {
@@ -387,4 +401,118 @@ pub(crate) async fn dialog_worker(
         tx.send(r);
     }
     info!("dialog task is exiting");
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Everything below is based on wasm-bindgen-rayon
+
+#[wasm_bindgen(module = "/src/platform/renderWorkers.js")]
+extern "C" {
+    #[wasm_bindgen(js_name = startWorkers)]
+    fn start_workers(
+        module: JsValue,
+        memory: JsValue,
+        builder: wbg_RenderPoolBuilder,
+    ) -> js_sys::Promise;
+}
+
+#[allow(non_camel_case_types)]
+#[wasm_bindgen]
+#[doc(hidden)]
+struct wbg_RenderPoolBuilder {
+    num_threads: usize,
+    rx: flume::Receiver<RenderTask<Notify>>,
+    sender: flume::Sender<StartTask>,
+    receiver: flume::Receiver<StartTask>,
+}
+
+pub struct StartTask {
+    rx: flume::Receiver<RenderTask<Notify>>,
+    ready: flume::Sender<()>,
+}
+
+/// Global handle for the tx channel, used to submit tasks to GPU workers
+static TX_CHANNEL: std::sync::OnceLock<flume::Sender<RenderTask<Notify>>> =
+    std::sync::OnceLock::new();
+
+#[wasm_bindgen]
+impl wbg_RenderPoolBuilder {
+    fn new(num_threads: usize) -> Self {
+        let (sender, receiver) = flume::bounded(num_threads);
+        let (tx, rx) = flume::unbounded();
+        TX_CHANNEL.set(tx).unwrap();
+        Self {
+            num_threads,
+            sender,
+            receiver,
+            rx,
+        }
+    }
+
+    /// Helper to get the main JS file name
+    #[wasm_bindgen(js_name = mainJS)]
+    pub fn main_js(&self) -> js_sys::JsString {
+        #[wasm_bindgen]
+        extern "C" {
+            #[wasm_bindgen(
+                thread_local_v2,
+                js_namespace = ["import", "meta"],
+                js_name = url
+            )]
+            static URL: js_sys::JsString;
+        }
+
+        URL.with(Clone::clone)
+    }
+
+    #[wasm_bindgen(js_name = numThreads)]
+    pub fn num_threads(&self) -> usize {
+        self.num_threads
+    }
+
+    pub fn receiver(&self) -> *const flume::Receiver<StartTask> {
+        &self.receiver
+    }
+
+    pub async fn build(&mut self) {
+        let mut wait_for = Vec::with_capacity(self.num_threads);
+        for _i in 0..self.num_threads {
+            let (tx, rx) = flume::bounded(0);
+            self.sender
+                .send(StartTask {
+                    rx: self.rx.clone(),
+                    ready: tx,
+                })
+                .unwrap();
+            wait_for.push(rx);
+        }
+        // We have to keep the builder alive until all of the children are done,
+        // because they're using its memory (accessed through `receiver`).
+        //
+        // Crimes, I tell you, crimes!
+        for r in wait_for {
+            r.recv_async().await.expect("failed to get wait_for rx");
+        }
+    }
+}
+
+#[wasm_bindgen]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[doc(hidden)]
+pub async fn wbg_render_start_worker(
+    receiver: *const flume::Receiver<StartTask>,
+) where
+    flume::Receiver<StartTask>: Sync,
+{
+    let receiver = unsafe { &*receiver };
+    let start = receiver
+        .recv_async()
+        .await
+        .expect("you were supposed to send me a receiver");
+
+    start.ready.send(()).expect("failed to send ready");
+
+    while let Ok(task) = start.rx.recv_async().await {
+        task.run();
+    }
 }

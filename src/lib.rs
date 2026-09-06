@@ -542,7 +542,7 @@ impl<P: Platform> App<P> {
         let rx = platform.take_rx_channel();
         let data = World::new();
         let undo = state::Undo::new(&data);
-        let render_pool = render::RenderWorkerPool::new();
+        let render_pool = platform.spawn_render_workers();
         Self {
             data,
             library: world::ShapeLibrary::build(),
