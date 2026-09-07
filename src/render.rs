@@ -912,3 +912,14 @@ fn denoise_2d(
     );
     out
 }
+
+////////////////////////////////////////////////////////////////////////////////
+
+/// Render worker, to be run in a thread (native) or Web Worker (web)
+pub(crate) async fn render_worker<N: Notify>(
+    rx: flume::Receiver<RenderTask<N>>,
+) {
+    while let Ok(task) = rx.recv_async().await {
+        task.run();
+    }
+}

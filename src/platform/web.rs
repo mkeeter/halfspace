@@ -511,8 +511,5 @@ pub async fn wbg_render_start_worker(
         .expect("you were supposed to send me a receiver");
 
     start.ready.send(()).expect("failed to send ready");
-
-    while let Ok(task) = start.rx.recv_async().await {
-        task.run();
-    }
+    crate::render::render_worker(start.rx).await;
 }
