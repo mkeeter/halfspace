@@ -133,7 +133,7 @@ impl egui_wgpu::CallbackTrait for WgpuRgbaPainter {
 pub(crate) struct RgbaResources {
     pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
-    cache: WgpuTextureCache<[[u8; 4]]>,
+    cache: WgpuTextureCache<[u32]>,
 
     /// Per-frame bound data
     ///
@@ -291,7 +291,7 @@ impl RgbaResources {
 
     fn get_data(
         &mut self,
-        data: &Arc<[[u8; 4]]>,
+        data: &Arc<[u32]>,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         size: wgpu::Extent3d,
@@ -387,7 +387,7 @@ impl RgbaResources {
 /// Resources used to render a single shaded image
 struct RgbaData {
     /// Image data which is stored in the texture
-    image: Arc<[[u8; 4]]>,
+    image: Arc<[u32]>,
 
     /// RGBA texture to render
     rgba_texture: wgpu::Texture,

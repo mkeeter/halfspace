@@ -152,19 +152,6 @@ pub struct RenderTask<N: Notify> {
 }
 
 impl<N: Notify> RenderTask<N> {
-    /// Render an image and send it as a reply (if it's not cancelled)
-    pub fn run(self) {
-        if let Some(data) = self.run_inner() {
-            self.reply.send(Message::RenderView(RenderViewReply {
-                block: self.block,
-                generation: self.generation,
-                start_time: self.start_time,
-                data,
-                settings: self.settings,
-            }))
-        }
-    }
-
     /// Function which actually renders images (off-thread)
     fn run_inner(&self) -> Option<ViewImage> {
         let scale = 1 << self.level;
@@ -415,7 +402,7 @@ pub struct ImageRenderSettings {
 
 #[derive(Clone, PartialEq)]
 pub struct VoxelRenderSettings {
-    scene: Scene,
+    scene: Scene, // TODO move sceen to task?
     mode: ViewMode3,
     perspective: bool,
     view: fidget::gui::View3,
@@ -460,7 +447,7 @@ fn image_to_heightmap(
     image: TaggedGeometryPixelImage,
     view: fidget::gui::View3,
     colors: Vec<Option<Color>>,
-) -> Arc<[[u8; 4]]> {
+) -> Arc<[u32]> {
     let threads = Some(&fidget::render::ThreadPool::Global);
 
     // Build an accumulated color image, starting with all white
@@ -493,7 +480,7 @@ fn image_to_heightmap(
     out.apply_effect(
         |x, y| {
             if image[(y, x)].depth == 0 {
-                [0; 4]
+                0u32
             } else {
                 // Scale based on height, but not all the way to black
                 let brightness = (image[(y, x)].depth as f32
@@ -504,7 +491,7 @@ fn image_to_heightmap(
                 let mut out =
                     color[(y, x)].map(|i| (i as f32 * brightness) as u8);
                 out[3] = 255; // don't attenuate alpha
-                out
+                u32::from_ne_bytes(out)
             }
         },
         threads,
@@ -516,7 +503,7 @@ fn image_to_shaded(
     image: TaggedGeometryPixelImage,
     view: fidget::gui::View3,
     colors: Vec<Option<Color>>,
-) -> Arc<[[u8; 4]]> {
+) -> Arc<[u32]> {
     let threads = Some(&fidget::render::ThreadPool::Global);
 
     // Build an accumulated color image, starting with all white
@@ -543,14 +530,14 @@ fn image_to_shaded(
     out.apply_effect(
         |x, y| {
             if image[(y, x)].depth == 0 {
-                [0; 4]
+                0u32
             } else {
                 // TODO(fidget) intensity is the same for all channels
                 let brightness = shaded[(y, x)][0] as u16;
                 let mut out = color[(y, x)]
                     .map(|i| ((i as u16 * brightness) / u8::MAX as u16) as u8);
                 out[3] = 255; // don't attenuate alpha
-                out
+                u32::from_ne_bytes(out)
             }
         },
         threads,
@@ -919,7 +906,199 @@ fn denoise_2d(
 pub(crate) async fn render_worker<N: Notify>(
     rx: flume::Receiver<RenderTask<N>>,
 ) {
+    let mut gpu = GpuWorker::new().await;
     while let Ok(task) = rx.recv_async().await {
-        task.run();
+        if let Some(data) = gpu.render(&task).await {
+            task.reply.send(Message::RenderView(RenderViewReply {
+                block: task.block,
+                generation: task.generation,
+                start_time: task.start_time,
+                data,
+                settings: task.settings,
+            }))
+        }
+    }
+}
+
+struct GpuWorker {
+    gpu: fidget::wgpu::Gpu,
+
+    voxel_ctx: fidget::wgpu::voxel::Context,
+    voxel_buffers: fidget::wgpu::voxel::Buffers,
+    voxel_merge_buffers: fidget::wgpu::voxel::effects::MergeBuffers,
+    voxel_ssao_buffers: fidget::wgpu::voxel::effects::SsaoBuffers,
+    voxel_shade_buffers: fidget::wgpu::voxel::effects::ShadeBuffers,
+    // TODO(fidget) this is awkward
+    voxel_read_buffer: fidget::wgpu::buf::ImageReadBuffer<
+        fidget::wgpu::voxel::effects::ShadedImageTag,
+    >,
+    voxel_effects: fidget::wgpu::voxel::effects::Context,
+}
+
+impl GpuWorker {
+    async fn new() -> Self {
+        let gpu = fidget::wgpu::Gpu::init().await.unwrap();
+        let voxel_ctx = fidget::wgpu::voxel::Context::new(&gpu);
+        let voxel_effects = fidget::wgpu::voxel::effects::Context::new(&gpu);
+        let voxel_shade_buffers = voxel_effects.shade_buffers();
+        Self {
+            voxel_buffers: voxel_ctx.buffers(),
+            voxel_merge_buffers: voxel_effects.merge_buffers(),
+            voxel_ssao_buffers: voxel_effects.ssao_buffers(),
+            voxel_read_buffer: gpu
+                .read_buffer_for(voxel_shade_buffers.output()),
+            gpu,
+            voxel_shade_buffers,
+            voxel_ctx,
+            voxel_effects,
+        }
+    }
+
+    async fn render<N: Notify>(
+        &mut self,
+        t: &RenderTask<N>,
+    ) -> Option<ViewImage> {
+        match &t.settings {
+            RenderSettings::Voxel(vs) => match vs.mode {
+                // This is the only GPU function at the moment
+                ViewMode3::Shaded => {
+                    self.render_voxel(vs, t.level, &t.cancel).await
+                }
+                ViewMode3::Heightmap => t.run_inner(),
+            },
+            _ => t.run_inner(),
+        }
+    }
+
+    async fn render_voxel(
+        &mut self,
+        vs: &VoxelRenderSettings,
+        level: usize,
+        cancel: &fidget::render::CancelToken,
+    ) -> Option<ViewImage> {
+        let VoxelRenderSettings {
+            scene,
+            mode,
+            view,
+            size,
+            perspective,
+        } = vs;
+        // If this is our final rendering level, then do oversampling in
+        // the Z direction for better rendering of edges.  XXX if you
+        // change this, then you also need to edit `shaded.rs` to adjust
+        // the `max_depth` passed into the shader.
+        let scale = 1 << level;
+        let bonus_z = if level == 0 { 2 } else { 1 };
+        let image_size = fidget::render::VoxelSize::new(
+            (size.width() / scale).max(1),
+            (size.height() / scale).max(1),
+            (size.depth() / scale).max(1) * bonus_z,
+        );
+        let z_scale = 2.0 / bonus_z as f32;
+        let scale = nalgebra::Scale3::new(1.0, 1.0, z_scale);
+        let mut world_to_model = view.world_to_model() * scale.to_homogeneous();
+        if *perspective {
+            *world_to_model.get_mut((3, 2)).unwrap() = 0.3 / bonus_z as f32;
+        }
+        let render_cfg = fidget::raster::voxel::RenderConfig {
+            image_size,
+            world_to_model,
+        };
+
+        // Render and accumulate every shape into merge buffers
+        self.voxel_merge_buffers.reset();
+        for s in &scene.shapes {
+            let rs = s.tree.clone().into();
+            // TODO cache and reuse shapes
+            let shape =
+                self.gpu.shape(&rs).expect("failed to get render shape");
+            self.voxel_ctx
+                .submit(&shape, &mut self.voxel_buffers, &render_cfg)
+                .expect("failed to submit voxel render");
+            self.voxel_effects
+                .submit_merge(
+                    self.voxel_buffers.image_storage_buffer(),
+                    true,
+                    &mut self.voxel_merge_buffers,
+                )
+                .expect("failed to submit voxel merge");
+        }
+        self.voxel_effects
+            .submit_ssao(
+                &self.voxel_merge_buffers,
+                &mut self.voxel_ssao_buffers,
+            )
+            .expect("failed to submit voxel SSAO");
+
+        if scene.shapes.iter().any(|c| c.color.is_some()) {
+            // TODO cache and reuse colors
+            let colors = scene
+                .shapes
+                .iter()
+                .map(|t| {
+                    t.color
+                        .as_ref()
+                        .map(|c| match c {
+                            Color::Rgb([r, g, b]) => {
+                                fidget::wgpu::ShapeColor::Rgb {
+                                    // TODO(fidget) this is awkward, should we also
+                                    // implement Into on &Tree?
+                                    r: r.clone().into(),
+                                    g: g.clone().into(),
+                                    b: b.clone().into(),
+                                }
+                            }
+                            Color::Hsl(..) => unimplemented!(),
+                        })
+                        .unwrap_or_else(|| {
+                            // TODO this is also awkward!
+                            let c =
+                                || fidget::context::Tree::constant(1.0).into();
+                            fidget::wgpu::ShapeColor::Rgb {
+                                r: c(),
+                                g: c(),
+                                b: c(),
+                            }
+                        })
+                })
+                .collect::<Vec<_>>();
+            let colors = self.gpu.color_buffers(&colors).unwrap();
+            self.voxel_effects
+                .submit_color(
+                    &self.voxel_merge_buffers,
+                    &world_to_model,
+                    &colors,
+                    &mut self.voxel_shade_buffers,
+                )
+                .expect("failed to submit color rendering");
+        }
+
+        match mode {
+            ViewMode3::Heightmap => unimplemented!(),
+            ViewMode3::Shaded => {
+                self.voxel_effects
+                    .submit_shade(
+                        &self.voxel_merge_buffers,
+                        Some(&self.voxel_ssao_buffers),
+                        &mut self.voxel_shade_buffers,
+                        Some(&mut self.voxel_read_buffer),
+                    )
+                    .expect("failed to submit shaded rendering");
+            }
+        };
+
+        // TODO this should be async for web compatibility
+        let mapped_image = self.gpu.map(&mut self.voxel_read_buffer);
+        let image = mapped_image.image();
+        let color = image.take().0.into();
+
+        let image = RgbaImage {
+            view: *view,
+            size: *size,
+            level,
+            color,
+            mode: *mode,
+        };
+        Some(ViewImage::Voxel(image))
     }
 }

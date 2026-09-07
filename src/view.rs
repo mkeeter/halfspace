@@ -182,7 +182,7 @@ pub struct RgbaImage {
     /// Pre-baked color
     ///
     /// This is greyscale for a heightmap rendering, or RGB for shaded
-    pub color: Arc<[[u8; 4]]>,
+    pub color: Arc<[u32]>,
     pub view: fidget::gui::View3,
     pub size: fidget::render::VoxelSize,
     pub level: usize,
