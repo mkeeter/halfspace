@@ -1,6 +1,7 @@
 use crate::{
     App, AppState, Message, MessageReceiver, MessageSender, Modal,
     platform::{self, Platform},
+    render::{RenderTask, RenderWorkerPool},
     state, wgpu_setup,
 };
 use log::{info, warn};
@@ -174,6 +175,19 @@ impl Platform for NativePlatform {
         };
         self.ctx
             .send_viewport_cmd(egui::ViewportCommand::Title(title.to_owned()));
+    }
+
+    fn spawn_render_workers(&mut self) -> RenderWorkerPool<Self::Notify> {
+        let (tx, rx) = flume::unbounded::<RenderTask<Notify>>();
+        for _ in 0..16 {
+            let rx = rx.clone();
+            std::thread::spawn(move || {
+                while let Ok(task) = rx.recv() {
+                    task.run();
+                }
+            });
+        }
+        RenderWorkerPool::new(tx)
     }
 }
 

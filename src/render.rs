@@ -18,8 +18,8 @@
 //! [`ViewData::image`](crate::view::ViewData::image) checks to see whether our
 //! current settings match those of an in-progress render.  If not, then it
 //! cancels the in-progress render and starts a new render, spawning it into the
-//! global `rayon` thread pool.  If available, it returns a cached image, which
-//! is a [`ViewImage`].
+//! render worker pool.  If available, it returns a cached image, which is a
+//! [`ViewImage`].
 //!
 //! A render task is represented by a [`RenderTask`] object, which performs the
 //! render then sends a generation-tagged result into a [`MessageGenSender`].
@@ -72,8 +72,8 @@ pub(crate) type RenderShape = fidget::shape::Shape<RenderFunction>;
 
 /// State representing an in-progress render
 ///
-/// This lives in the main thread; the work itself lives in a closure in the
-/// `rayon` or WGPU thread pool.
+/// This lives in the main thread; the work itself lives in [`RenderTask`] in
+/// the worker pool.
 pub struct RenderTaskHandle {
     settings: RenderSettings,
     level: usize,
@@ -86,20 +86,17 @@ impl Drop for RenderTaskHandle {
     }
 }
 
-/// CPU worker pool, which dispatches to the (global) Rayon thread pool
+/// Render worker pool, backed by dedicated threads or web workers
 pub(crate) struct RenderWorkerPool<N: Notify> {
-    // TODO actually make an explicit Rayon pool here?
-    _marker: std::marker::PhantomData<N>,
+    tx: flume::Sender<RenderTask<N>>,
 }
 
 impl<N: Notify> RenderWorkerPool<N> {
-    pub(crate) fn new() -> Self {
-        Self {
-            _marker: std::marker::PhantomData,
-        }
+    pub(crate) fn new(tx: flume::Sender<RenderTask<N>>) -> Self {
+        Self { tx }
     }
 
-    /// Begins a new image rendering task in the global rayon thread pool
+    /// Begins a new image rendering task in the worker pool
     pub(crate) fn spawn(
         &self,
         block: BlockIndex,
@@ -111,21 +108,15 @@ impl<N: Notify> RenderWorkerPool<N> {
         let cancel = fidget::render::CancelToken::new();
         let start_time = Instant::now();
         let task = RenderTask {
+            block,
+            generation,
             settings: settings.clone(),
             level,
+            start_time,
             cancel: cancel.clone(),
+            reply: tx,
         };
-        rayon::spawn(move || {
-            if let Some(data) = task.run() {
-                tx.send(Message::RenderView(RenderViewReply {
-                    block,
-                    generation,
-                    start_time,
-                    data,
-                    settings: task.settings,
-                }))
-            }
-        });
+        self.tx.send(task).expect("all render threads stopped");
         RenderTaskHandle {
             settings,
             cancel,
@@ -149,16 +140,33 @@ impl RenderTaskHandle {
     }
 }
 
-/// Dummy object representing a CPU render task
-struct RenderTask {
+/// Object representing a render task
+pub struct RenderTask<N: Notify> {
+    block: BlockIndex,
+    generation: u64,
     settings: RenderSettings,
     level: usize,
     cancel: fidget::render::CancelToken,
+    reply: MessageGenSender<N>,
+    start_time: Instant,
 }
 
-impl RenderTask {
+impl<N: Notify> RenderTask<N> {
+    /// Render an image and send it as a reply (if it's not cancelled)
+    pub fn run(self) {
+        if let Some(data) = self.run_inner() {
+            self.reply.send(Message::RenderView(RenderViewReply {
+                block: self.block,
+                generation: self.generation,
+                start_time: self.start_time,
+                data,
+                settings: self.settings,
+            }))
+        }
+    }
+
     /// Function which actually renders images (off-thread)
-    pub fn run(&self) -> Option<ViewImage> {
+    fn run_inner(&self) -> Option<ViewImage> {
         let scale = 1 << self.level;
         let data = match &self.settings {
             RenderSettings::Image(ImageRenderSettings {
