@@ -962,7 +962,11 @@ impl GpuWorker {
             RenderSettings::Voxel(vs) => match vs.mode {
                 // This is the only GPU function at the moment
                 ViewMode3::Shaded => {
-                    self.render_voxel(vs, t.level, &t.cancel).await
+                    if t.cancel.is_cancelled() {
+                        None
+                    } else {
+                        self.render_voxel(vs, t.level).await
+                    }
                 }
                 ViewMode3::Heightmap => t.run_inner(),
             },
@@ -974,7 +978,6 @@ impl GpuWorker {
         &mut self,
         vs: &VoxelRenderSettings,
         level: usize,
-        cancel: &fidget::render::CancelToken,
     ) -> Option<ViewImage> {
         let VoxelRenderSettings {
             scene,
@@ -1041,8 +1044,8 @@ impl GpuWorker {
                         .map(|c| match c {
                             Color::Rgb([r, g, b]) => {
                                 fidget::wgpu::ShapeColor::Rgb {
-                                    // TODO(fidget) this is awkward, should we also
-                                    // implement Into on &Tree?
+                                    // TODO(fidget) this is awkward, should we
+                                    // also implement Into on &Tree?
                                     r: r.clone().into(),
                                     g: g.clone().into(),
                                     b: b.clone().into(),
@@ -1051,7 +1054,6 @@ impl GpuWorker {
                             Color::Hsl(..) => unimplemented!(),
                         })
                         .unwrap_or_else(|| {
-                            // TODO this is also awkward!
                             let c =
                                 || fidget::context::Tree::constant(1.0).into();
                             fidget::wgpu::ShapeColor::Rgb {
