@@ -927,15 +927,25 @@ struct GpuWorker {
     gpu: fidget::wgpu::Gpu,
 
     voxel_ctx: fidget::wgpu::voxel::Context,
+    voxel_effects: fidget::wgpu::voxel::effects::Context,
     voxel_buffers: fidget::wgpu::voxel::Buffers,
     voxel_merge_buffers: fidget::wgpu::voxel::effects::MergeBuffers,
     voxel_ssao_buffers: fidget::wgpu::voxel::effects::SsaoBuffers,
     voxel_shade_buffers: fidget::wgpu::voxel::effects::ShadeBuffers,
-    // TODO(fidget) this is awkward
     voxel_read_buffer: fidget::wgpu::buf::ReadBuffer<
         fidget::wgpu::voxel::effects::ShadedImageTag,
     >,
-    voxel_effects: fidget::wgpu::voxel::effects::Context,
+
+    pixel_ctx: fidget::wgpu::pixel::Context,
+    pixel_effects: fidget::wgpu::pixel::effects::Context,
+    pixel_buffers: fidget::wgpu::pixel::Buffers,
+    pixel_merge_buffers: fidget::wgpu::pixel::effects::MergeBuffers,
+    pixel_read_distance_buffer: fidget::wgpu::buf::ReadBuffer<
+        fidget::wgpu::pixel::effects::PixelDistanceBufferTag,
+    >,
+    pixel_read_color_buffer: fidget::wgpu::buf::ReadBuffer<
+        fidget::wgpu::pixel::effects::PixelColorBufferTag,
+    >,
 }
 
 impl GpuWorker {
@@ -944,16 +954,34 @@ impl GpuWorker {
         let voxel_ctx = fidget::wgpu::voxel::Context::new(&gpu);
         let voxel_effects = fidget::wgpu::voxel::effects::Context::new(&gpu);
         let voxel_shade_buffers = voxel_effects.shade_buffers();
+        let voxel_buffers = voxel_ctx.buffers();
+        let voxel_merge_buffers = voxel_effects.merge_buffers();
+        let voxel_ssao_buffers = voxel_effects.ssao_buffers();
+        let voxel_read_buffer = gpu.read_buffer("voxel read");
+
+        let pixel_ctx = fidget::wgpu::pixel::Context::new(&gpu);
+        let pixel_effects = fidget::wgpu::pixel::effects::Context::new(&gpu);
+        let pixel_merge_buffers = pixel_effects.merge_buffers();
+        let pixel_buffers = pixel_ctx.buffers();
+        let pixel_read_color_buffer = gpu.read_buffer("pixel color read");
+        let pixel_read_distance_buffer = gpu.read_buffer("pixel distance read");
+
         Self {
-            voxel_buffers: voxel_ctx.buffers(),
-            voxel_merge_buffers: voxel_effects.merge_buffers(),
-            voxel_ssao_buffers: voxel_effects.ssao_buffers(),
-            voxel_read_buffer: gpu
-                .read_buffer_for(voxel_shade_buffers.output()),
             gpu,
             voxel_shade_buffers,
             voxel_ctx,
             voxel_effects,
+            voxel_buffers,
+            voxel_read_buffer,
+            voxel_merge_buffers,
+            voxel_ssao_buffers,
+
+            pixel_ctx,
+            pixel_effects,
+            pixel_buffers,
+            pixel_merge_buffers,
+            pixel_read_color_buffer,
+            pixel_read_distance_buffer,
         }
     }
 
