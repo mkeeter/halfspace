@@ -337,7 +337,10 @@ pub(crate) fn merge_and_color(
     image_size: fidget::render::ImageSize,
     view: fidget::gui::View2,
     images: Vec<(fidget::raster::pixel::Image, Option<Color>)>,
-) -> (TaggedDistancePixelImage, Option<fidget::raster::RgbaImage>) {
+) -> (
+    TaggedDistancePixelImage,
+    Option<fidget::raster::Image<[u8; 4]>>,
+) {
     let mut merged = TaggedDistancePixelImage::new(image_size);
     merged.apply_effect(
         |x, y| {
@@ -929,7 +932,7 @@ struct GpuWorker {
     voxel_ssao_buffers: fidget::wgpu::voxel::effects::SsaoBuffers,
     voxel_shade_buffers: fidget::wgpu::voxel::effects::ShadeBuffers,
     // TODO(fidget) this is awkward
-    voxel_read_buffer: fidget::wgpu::buf::ImageReadBuffer<
+    voxel_read_buffer: fidget::wgpu::buf::ReadBuffer<
         fidget::wgpu::voxel::effects::ShadedImageTag,
     >,
     voxel_effects: fidget::wgpu::voxel::effects::Context,
@@ -1020,7 +1023,7 @@ impl GpuWorker {
                 .expect("failed to submit voxel render");
             self.voxel_effects
                 .submit_merge(
-                    self.voxel_buffers.image_storage_buffer(),
+                    self.voxel_buffers.output(),
                     true,
                     &mut self.voxel_merge_buffers,
                 )
@@ -1083,14 +1086,17 @@ impl GpuWorker {
                         &self.voxel_merge_buffers,
                         Some(&self.voxel_ssao_buffers),
                         &mut self.voxel_shade_buffers,
-                        Some(&mut self.voxel_read_buffer),
                     )
                     .expect("failed to submit shaded rendering");
             }
         };
 
-        // TODO this should be async for web compatibility
-        let mapped_image = self.gpu.map(&mut self.voxel_read_buffer);
+        self.gpu.copy(
+            self.voxel_shade_buffers.output(),
+            &mut self.voxel_read_buffer,
+        );
+        let mapped_image =
+            self.gpu.map_image_async(&mut self.voxel_read_buffer).await;
         let image = mapped_image.image();
         let color = image.take().0.into();
 
