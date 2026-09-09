@@ -36,7 +36,6 @@ log = "0.4.27"
 nalgebra = { version = "0.35", features = ["serde", "serde-serialize"] }
 nonempty = "0.12.0"
 ordered-float = "5.1.0"
-palette = "0.7.6"
 rayon = "1.10.0"
 rfd = "0.15.3"
 serde = "1"
