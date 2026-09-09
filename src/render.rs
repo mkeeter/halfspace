@@ -45,7 +45,8 @@
 //! ## Drawing images to the screen
 //! TODO write this
 use crate::{
-    BlockIndex, Message, MessageGenSender, RenderViewReply,
+    BlockIndex, Message, MessageGenSender, MessageSender, RenderViewReply,
+    export::ExportError,
     platform::Notify,
     view::{
         PixelImage, RgbaImage, ViewCanvas, ViewImage, ViewMode2, ViewMode3,
@@ -104,13 +105,15 @@ impl<N: Notify> RenderWorkerPool<N> {
         let cancel = fidget::render::CancelToken::new();
         let start_time = Instant::now();
         let task = RenderTask {
-            block,
-            generation,
+            kind: TaskKind::Display {
+                block,
+                generation,
+                level,
+                start_time,
+                reply: tx,
+            },
             settings: settings.clone(),
-            level,
-            start_time,
             cancel: cancel.clone(),
-            reply: tx,
         };
         self.tx.send(task).expect("all render threads stopped");
         RenderTaskHandle {
@@ -118,6 +121,22 @@ impl<N: Notify> RenderWorkerPool<N> {
             cancel,
             level,
         }
+    }
+
+    /// Begins a new export image rendering task in the worker pool
+    pub(crate) fn export(
+        &self,
+        settings: RenderSettings,
+        tx: MessageSender<N>,
+    ) -> fidget::render::CancelToken {
+        let cancel = fidget::render::CancelToken::new();
+        let task = RenderTask {
+            kind: TaskKind::Export { reply: tx },
+            settings,
+            cancel: cancel.clone(),
+        };
+        self.tx.send(task).expect("all render threads stopped");
+        cancel
     }
 }
 
@@ -138,35 +157,22 @@ impl RenderTaskHandle {
 
 /// Object representing a render task
 pub struct RenderTask<N: Notify> {
-    block: BlockIndex,
-    generation: u64,
     settings: RenderSettings,
-    level: usize,
     cancel: fidget::render::CancelToken,
-    reply: MessageGenSender<N>,
-    start_time: Instant,
+    kind: TaskKind<N>,
 }
 
-/// Compares two distance pixels
-///
-/// Returns `true` if we should swap (i.e. replace `a` with `b`)
-fn compare_distance_pixel(a: RawDistancePixel, b: RawDistancePixel) -> bool {
-    // For inside pixels, prefer `b` over `a` so that the last image wins
-    if b.inside() {
-        true
-    } else if a.inside() {
-        false
-    } else if let (Some(da), Some(db)) = (a.distance(), b.distance()) {
-        // Outside pixels are only rendered in SDF mode, which is pixel-perfect
-        // (so we should always have distance values).  In this case, we'll do a
-        // true `min` for outside pixels, instead of the `b`-over-`a` logic
-        // which is used for inside pixels
-        db < da
-    } else {
-        // Otherwise, just prefer `b`; we are presumably in a non-SDF mode which
-        // skips outside pixels anyways.
-        true
-    }
+pub enum TaskKind<N: Notify> {
+    Display {
+        block: BlockIndex,
+        generation: u64,
+        reply: MessageGenSender<N>,
+        start_time: Instant,
+        level: usize,
+    },
+    Export {
+        reply: MessageSender<N>,
+    },
 }
 
 /// Settings for rendering an image
@@ -178,19 +184,19 @@ pub enum RenderSettings {
 
 #[derive(Clone, PartialEq)]
 pub struct ImageRenderSettings {
-    scene: Scene, // TODO cloning scenes can be expensive
-    mode: ViewMode2,
-    view: fidget::gui::View2,
-    size: fidget::render::ImageSize,
+    pub scene: Scene, // TODO cloning scenes can be expensive
+    pub mode: ViewMode2,
+    pub view: fidget::gui::View2,
+    pub size: fidget::render::ImageSize,
 }
 
 #[derive(Clone, PartialEq)]
 pub struct VoxelRenderSettings {
-    scene: Scene, // TODO move sceen to task?
-    mode: ViewMode3,
-    perspective: bool,
-    view: fidget::gui::View3,
-    size: fidget::render::VoxelSize,
+    pub scene: Scene, // TODO move sceen to task?
+    pub mode: ViewMode3,
+    pub perspective: bool,
+    pub view: fidget::gui::View3,
+    pub size: fidget::render::VoxelSize,
 }
 
 impl RenderSettings {
@@ -235,14 +241,65 @@ pub(crate) async fn render_worker<N: Notify>(
 ) {
     let mut gpu = GpuWorker::new().await;
     while let Ok(task) = rx.recv_async().await {
-        if let Some(data) = gpu.render(&task).await {
-            task.reply.send(Message::RenderView(RenderViewReply {
-                block: task.block,
-                generation: task.generation,
-                start_time: task.start_time,
-                data,
-                settings: task.settings,
-            }))
+        match task.kind {
+            TaskKind::Display {
+                block,
+                generation,
+                start_time,
+                level,
+                reply,
+            } => {
+                if task.cancel.is_cancelled() {
+                    continue;
+                }
+                let data = match &task.settings {
+                    RenderSettings::Voxel(vs) => {
+                        gpu.render_voxel(vs, level).await
+                    }
+                    RenderSettings::Image(rs) => {
+                        gpu.render_pixel(rs, level).await
+                    }
+                };
+                reply.send(Message::RenderView(RenderViewReply {
+                    block,
+                    generation,
+                    start_time,
+                    data,
+                    settings: task.settings,
+                }))
+            }
+            TaskKind::Export { reply } => {
+                if task.cancel.is_cancelled() {
+                    reply.send(Message::ExportComplete(Err(
+                        ExportError::Cancelled,
+                    )));
+                    continue;
+                }
+                let data = match &task.settings {
+                    RenderSettings::Voxel(vs) => gpu.render_voxel(vs, 0).await,
+                    RenderSettings::Image(rs) => gpu.render_pixel(rs, 0).await,
+                };
+                let out = match data {
+                    ViewImage::Pixel(px) => {
+                        if let Some(c) = px.color {
+                            c.as_bytes().to_vec()
+                        } else {
+                            px.distance
+                                .iter()
+                                .flat_map(|p| {
+                                    if p.inside() {
+                                        [0xFF; 4]
+                                    } else {
+                                        [0x00; 4]
+                                    }
+                                })
+                                .collect()
+                        }
+                    }
+                    ViewImage::Voxel(im) => im.color.as_bytes().to_vec(),
+                };
+                reply.send(Message::ExportComplete(Ok(out)));
+            }
         }
     }
 }
@@ -309,24 +366,11 @@ impl GpuWorker {
         }
     }
 
-    async fn render<N: Notify>(
-        &mut self,
-        t: &RenderTask<N>,
-    ) -> Option<ViewImage> {
-        if t.cancel.is_cancelled() {
-            return None;
-        }
-        match &t.settings {
-            RenderSettings::Voxel(vs) => self.render_voxel(vs, t.level).await,
-            RenderSettings::Image(rs) => self.render_pixel(rs, t.level).await,
-        }
-    }
-
     async fn render_voxel(
         &mut self,
         vs: &VoxelRenderSettings,
         level: usize,
-    ) -> Option<ViewImage> {
+    ) -> ViewImage {
         let VoxelRenderSettings {
             scene,
             mode,
@@ -457,14 +501,14 @@ impl GpuWorker {
             color,
             mode: *mode,
         };
-        Some(ViewImage::Voxel(image))
+        ViewImage::Voxel(image)
     }
 
     async fn render_pixel(
         &mut self,
         vs: &ImageRenderSettings,
         level: usize,
-    ) -> Option<ViewImage> {
+    ) -> ViewImage {
         let ImageRenderSettings {
             scene,
             mode,
@@ -573,10 +617,7 @@ impl GpuWorker {
             .map_image_async(&mut self.pixel_read_distance_buffer)
             .await;
         let distance_img = mapped_distance_image.image();
-        let distance =
-            <[f32]>::ref_from_bytes(distance_img.take().0.as_bytes())
-                .unwrap()
-                .into();
+        let distance = distance_img.take().0.into();
 
         let image = PixelImage {
             distance,
@@ -586,6 +627,6 @@ impl GpuWorker {
             color,
             mode: *mode,
         };
-        Some(ViewImage::Pixel(image))
+        ViewImage::Pixel(image)
     }
 }

@@ -1,11 +1,8 @@
-use crate::{render::RenderShape, world::Scene};
-
-use zerocopy::IntoBytes;
+use crate::render::RenderShape;
 
 use fidget::{
     context::Tree,
     mesh::{Octree, Settings},
-    raster::pixel::{EvalConfig, RenderConfig},
     render::{ImageSize, ThreadPool},
     shapes::{
         Box, Intersection,
@@ -112,11 +109,11 @@ pub(crate) fn build_stl(
     Ok(stl)
 }
 
-fn image_view(
+pub(crate) fn image_view(
     lower: Vec2,
     upper: Vec2,
     resolution: f32,
-) -> Result<fidget::gui::View2, ExportError> {
+) -> Result<(fidget::gui::View2, ImageSize), ExportError> {
     let center = (lower + upper) / 2.0;
     let scale_xyz = (upper - center).abs().max((lower - center).abs());
     let scale = scale_xyz.x.min(scale_xyz.y);
@@ -131,15 +128,6 @@ fn image_view(
     if scale.is_nan() || scale < 1e-8 {
         return Err(ExportError::BoundsAreTooSmall);
     }
-    Ok(fidget::gui::View2::from_center_and_scale(center, scale))
-}
-
-pub(crate) fn image_settings(
-    lower: Vec2,
-    upper: Vec2,
-    resolution: f32,
-) -> Result<RenderConfig, ExportError> {
-    let view = image_view(lower, upper, resolution)?;
 
     let size = (upper - lower) * resolution;
     if size.x <= 0.0 {
@@ -150,67 +138,8 @@ pub(crate) fn image_settings(
     let width = size.x as u32;
     let height = size.y as u32;
 
-    let settings = RenderConfig {
-        world_to_model: view.world_to_model(),
-        ..RenderConfig::from_size(ImageSize::new(width, height))
-    };
-    Ok(settings)
-}
-
-pub(crate) fn build_image(
-    scene: Scene,
-    lower: Vec2,
-    upper: Vec2,
-    resolution: f32,
-    cancel_token: fidget::render::CancelToken,
-) -> Result<Vec<u8>, ExportError> {
-    // Some duplicated work here, oh well
-    let view = image_view(lower, upper, resolution)?;
-    let render_cfg = image_settings(lower, upper, resolution)?;
-    let eval_cfg = EvalConfig {
-        cancel: cancel_token,
-        ..EvalConfig::default()
-    };
-
-    let images: Vec<_> = scene
-        .shapes
-        .iter()
-        .map(|shape| {
-            let rs = RenderShape::from(shape.tree.clone());
-            let data = fidget::raster::pixel::render(
-                rs.try_into().expect("no vars allowed"),
-                &render_cfg,
-                &eval_cfg,
-            )?;
-            Some((data, shape.color.clone()))
-        })
-        .collect::<Option<_>>()
-        .ok_or(ExportError::Cancelled)?;
-
-    let (distance, color) =
-        crate::render::merge_and_color(render_cfg.image_size, view, images);
-
-    let mut out = fidget::raster::Image::<[u8; 4]>::new(render_cfg.image_size);
-    out.apply_effect(
-        |x, y| {
-            let pos = y * render_cfg.image_size.width() as usize + x;
-            if distance[pos].0.inside() {
-                color.as_ref().map(|c| c[pos]).unwrap_or([u8::MAX; 4])
-            } else {
-                [0; 4]
-            }
-        },
-        eval_cfg.threads,
-    );
-    let mut bytes = vec![];
-    image::write_buffer_with_format(
-        &mut std::io::Cursor::new(&mut bytes),
-        out.take().0.as_bytes(),
-        render_cfg.image_size.width(),
-        render_cfg.image_size.height(),
-        image::ColorType::Rgba8,
-        image::ImageFormat::Png,
-    )?;
-
-    Ok(bytes)
+    Ok((
+        fidget::gui::View2::from_center_and_scale(center, scale),
+        ImageSize::new(width, height),
+    ))
 }

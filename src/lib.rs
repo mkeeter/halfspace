@@ -1662,17 +1662,27 @@ impl<P: Platform> App<P> {
                         "png",
                     )
                 {
-                    let cancel = fidget::render::CancelToken::new();
-                    let cancel_ = cancel.clone();
                     let tx = self.rx.sender();
-                    rayon::spawn(move || {
-                        let r = export::build_image(
-                            scene, min, max, resolution, cancel_,
-                        );
-                        tx.send(Message::ExportComplete(r))
-                    });
-                    self.modal =
-                        Some(Modal::ExportInProgress { target, cancel });
+                    match export::image_view(min, max, resolution) {
+                        Ok((view, size)) => {
+                            let cancel = self.render_pool.export(
+                                render::RenderSettings::Image(
+                                    render::ImageRenderSettings {
+                                        scene,
+                                        mode: view::ViewMode2::Bitfield,
+                                        view,
+                                        size,
+                                    },
+                                ),
+                                tx,
+                            );
+                            self.modal = Some(Modal::ExportInProgress {
+                                target,
+                                cancel,
+                            });
+                        }
+                        Err(e) => tx.send(Message::ExportComplete(Err(e))),
+                    }
                 }
             }
             None => (),
