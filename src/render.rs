@@ -453,7 +453,13 @@ impl GpuWorker {
                                     b: b.clone().into(),
                                 }
                             }
-                            Color::Hsl(..) => unimplemented!(),
+                            Color::Hsl([h, s, l]) => {
+                                fidget::wgpu::ShapeColor::Hsl {
+                                    h: h.clone().into(),
+                                    s: s.clone().into(),
+                                    l: l.clone().into(),
+                                }
+                            }
                         })
                         .unwrap_or_else(|| {
                             let c =
@@ -586,7 +592,13 @@ impl GpuWorker {
                                     b: b.clone().into(),
                                 }
                             }
-                            Color::Hsl(..) => unimplemented!(),
+                            Color::Hsl([h, s, l]) => {
+                                fidget::wgpu::ShapeColor::Hsl {
+                                    h: h.clone().into(),
+                                    s: s.clone().into(),
+                                    l: l.clone().into(),
+                                }
+                            }
                         })
                         .unwrap_or_else(|| {
                             let c =
