@@ -1665,6 +1665,7 @@ impl<P: Platform> App<P> {
                     let tx = self.rx.sender();
                     match export::image_view(min, max, resolution) {
                         Ok((view, size)) => {
+                            // Sends the export task to the render pool
                             let cancel = self.render_pool.export(
                                 render::RenderSettings::Image(
                                     render::ImageRenderSettings {

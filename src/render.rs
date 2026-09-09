@@ -54,8 +54,6 @@ use crate::{
     world::{Color, Scene},
 };
 
-use fidget::raster::pixel::RawDistancePixel;
-
 use web_time::Instant;
 use zerocopy::{FromBytes, IntoBytes};
 
@@ -275,9 +273,13 @@ pub(crate) async fn render_worker<N: Notify>(
                     )));
                     continue;
                 }
-                let data = match &task.settings {
-                    RenderSettings::Voxel(vs) => gpu.render_voxel(vs, 0).await,
-                    RenderSettings::Image(rs) => gpu.render_pixel(rs, 0).await,
+                let (data, image_size) = match &task.settings {
+                    RenderSettings::Voxel(vs) => {
+                        (gpu.render_voxel(vs, 0).await, vs.size.into())
+                    }
+                    RenderSettings::Image(rs) => {
+                        (gpu.render_pixel(rs, 0).await, rs.size)
+                    }
                 };
                 let out = match data {
                     ViewImage::Pixel(px) => {
@@ -296,9 +298,24 @@ pub(crate) async fn render_worker<N: Notify>(
                                 .collect()
                         }
                     }
+                    // TODO borrow in this case?
                     ViewImage::Voxel(im) => im.color.as_bytes().to_vec(),
                 };
-                reply.send(Message::ExportComplete(Ok(out)));
+
+                let mut bytes = vec![];
+                match image::write_buffer_with_format(
+                    &mut std::io::Cursor::new(&mut bytes),
+                    &out,
+                    image_size.width(),
+                    image_size.height(),
+                    image::ColorType::Rgba8,
+                    image::ImageFormat::Png,
+                ) {
+                    Ok(()) => reply.send(Message::ExportComplete(Ok(bytes))),
+                    Err(e) => {
+                        reply.send(Message::ExportComplete(Err(e.into())))
+                    }
+                }
             }
         }
     }
