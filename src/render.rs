@@ -61,6 +61,7 @@ use fidget::{
 use rayon::prelude::*;
 use std::sync::Arc;
 use web_time::Instant;
+use zerocopy::{FromBytes, IntoBytes};
 
 #[cfg(all(feature = "jit", not(target_arch = "wasm32")))]
 pub(crate) type RenderFunction = fidget::jit::JitFunction;
@@ -1001,7 +1002,7 @@ impl GpuWorker {
                 }
                 ViewMode3::Heightmap => t.run_inner(),
             },
-            _ => t.run_inner(),
+            RenderSettings::Image(rs) => self.render_pixel(rs, t.level).await,
         }
     }
 
@@ -1136,5 +1137,134 @@ impl GpuWorker {
             mode: *mode,
         };
         Some(ViewImage::Voxel(image))
+    }
+
+    async fn render_pixel(
+        &mut self,
+        vs: &ImageRenderSettings,
+        level: usize,
+    ) -> Option<ViewImage> {
+        let ImageRenderSettings {
+            scene,
+            mode,
+            view,
+            size,
+        } = vs;
+        // If this is our final rendering level, then do oversampling in
+        // the Z direction for better rendering of edges.  XXX if you
+        // change this, then you also need to edit `shaded.rs` to adjust
+        // the `max_depth` passed into the shader.
+        let scale = 1 << level;
+        let image_size = fidget::render::ImageSize::new(
+            (size.width() / scale).max(1),
+            (size.height() / scale).max(1),
+        );
+        let world_to_model = view.world_to_model();
+        let render_cfg = fidget::raster::pixel::RenderConfig {
+            image_size,
+            world_to_model,
+            pixel_perfect: matches!(mode, ViewMode2::Sdf),
+            z: 0.0,
+        };
+
+        // Render and accumulate every shape into merge buffers
+        self.pixel_merge_buffers.reset();
+        for s in &scene.shapes {
+            let rs = s.tree.clone().into();
+            // TODO cache and reuse shapes
+            let shape =
+                self.gpu.shape(&rs).expect("failed to get render shape");
+            self.pixel_ctx
+                .submit(&shape, &mut self.pixel_buffers, &render_cfg)
+                .expect("failed to submit pixel render");
+            self.pixel_effects
+                .submit_merge(
+                    self.pixel_buffers.output(),
+                    true,
+                    &mut self.pixel_merge_buffers,
+                )
+                .expect("failed to submit pixel merge");
+        }
+
+        if scene.shapes.iter().any(|c| c.color.is_some()) {
+            // TODO cache and reuse colors
+            let colors = scene
+                .shapes
+                .iter()
+                .map(|t| {
+                    t.color
+                        .as_ref()
+                        .map(|c| match c {
+                            Color::Rgb([r, g, b]) => {
+                                fidget::wgpu::ShapeColor::Rgb {
+                                    // TODO(fidget) this is awkward, should we
+                                    // also implement Into on &Tree?
+                                    r: r.clone().into(),
+                                    g: g.clone().into(),
+                                    b: b.clone().into(),
+                                }
+                            }
+                            Color::Hsl(..) => unimplemented!(),
+                        })
+                        .unwrap_or_else(|| {
+                            let c =
+                                || fidget::context::Tree::constant(1.0).into();
+                            fidget::wgpu::ShapeColor::Rgb {
+                                r: c(),
+                                g: c(),
+                                b: c(),
+                            }
+                        })
+                })
+                .collect::<Vec<_>>();
+            let colors = self.gpu.color_buffers(&colors).unwrap();
+            self.pixel_effects
+                .submit_color(
+                    &mut self.pixel_merge_buffers,
+                    fidget::wgpu::pixel::effects::ColorSettings {
+                        z: 0.0,
+                        world_to_model,
+                        only_filled: true,
+                    },
+                    &colors,
+                )
+                .expect("failed to submit color rendering");
+        }
+
+        let color = if let Some(c) = self.pixel_merge_buffers.output_color() {
+            self.gpu.copy(c, &mut self.pixel_read_color_buffer);
+            let mapped_color_image = self
+                .gpu
+                .map_image_async(&mut self.pixel_read_color_buffer)
+                .await;
+            let data = mapped_color_image.image().take().0;
+            Some(<[[u8; 4]]>::ref_from_bytes(data.as_bytes()).unwrap().into())
+        } else {
+            None
+        };
+
+        self.gpu.copy(
+            self.pixel_merge_buffers.output_distance(),
+            &mut self.pixel_read_distance_buffer,
+        );
+        let mapped_distance_image = self
+            .gpu
+            .map_image_async(&mut self.pixel_read_distance_buffer)
+            .await;
+        let distance_img = mapped_distance_image.image();
+        let distance =
+            <[f32]>::ref_from_bytes(distance_img.take().0.as_bytes())
+                .unwrap()
+                .into();
+
+        let image = PixelImage {
+            distance,
+            view: *view,
+            size: *size,
+            level,
+            color,
+            mode: *mode,
+        };
+        Some(ViewImage::Pixel(image))
     }
 }
