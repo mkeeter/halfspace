@@ -966,7 +966,7 @@ impl BlockEvalData {
                   tree: fidget::context::Tree,
                   min: fidget::shapes::types::Vec3,
                   max: fidget::shapes::types::Vec3,
-                  feature_size: f32|
+                  feature_size: f64|
                   -> Result<(), Box<rhai::EvalAltResult>> {
                 let mut eval_data = eval_data_.write().unwrap();
                 if eval_data.export.is_some() {
@@ -980,7 +980,7 @@ impl BlockEvalData {
                     tree,
                     min,
                     max,
-                    feature_size,
+                    feature_size: feature_size as f32,
                 });
                 Ok(())
             },
@@ -992,7 +992,7 @@ impl BlockEvalData {
                   scene: Scene,
                   min: fidget::shapes::types::Vec2,
                   max: fidget::shapes::types::Vec2,
-                  resolution: f32|
+                  resolution: f64|
                   -> Result<(), Box<rhai::EvalAltResult>> {
                 let mut eval_data = eval_data_.write().unwrap();
                 if eval_data.export.is_some() {
@@ -1006,7 +1006,7 @@ impl BlockEvalData {
                     scene,
                     min,
                     max,
-                    resolution,
+                    resolution: resolution as f32,
                 });
                 Ok(())
             },
