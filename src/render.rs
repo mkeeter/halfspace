@@ -396,9 +396,7 @@ impl GpuWorker {
             perspective,
         } = vs;
         // If this is our final rendering level, then do oversampling in
-        // the Z direction for better rendering of edges.  XXX if you
-        // change this, then you also need to edit `shaded.rs` to adjust
-        // the `max_depth` passed into the shader.
+        // the Z direction for better rendering of edges.
         let scale = 1 << level;
         let bonus_z = if level == 0 { 2 } else { 1 };
         let image_size = fidget::render::VoxelSize::new(

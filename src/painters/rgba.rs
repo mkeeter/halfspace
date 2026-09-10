@@ -29,8 +29,6 @@ pub struct WgpuRgbaPainter {
 #[derive(Copy, Clone, zerocopy::IntoBytes, zerocopy::Immutable)]
 struct Uniforms {
     transform: [[f32; 4]; 4],
-    max_depth: f32,
-    _padding: [u8; 12],
 }
 
 impl WgpuRgbaPainter {
@@ -85,15 +83,8 @@ impl egui_wgpu::CallbackTrait for WgpuRgbaPainter {
             gr.rgba
                 .get_data(&self.image.color, device, queue, texture_size);
 
-        // Create the uniform
-        // XXX this should be somewhere more central, instead of hacked here
-        let max_depth = (self.image.size.depth() / (1 << self.image.level))
-            .max(1)
-            * if self.image.level == 0 { 2 } else { 1 };
         let uniforms = Uniforms {
             transform: transform.into(),
-            max_depth: max_depth as f32,
-            _padding: Default::default(),
         };
         {
             let mut writer = queue
