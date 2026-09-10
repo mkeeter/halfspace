@@ -417,6 +417,10 @@ impl GpuWorker {
 
         // Render and accumulate every shape into merge buffers
         self.voxel_merge_buffers.reset();
+        let merge_settings = fidget::wgpu::voxel::effects::MergeSettings {
+            denoise: true,
+            z_scale,
+        };
         for s in &scene.shapes {
             let rs = s.tree.clone().into();
             // TODO cache and reuse shapes
@@ -428,7 +432,7 @@ impl GpuWorker {
             self.voxel_effects
                 .submit_merge(
                     self.voxel_buffers.output(),
-                    true,
+                    merge_settings,
                     &mut self.voxel_merge_buffers,
                 )
                 .expect("failed to submit voxel merge");
