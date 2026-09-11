@@ -85,12 +85,13 @@ pub fn run() {
     }
 
     let example = params.and_then(|p| p.get("example"));
+    const RENDER_POOL_WORKER_COUNT: usize = 4;
     wasm_bindgen_futures::spawn_local(async move {
         // Start the render workers before doing any other work
         start_workers(
             wasm_bindgen::module(),
             wasm_bindgen::memory(),
-            wbg_RenderPoolBuilder::new(16),
+            wbg_RenderPoolBuilder::new(RENDER_POOL_WORKER_COUNT),
         )
         .await
         .expect("failed to start workers");

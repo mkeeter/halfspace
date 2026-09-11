@@ -179,7 +179,8 @@ impl Platform for NativePlatform {
 
     fn spawn_render_workers(&mut self) -> RenderWorkerPool<Self::Notify> {
         let (tx, rx) = flume::unbounded::<RenderTask<Notify>>();
-        for _ in 0..16 {
+        const RENDER_POOL_WORKER_COUNT: usize = 4;
+        for _ in 0..RENDER_POOL_WORKER_COUNT {
             let rx = rx.clone();
             std::thread::spawn(move || {
                 pollster::block_on(async move {
