@@ -333,6 +333,7 @@ struct GpuWorker {
     voxel_read_buffer: fidget::wgpu::buf::ReadBuffer<
         fidget::wgpu::voxel::effects::ShadedImageTag,
     >,
+    voxel_color_workspace: fidget::wgpu::voxel::effects::ColorWorkspace,
 
     pixel_ctx: fidget::wgpu::pixel::Context,
     pixel_effects: fidget::wgpu::pixel::effects::Context,
@@ -344,6 +345,7 @@ struct GpuWorker {
     pixel_read_color_buffer: fidget::wgpu::buf::ReadBuffer<
         fidget::wgpu::pixel::effects::PixelColorBufferTag,
     >,
+    pixel_color_workspace: fidget::wgpu::pixel::effects::ColorWorkspace,
 }
 
 impl GpuWorker {
@@ -356,6 +358,7 @@ impl GpuWorker {
         let voxel_merge_buffers = voxel_effects.merge_buffers();
         let voxel_ssao_buffers = voxel_effects.ssao_buffers();
         let voxel_read_buffer = gpu.read_buffer("voxel read");
+        let voxel_color_workspace = voxel_effects.color_workspace();
 
         let pixel_ctx = fidget::wgpu::pixel::Context::new(&gpu);
         let pixel_effects = fidget::wgpu::pixel::effects::Context::new(&gpu);
@@ -363,6 +366,7 @@ impl GpuWorker {
         let pixel_buffers = pixel_ctx.buffers();
         let pixel_read_color_buffer = gpu.read_buffer("pixel color read");
         let pixel_read_distance_buffer = gpu.read_buffer("pixel distance read");
+        let pixel_color_workspace = pixel_effects.color_workspace();
 
         Self {
             gpu,
@@ -373,6 +377,7 @@ impl GpuWorker {
             voxel_read_buffer,
             voxel_merge_buffers,
             voxel_ssao_buffers,
+            voxel_color_workspace,
 
             pixel_ctx,
             pixel_effects,
@@ -380,6 +385,7 @@ impl GpuWorker {
             pixel_merge_buffers,
             pixel_read_color_buffer,
             pixel_read_distance_buffer,
+            pixel_color_workspace,
         }
     }
 
@@ -424,8 +430,8 @@ impl GpuWorker {
         for s in &scene.shapes {
             let rs = s.tree.clone().into();
             // TODO cache and reuse shapes
-            let shape =
-                self.gpu.shape(&rs).expect("failed to get render shape");
+            let shape = fidget::wgpu::RenderShape::new(&rs)
+                .expect("failed to get render shape");
             self.voxel_ctx
                 .submit(&shape, &mut self.voxel_buffers, &render_cfg)
                 .expect("failed to submit voxel render");
@@ -447,7 +453,7 @@ impl GpuWorker {
                         .as_ref()
                         .map(|c| match c {
                             Color::Rgb([r, g, b]) => {
-                                fidget::wgpu::ShapeColor::Rgb {
+                                fidget::wgpu::color::ShapeColor::Rgb {
                                     // TODO(fidget) this is awkward, should we
                                     // also implement Into on &Tree?
                                     r: r.clone().into(),
@@ -456,7 +462,7 @@ impl GpuWorker {
                                 }
                             }
                             Color::Hsl([h, s, l]) => {
-                                fidget::wgpu::ShapeColor::Hsl {
+                                fidget::wgpu::color::ShapeColor::Hsl {
                                     h: h.clone().into(),
                                     s: s.clone().into(),
                                     l: l.clone().into(),
@@ -466,7 +472,7 @@ impl GpuWorker {
                         .unwrap_or_else(|| {
                             let c =
                                 || fidget::context::Tree::constant(1.0).into();
-                            fidget::wgpu::ShapeColor::Rgb {
+                            fidget::wgpu::color::ShapeColor::Rgb {
                                 r: c(),
                                 g: c(),
                                 b: c(),
@@ -474,12 +480,14 @@ impl GpuWorker {
                         })
                 })
                 .collect::<Vec<_>>();
-            let colors = self.gpu.color_buffers(&colors).unwrap();
+            let colors =
+                fidget::wgpu::color::ShapeColorBuffers::new(&colors).unwrap();
             self.voxel_effects
                 .submit_color(
                     &self.voxel_merge_buffers,
                     &world_to_model,
                     &colors,
+                    &mut self.voxel_color_workspace,
                     &mut self.voxel_shade_buffers,
                 )
                 .expect("failed to submit color rendering");
@@ -562,8 +570,8 @@ impl GpuWorker {
         for s in &scene.shapes {
             let rs = s.tree.clone().into();
             // TODO cache and reuse shapes
-            let shape =
-                self.gpu.shape(&rs).expect("failed to get render shape");
+            let shape = fidget::wgpu::RenderShape::new(&rs)
+                .expect("failed to get render shape");
             self.pixel_ctx
                 .submit(&shape, &mut self.pixel_buffers, &render_cfg)
                 .expect("failed to submit pixel render");
@@ -586,7 +594,7 @@ impl GpuWorker {
                         .as_ref()
                         .map(|c| match c {
                             Color::Rgb([r, g, b]) => {
-                                fidget::wgpu::ShapeColor::Rgb {
+                                fidget::wgpu::color::ShapeColor::Rgb {
                                     // TODO(fidget) this is awkward, should we
                                     // also implement Into on &Tree?
                                     r: r.clone().into(),
@@ -595,7 +603,7 @@ impl GpuWorker {
                                 }
                             }
                             Color::Hsl([h, s, l]) => {
-                                fidget::wgpu::ShapeColor::Hsl {
+                                fidget::wgpu::color::ShapeColor::Hsl {
                                     h: h.clone().into(),
                                     s: s.clone().into(),
                                     l: l.clone().into(),
@@ -605,7 +613,7 @@ impl GpuWorker {
                         .unwrap_or_else(|| {
                             let c =
                                 || fidget::context::Tree::constant(1.0).into();
-                            fidget::wgpu::ShapeColor::Rgb {
+                            fidget::wgpu::color::ShapeColor::Rgb {
                                 r: c(),
                                 g: c(),
                                 b: c(),
@@ -613,7 +621,8 @@ impl GpuWorker {
                         })
                 })
                 .collect::<Vec<_>>();
-            let colors = self.gpu.color_buffers(&colors).unwrap();
+            let colors =
+                fidget::wgpu::color::ShapeColorBuffers::new(&colors).unwrap();
             self.pixel_effects
                 .submit_color(
                     &mut self.pixel_merge_buffers,
@@ -623,6 +632,7 @@ impl GpuWorker {
                         only_filled: true,
                     },
                     &colors,
+                    &mut self.pixel_color_workspace,
                 )
                 .expect("failed to submit color rendering");
         }
