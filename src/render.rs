@@ -235,9 +235,9 @@ impl RenderSettings {
 
 /// Render worker, to be run in a thread (native) or Web Worker (web)
 pub(crate) async fn render_worker<N: Notify>(
+    mut gpu: GpuWorker,
     rx: flume::Receiver<RenderTask<N>>,
 ) {
-    let mut gpu = GpuWorker::new().await;
     while let Ok(task) = rx.recv_async().await {
         match task.kind {
             TaskKind::Display {
@@ -321,8 +321,8 @@ pub(crate) async fn render_worker<N: Notify>(
     }
 }
 
-struct GpuWorker {
-    gpu: fidget::wgpu::Gpu,
+pub(crate) struct GpuWorker {
+    pub gpu: fidget::wgpu::Gpu,
 
     voxel_ctx: fidget::wgpu::voxel::Context,
     voxel_effects: fidget::wgpu::voxel::effects::Context,
@@ -349,7 +349,7 @@ struct GpuWorker {
 }
 
 impl GpuWorker {
-    async fn new() -> Self {
+    pub(crate) async fn new() -> Self {
         let gpu = fidget::wgpu::Gpu::init().await.unwrap();
         let voxel_ctx = fidget::wgpu::voxel::Context::new(&gpu);
         let voxel_effects = fidget::wgpu::voxel::effects::Context::new(&gpu);

@@ -182,7 +182,10 @@ impl Platform for NativePlatform {
         for _ in 0..16 {
             let rx = rx.clone();
             std::thread::spawn(move || {
-                pollster::block_on(crate::render::render_worker(rx));
+                pollster::block_on(async move {
+                    let gpu = crate::render::GpuWorker::new().await;
+                    crate::render::render_worker(gpu, rx).await;
+                });
             });
         }
         RenderWorkerPool::new(tx)
