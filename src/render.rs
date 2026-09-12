@@ -451,24 +451,7 @@ impl GpuWorker {
                 .map(|t| {
                     t.color
                         .as_ref()
-                        .map(|c| match c {
-                            Color::Rgb([r, g, b]) => {
-                                fidget::wgpu::color::ShapeColor::Rgb {
-                                    // TODO(fidget) this is awkward, should we
-                                    // also implement Into on &Tree?
-                                    r: r.clone().into(),
-                                    g: g.clone().into(),
-                                    b: b.clone().into(),
-                                }
-                            }
-                            Color::Hsl([h, s, l]) => {
-                                fidget::wgpu::color::ShapeColor::Hsl {
-                                    h: h.clone().into(),
-                                    s: s.clone().into(),
-                                    l: l.clone().into(),
-                                }
-                            }
-                        })
+                        .map(fidget::wgpu::color::ShapeColor::from)
                         .unwrap_or_else(|| {
                             let c =
                                 || fidget::context::Tree::constant(1.0).into();
@@ -592,24 +575,7 @@ impl GpuWorker {
                 .map(|t| {
                     t.color
                         .as_ref()
-                        .map(|c| match c {
-                            Color::Rgb([r, g, b]) => {
-                                fidget::wgpu::color::ShapeColor::Rgb {
-                                    // TODO(fidget) this is awkward, should we
-                                    // also implement Into on &Tree?
-                                    r: r.clone().into(),
-                                    g: g.clone().into(),
-                                    b: b.clone().into(),
-                                }
-                            }
-                            Color::Hsl([h, s, l]) => {
-                                fidget::wgpu::color::ShapeColor::Hsl {
-                                    h: h.clone().into(),
-                                    s: s.clone().into(),
-                                    l: l.clone().into(),
-                                }
-                            }
-                        })
+                        .map(fidget::wgpu::color::ShapeColor::from)
                         .unwrap_or_else(|| {
                             let c =
                                 || fidget::context::Tree::constant(1.0).into();

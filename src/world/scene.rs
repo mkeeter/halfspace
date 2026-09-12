@@ -32,6 +32,23 @@ pub enum Color {
     Hsl([fidget::context::Tree; 3]),
 }
 
+impl From<&Color> for fidget::wgpu::color::ShapeColor<fidget::vm::VmShape> {
+    fn from(value: &Color) -> Self {
+        match value {
+            Color::Rgb([r, g, b]) => fidget::wgpu::color::ShapeColor::Rgb {
+                r: r.clone().into(),
+                g: g.clone().into(),
+                b: b.clone().into(),
+            },
+            Color::Hsl([h, s, l]) => fidget::wgpu::color::ShapeColor::Hsl {
+                h: h.clone().into(),
+                s: s.clone().into(),
+                l: l.clone().into(),
+            },
+        }
+    }
+}
+
 impl rhai::CustomType for Color {
     fn build(mut builder: rhai::TypeBuilder<Self>) {
         builder
