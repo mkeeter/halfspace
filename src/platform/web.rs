@@ -517,13 +517,15 @@ pub async fn wbg_render_start_worker(
     // Workaround for https://bugzilla.mozilla.org/show_bug.cgi?id=1870699 :
     // If we are on Firefox, then spam a WebGPU submission at 100 Hz to keep the
     // worker thread polling the GPU.  This is terrible!
-    let navigator =
-        js_sys::Reflect::get(&global, &JsValue::from_str("navigator"))
-            .expect("navigator should exist on any global scope");
+    let navigator = js_sys::Reflect::get(
+        &js_sys::global(),
+        &JsValue::from_str("navigator"),
+    )
+    .expect("navigator should exist on any global scope");
     let navigator: web_sys::Navigator = navigator.unchecked_into();
     if navigator
         .user_agent()
-        .is_some_and(|ua| ua.contains("Firefox"))
+        .is_ok_and(|ua| ua.contains("Firefox"))
     {
         let device = gpu.gpu.device.clone();
         let queue = gpu.gpu.queue.clone();
