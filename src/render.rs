@@ -51,7 +51,7 @@ use crate::{
     view::{
         PixelImage, RgbaImage, ViewCanvas, ViewImage, ViewMode2, ViewMode3,
     },
-    world::{Color, Scene},
+    world::Scene,
 };
 
 use web_time::Instant;
@@ -267,12 +267,18 @@ pub(crate) async fn render_worker<N: Notify>(
                 }))
             }
             TaskKind::Export { reply } => {
+                // Initial check for cancellation, in case there's a long queue
+                // of things to render and we just now got to this one.
                 if task.cancel.is_cancelled() {
                     reply.send(Message::ExportComplete(Err(
                         ExportError::Cancelled,
                     )));
                     continue;
                 }
+
+                // We can't pass cancellation through to the GPU, unfortunately,
+                // so we'll kick off a rendering then check cancellation again
+                // after we're done.
                 let (data, image_size) = match &task.settings {
                     RenderSettings::Voxel(vs) => {
                         (gpu.render_voxel(vs, 0).await, vs.size.into())
@@ -281,6 +287,18 @@ pub(crate) async fn render_worker<N: Notify>(
                         (gpu.render_pixel(rs, 0).await, rs.size)
                     }
                 };
+
+                // Re-check cancellation.  This is a *little* silly, because I
+                // expect image rendering to happen in ~milliseconds, but maybe
+                // the user wants a gigantic export and will have time to hit
+                // Cancel?
+                if task.cancel.is_cancelled() {
+                    reply.send(Message::ExportComplete(Err(
+                        ExportError::Cancelled,
+                    )));
+                    continue;
+                }
+
                 let out = match data {
                     ViewImage::Pixel(px) => {
                         if let Some(c) = px.color {
@@ -531,10 +549,6 @@ impl GpuWorker {
             view,
             size,
         } = vs;
-        // If this is our final rendering level, then do oversampling in
-        // the Z direction for better rendering of edges.  XXX if you
-        // change this, then you also need to edit `shaded.rs` to adjust
-        // the `max_depth` passed into the shader.
         let scale = 1 << level;
         let image_size = fidget::render::ImageSize::new(
             (size.width() / scale).max(1),
