@@ -182,7 +182,7 @@ pub enum RenderSettings {
 
 #[derive(Clone, PartialEq)]
 pub struct ImageRenderSettings {
-    pub scene: Scene, // TODO cloning scenes can be expensive
+    pub scene: Scene,
     pub mode: ViewMode2,
     pub view: fidget::gui::View2,
     pub size: fidget::render::ImageSize,
@@ -190,7 +190,7 @@ pub struct ImageRenderSettings {
 
 #[derive(Clone, PartialEq)]
 pub struct VoxelRenderSettings {
-    pub scene: Scene, // TODO move sceen to task?
+    pub scene: Scene,
     pub mode: ViewMode3,
     pub perspective: bool,
     pub view: fidget::gui::View3,
@@ -427,7 +427,7 @@ impl GpuWorker {
             denoise: true,
             z_scale,
         };
-        for s in &scene.shapes {
+        for s in scene.shapes.iter() {
             let rs = s.tree.clone().into();
             // TODO cache and reuse shapes
             let shape = fidget::wgpu::RenderShape::new(&rs)
@@ -567,7 +567,7 @@ impl GpuWorker {
 
         // Render and accumulate every shape into merge buffers
         self.pixel_merge_buffers.reset();
-        for s in &scene.shapes {
+        for s in scene.shapes.iter() {
             let rs = s.tree.clone().into();
             // TODO cache and reuse shapes
             let shape = fidget::wgpu::RenderShape::new(&rs)
