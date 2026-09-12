@@ -1,7 +1,7 @@
 use fidget::rhai::FromDynamic;
-use std::ops::Deref;
+use std::{ops::Deref, sync::Arc};
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Drawable {
     /// Tree to draw, as a node in the parent [`Scene`]'s context
     pub tree: fidget::context::Tree,
@@ -24,7 +24,7 @@ impl rhai::CustomType for Drawable {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum Color {
     /// RGB color, evaluated per-pixel
     Rgb([fidget::context::Tree; 3]),
@@ -134,22 +134,76 @@ impl rhai::CustomType for Color {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 pub struct Scene {
-    pub shapes: std::sync::Arc<[Drawable]>,
+    pub shapes: Arc<[Drawable]>,
+    pub render_shapes: Arc<[fidget::wgpu::RenderShape]>,
+    pub render_color: Option<Arc<fidget::wgpu::color::ShapeColorBuffers>>,
 }
+
+// Only compare `shapes`, because other values are generated from it
+impl PartialEq for Scene {
+    fn eq(&self, other: &Self) -> bool {
+        self.shapes == other.shapes
+    }
+}
+impl Eq for Scene {}
 
 impl From<fidget::context::Tree> for Scene {
     fn from(tree: fidget::context::Tree) -> Self {
-        Scene {
-            shapes: [Drawable { tree, color: None }].into(),
-        }
+        Scene::new(&[Drawable { tree, color: None }])
     }
 }
 
 impl From<Drawable> for Scene {
     fn from(d: Drawable) -> Self {
-        Scene { shapes: [d].into() }
+        Scene::new(&[d])
+    }
+}
+
+impl Scene {
+    pub fn new(shapes: &[Drawable]) -> Self {
+        let render_shapes = shapes
+            .iter()
+            .map(|s| {
+                let rs = s.tree.clone().into();
+                fidget::wgpu::RenderShape::new(&rs)
+                    .expect("failed to get render shape")
+            })
+            .collect::<Vec<_>>();
+
+        let render_color = if shapes.iter().any(|c| c.color.is_some()) {
+            let colors = shapes
+                .iter()
+                .map(|t| {
+                    t.color
+                        .as_ref()
+                        .map(fidget::wgpu::color::ShapeColor::from)
+                        .unwrap_or_else(|| {
+                            let c =
+                                || fidget::context::Tree::constant(1.0).into();
+                            fidget::wgpu::color::ShapeColor::Rgb {
+                                r: c(),
+                                g: c(),
+                                b: c(),
+                            }
+                        })
+                })
+                .collect::<Vec<_>>();
+            Some(
+                fidget::wgpu::color::ShapeColorBuffers::new(&colors)
+                    .unwrap()
+                    .into(),
+            )
+        } else {
+            None
+        };
+
+        Self {
+            shapes: shapes.into(),
+            render_shapes: render_shapes.into(),
+            render_color,
+        }
     }
 }
 
@@ -204,9 +258,7 @@ fn build_scene(
             }
         })
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(Scene {
-        shapes: shapes.into(),
-    })
+    Ok(Scene::new(&shapes))
 }
 
 scene_builder!(build_scene1, a);

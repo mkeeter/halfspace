@@ -448,13 +448,9 @@ impl GpuWorker {
             denoise: true,
             z_scale,
         };
-        for s in scene.shapes.iter() {
-            let rs = s.tree.clone().into();
-            // TODO cache and reuse shapes
-            let shape = fidget::wgpu::RenderShape::new(&rs)
-                .expect("failed to get render shape");
+        for s in scene.render_shapes.iter() {
             self.voxel_ctx
-                .submit(&shape, &mut self.voxel_workspace, &render_cfg)
+                .submit(s, &mut self.voxel_workspace, &render_cfg)
                 .expect("failed to submit voxel render");
             self.voxel_effects
                 .submit_merge(
@@ -464,33 +460,12 @@ impl GpuWorker {
                 )
                 .expect("failed to submit voxel merge");
         }
-        if scene.shapes.iter().any(|c| c.color.is_some()) {
-            // TODO cache and reuse colors
-            let colors = scene
-                .shapes
-                .iter()
-                .map(|t| {
-                    t.color
-                        .as_ref()
-                        .map(fidget::wgpu::color::ShapeColor::from)
-                        .unwrap_or_else(|| {
-                            let c =
-                                || fidget::context::Tree::constant(1.0).into();
-                            fidget::wgpu::color::ShapeColor::Rgb {
-                                r: c(),
-                                g: c(),
-                                b: c(),
-                            }
-                        })
-                })
-                .collect::<Vec<_>>();
-            let colors =
-                fidget::wgpu::color::ShapeColorBuffers::new(&colors).unwrap();
+        if let Some(colors) = scene.render_color.as_ref() {
             self.voxel_effects
                 .submit_color(
                     &self.voxel_merge_workspace,
                     &world_to_model,
-                    &colors,
+                    colors,
                     &mut self.voxel_color_workspace,
                     &mut self.voxel_shade_workspace,
                 )
@@ -567,13 +542,9 @@ impl GpuWorker {
 
         // Render and accumulate every shape into merge buffers
         self.pixel_merge_workspace.reset();
-        for s in scene.shapes.iter() {
-            let rs = s.tree.clone().into();
-            // TODO cache and reuse shapes
-            let shape = fidget::wgpu::RenderShape::new(&rs)
-                .expect("failed to get render shape");
+        for s in scene.render_shapes.iter() {
             self.pixel_ctx
-                .submit(&shape, &mut self.pixel_workspace, &render_cfg)
+                .submit(s, &mut self.pixel_workspace, &render_cfg)
                 .expect("failed to submit pixel render");
             self.pixel_effects
                 .submit_merge(
@@ -584,28 +555,7 @@ impl GpuWorker {
                 .expect("failed to submit pixel merge");
         }
 
-        if scene.shapes.iter().any(|c| c.color.is_some()) {
-            // TODO cache and reuse colors
-            let colors = scene
-                .shapes
-                .iter()
-                .map(|t| {
-                    t.color
-                        .as_ref()
-                        .map(fidget::wgpu::color::ShapeColor::from)
-                        .unwrap_or_else(|| {
-                            let c =
-                                || fidget::context::Tree::constant(1.0).into();
-                            fidget::wgpu::color::ShapeColor::Rgb {
-                                r: c(),
-                                g: c(),
-                                b: c(),
-                            }
-                        })
-                })
-                .collect::<Vec<_>>();
-            let colors =
-                fidget::wgpu::color::ShapeColorBuffers::new(&colors).unwrap();
+        if let Some(color) = scene.render_color.as_ref() {
             self.pixel_effects
                 .submit_color(
                     &mut self.pixel_merge_workspace,
@@ -614,7 +564,7 @@ impl GpuWorker {
                         world_to_model,
                         only_filled: true,
                     },
-                    &colors,
+                    color,
                     &mut self.pixel_color_workspace,
                 )
                 .expect("failed to submit color rendering");
