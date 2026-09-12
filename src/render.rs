@@ -237,8 +237,10 @@ impl RenderSettings {
 pub(crate) async fn render_worker<N: Notify>(
     mut gpu: GpuWorker,
     rx: flume::Receiver<RenderTask<N>>,
+    waker: flume::Sender<bool>,
 ) {
     while let Ok(task) = rx.recv_async().await {
+        let _ = waker.try_send(true);
         match task.kind {
             TaskKind::Display {
                 block,
@@ -336,6 +338,7 @@ pub(crate) async fn render_worker<N: Notify>(
                 }
             }
         }
+        let _ = waker.try_send(false);
     }
 }
 

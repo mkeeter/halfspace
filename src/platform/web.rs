@@ -515,8 +515,9 @@ pub async fn wbg_render_start_worker(
     let gpu = crate::render::GpuWorker::new().await;
 
     // Workaround for https://bugzilla.mozilla.org/show_bug.cgi?id=1870699 :
-    // If we are on Firefox, then spam a WebGPU submission at 100 Hz to keep the
-    // worker thread polling the GPU.  This is terrible!
+    // If we are on Firefox, then while rendering is active, spam WebGPU
+    // submission at 100 Hz to keep the worker thread polling the GPU.
+    let (wake_tx, wake_rx) = flume::bounded::<bool>(4);
     let navigator = js_sys::Reflect::get(
         &js_sys::global(),
         &JsValue::from_str("navigator"),
@@ -531,18 +532,34 @@ pub async fn wbg_render_start_worker(
         let queue = gpu.gpu.queue.clone();
         wasm_bindgen_futures::spawn_local(async move {
             loop {
-                let encoder = device.create_command_encoder(
-                    &egui_wgpu::wgpu::CommandEncoderDescriptor {
-                        label: Some("heartbeat"),
-                    },
-                );
-                queue.submit(std::iter::once(encoder.finish()));
-                sleep(10).await;
+                while let Ok(c) = wake_rx.recv_async().await {
+                    if !c {
+                        continue;
+                    }
+                    // Inner poll loop
+                    info!("polling started");
+                    loop {
+                        let encoder = device.create_command_encoder(
+                            &egui_wgpu::wgpu::CommandEncoderDescriptor {
+                                label: Some("heartbeat"),
+                            },
+                        );
+                        queue.submit(std::iter::once(encoder.finish()));
+                        sleep(10).await;
+                        match wake_rx.try_recv() {
+                            Ok(false) => break,
+                            Ok(true) => warn!("received wake(true) twice"),
+                            Err(flume::TryRecvError::Disconnected) => break,
+                            Err(flume::TryRecvError::Empty) => (),
+                        }
+                    }
+                    info!("polling stopped");
+                }
             }
         });
     }
 
-    crate::render::render_worker(gpu, start.rx).await;
+    crate::render::render_worker(gpu, start.rx, wake_tx).await;
 }
 
 async fn sleep(ms: i32) {
