@@ -301,10 +301,10 @@ pub(crate) async fn render_worker<N: Notify>(
                     continue;
                 }
 
-                let out = match data {
+                let out = match &data {
                     ViewImage::Pixel(px) => {
-                        if let Some(c) = px.color {
-                            c.as_bytes().to_vec()
+                        if let Some(c) = &px.color {
+                            std::borrow::Cow::Borrowed(c.as_bytes())
                         } else {
                             px.distance
                                 .iter()
@@ -318,8 +318,9 @@ pub(crate) async fn render_worker<N: Notify>(
                                 .collect()
                         }
                     }
-                    // TODO borrow in this case?
-                    ViewImage::Voxel(im) => im.color.as_bytes().to_vec(),
+                    ViewImage::Voxel(im) => {
+                        std::borrow::Cow::Borrowed(im.color.as_bytes())
+                    }
                 };
 
                 let mut bytes = vec![];
