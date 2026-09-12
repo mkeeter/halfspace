@@ -347,10 +347,10 @@ pub(crate) struct GpuWorker {
 
     voxel_ctx: fidget::wgpu::voxel::Context,
     voxel_effects: fidget::wgpu::voxel::effects::Context,
-    voxel_buffers: fidget::wgpu::voxel::Buffers,
-    voxel_merge_buffers: fidget::wgpu::voxel::effects::MergeBuffers,
-    voxel_ssao_buffers: fidget::wgpu::voxel::effects::SsaoBuffers,
-    voxel_shade_buffers: fidget::wgpu::voxel::effects::ShadeBuffers,
+    voxel_workspace: fidget::wgpu::voxel::Workspace,
+    voxel_merge_workspace: fidget::wgpu::voxel::effects::MergeWorkspace,
+    voxel_ssao_workspace: fidget::wgpu::voxel::effects::SsaoWorkspace,
+    voxel_shade_workspace: fidget::wgpu::voxel::effects::ShadeWorkspace,
     voxel_read_buffer: fidget::wgpu::buf::ReadBuffer<
         fidget::wgpu::voxel::effects::ShadedImageTag,
     >,
@@ -358,8 +358,8 @@ pub(crate) struct GpuWorker {
 
     pixel_ctx: fidget::wgpu::pixel::Context,
     pixel_effects: fidget::wgpu::pixel::effects::Context,
-    pixel_buffers: fidget::wgpu::pixel::Buffers,
-    pixel_merge_buffers: fidget::wgpu::pixel::effects::MergeBuffers,
+    pixel_workspace: fidget::wgpu::pixel::Workspace,
+    pixel_merge_workspace: fidget::wgpu::pixel::effects::MergeWorkspace,
     pixel_read_distance_buffer: fidget::wgpu::buf::ReadBuffer<
         fidget::wgpu::pixel::effects::PixelDistanceBufferTag,
     >,
@@ -374,36 +374,36 @@ impl GpuWorker {
         let gpu = fidget::wgpu::Gpu::init().await.unwrap();
         let voxel_ctx = fidget::wgpu::voxel::Context::new(&gpu);
         let voxel_effects = fidget::wgpu::voxel::effects::Context::new(&gpu);
-        let voxel_shade_buffers = voxel_effects.shade_buffers();
-        let voxel_buffers = voxel_ctx.buffers();
-        let voxel_merge_buffers = voxel_effects.merge_buffers();
-        let voxel_ssao_buffers = voxel_effects.ssao_buffers();
+        let voxel_shade_workspace = voxel_effects.shade_workspace();
+        let voxel_workspace = voxel_ctx.workspace();
+        let voxel_merge_workspace = voxel_effects.merge_workspace();
+        let voxel_ssao_workspace = voxel_effects.ssao_workspace();
         let voxel_read_buffer = gpu.read_buffer("voxel read");
         let voxel_color_workspace = voxel_effects.color_workspace();
 
         let pixel_ctx = fidget::wgpu::pixel::Context::new(&gpu);
         let pixel_effects = fidget::wgpu::pixel::effects::Context::new(&gpu);
-        let pixel_merge_buffers = pixel_effects.merge_buffers();
-        let pixel_buffers = pixel_ctx.buffers();
+        let pixel_merge_workspace = pixel_effects.merge_workspace();
+        let pixel_workspace = pixel_ctx.workspace();
         let pixel_read_color_buffer = gpu.read_buffer("pixel color read");
         let pixel_read_distance_buffer = gpu.read_buffer("pixel distance read");
         let pixel_color_workspace = pixel_effects.color_workspace();
 
         Self {
             gpu,
-            voxel_shade_buffers,
+            voxel_shade_workspace,
             voxel_ctx,
             voxel_effects,
-            voxel_buffers,
+            voxel_workspace,
             voxel_read_buffer,
-            voxel_merge_buffers,
-            voxel_ssao_buffers,
+            voxel_merge_workspace,
+            voxel_ssao_workspace,
             voxel_color_workspace,
 
             pixel_ctx,
             pixel_effects,
-            pixel_buffers,
-            pixel_merge_buffers,
+            pixel_workspace,
+            pixel_merge_workspace,
             pixel_read_color_buffer,
             pixel_read_distance_buffer,
             pixel_color_workspace,
@@ -443,7 +443,7 @@ impl GpuWorker {
         };
 
         // Render and accumulate every shape into merge buffers
-        self.voxel_merge_buffers.reset();
+        self.voxel_merge_workspace.reset();
         let merge_settings = fidget::wgpu::voxel::effects::MergeSettings {
             denoise: true,
             z_scale,
@@ -454,13 +454,13 @@ impl GpuWorker {
             let shape = fidget::wgpu::RenderShape::new(&rs)
                 .expect("failed to get render shape");
             self.voxel_ctx
-                .submit(&shape, &mut self.voxel_buffers, &render_cfg)
+                .submit(&shape, &mut self.voxel_workspace, &render_cfg)
                 .expect("failed to submit voxel render");
             self.voxel_effects
                 .submit_merge(
-                    self.voxel_buffers.output(),
+                    self.voxel_workspace.output(),
                     merge_settings,
-                    &mut self.voxel_merge_buffers,
+                    &mut self.voxel_merge_workspace,
                 )
                 .expect("failed to submit voxel merge");
         }
@@ -488,11 +488,11 @@ impl GpuWorker {
                 fidget::wgpu::color::ShapeColorBuffers::new(&colors).unwrap();
             self.voxel_effects
                 .submit_color(
-                    &self.voxel_merge_buffers,
+                    &self.voxel_merge_workspace,
                     &world_to_model,
                     &colors,
                     &mut self.voxel_color_workspace,
-                    &mut self.voxel_shade_buffers,
+                    &mut self.voxel_shade_workspace,
                 )
                 .expect("failed to submit color rendering");
         }
@@ -501,29 +501,29 @@ impl GpuWorker {
             ViewMode3::Heightmap => self
                 .voxel_effects
                 .submit_heightmap(
-                    &self.voxel_merge_buffers,
-                    &mut self.voxel_shade_buffers,
+                    &self.voxel_merge_workspace,
+                    &mut self.voxel_shade_workspace,
                 )
                 .expect("failed to submit shaded rendering"),
             ViewMode3::Shaded => {
                 self.voxel_effects
                     .submit_ssao(
-                        &self.voxel_merge_buffers,
-                        &mut self.voxel_ssao_buffers,
+                        &self.voxel_merge_workspace,
+                        &mut self.voxel_ssao_workspace,
                     )
                     .expect("failed to submit voxel SSAO");
                 self.voxel_effects
                     .submit_shade(
-                        &self.voxel_merge_buffers,
-                        Some(&self.voxel_ssao_buffers),
-                        &mut self.voxel_shade_buffers,
+                        &self.voxel_merge_workspace,
+                        Some(&self.voxel_ssao_workspace),
+                        &mut self.voxel_shade_workspace,
                     )
                     .expect("failed to submit shaded rendering");
             }
         };
 
         self.gpu.copy(
-            self.voxel_shade_buffers.output(),
+            self.voxel_shade_workspace.output(),
             &mut self.voxel_read_buffer,
         );
         let mapped_image =
@@ -566,20 +566,20 @@ impl GpuWorker {
         };
 
         // Render and accumulate every shape into merge buffers
-        self.pixel_merge_buffers.reset();
+        self.pixel_merge_workspace.reset();
         for s in scene.shapes.iter() {
             let rs = s.tree.clone().into();
             // TODO cache and reuse shapes
             let shape = fidget::wgpu::RenderShape::new(&rs)
                 .expect("failed to get render shape");
             self.pixel_ctx
-                .submit(&shape, &mut self.pixel_buffers, &render_cfg)
+                .submit(&shape, &mut self.pixel_workspace, &render_cfg)
                 .expect("failed to submit pixel render");
             self.pixel_effects
                 .submit_merge(
-                    self.pixel_buffers.output(),
+                    self.pixel_workspace.output(),
                     true,
-                    &mut self.pixel_merge_buffers,
+                    &mut self.pixel_merge_workspace,
                 )
                 .expect("failed to submit pixel merge");
         }
@@ -608,7 +608,7 @@ impl GpuWorker {
                 fidget::wgpu::color::ShapeColorBuffers::new(&colors).unwrap();
             self.pixel_effects
                 .submit_color(
-                    &mut self.pixel_merge_buffers,
+                    &mut self.pixel_merge_workspace,
                     fidget::wgpu::pixel::effects::ColorSettings {
                         z: 0.0,
                         world_to_model,
@@ -620,7 +620,7 @@ impl GpuWorker {
                 .expect("failed to submit color rendering");
         }
 
-        let color = if let Some(c) = self.pixel_merge_buffers.output_color() {
+        let color = if let Some(c) = self.pixel_merge_workspace.output_color() {
             self.gpu.copy(c, &mut self.pixel_read_color_buffer);
             let mapped_color_image = self
                 .gpu
@@ -633,7 +633,7 @@ impl GpuWorker {
         };
 
         self.gpu.copy(
-            self.pixel_merge_buffers.output_distance(),
+            self.pixel_merge_workspace.output_distance(),
             &mut self.pixel_read_distance_buffer,
         );
         let mapped_distance_image = self
