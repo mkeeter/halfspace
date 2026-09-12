@@ -10,6 +10,7 @@ use eframe::{
     egui,
     egui_wgpu::{self, wgpu},
 };
+use fidget::raster::pixel::RawDistancePixel;
 use std::collections::HashMap;
 use zerocopy::IntoBytes;
 
@@ -66,7 +67,7 @@ pub(crate) struct SdfResources {
     bound_data: HashMap<BlockIndex, SdfData>,
 
     color_cache: WgpuTextureCache<[[u8; 4]]>,
-    distance_cache: WgpuTextureCache<[f32]>,
+    distance_cache: WgpuTextureCache<[RawDistancePixel]>,
 
     /// Empty texture used when we don't have a color channel
     dummy_color_texture: wgpu::Texture,

@@ -689,7 +689,7 @@ fn script_block_body(
             // Calculate settings here in the UI, so that we can disable the
             // button and show immediate feedback if they're invalid.  We'll
             // also check them in the actual mesh export function.
-            let s = export::image_settings(*min, *max, *resolution);
+            let s = export::image_view(*min, *max, *resolution);
             let enabled = block_data.error.is_none() && s.is_ok();
             let r = ui.horizontal(|ui| {
                 ui.add_space(padding);
@@ -707,8 +707,8 @@ fn script_block_body(
                         ui.add_space(padding);
                         ui.label(format!(
                             "Image size: {} × {}",
-                            s.image_size.width(),
-                            s.image_size.height()
+                            s.1.width(),
+                            s.1.height()
                         ));
                     });
                 }

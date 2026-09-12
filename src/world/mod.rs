@@ -13,7 +13,7 @@ use heck::ToSnakeCase;
 
 mod scene;
 mod shapes;
-pub use scene::{Color, Drawable, Scene};
+pub use scene::{Drawable, Scene};
 pub use shapes::{ShapeKind, ShapeLibrary};
 
 #[allow(clippy::large_enum_variant)]

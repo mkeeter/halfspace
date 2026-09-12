@@ -164,7 +164,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "parking_lot",
  "percent-encoding",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
  "x11rb",
 ]
 
@@ -489,12 +489,6 @@ name = "bumpalo"
 version = "3.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d20789868f4b01b2f2caec9f5c4e0213b41e3e5702a50157d699ae31ced2fcb"
-
-[[package]]
-name = "by_address"
-version = "1.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64fa3c856b712db6612c019f14756e64e4bcea13337a6b33b696333a9eaa2d06"
 
 [[package]]
 name = "bytemuck"
@@ -1293,7 +1287,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1435,12 +1429,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fast-srgb8"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd2e7510819d6fbf51a5545c8f922716ecfb14df168a3242f7d33e0239efe6a1"
-
-[[package]]
 name = "fastrand"
 version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1490,7 +1478,7 @@ dependencies = [
 [[package]]
 name = "fidget"
 version = "0.5.0"
-source = "git+https://github.com/mkeeter/fidget#94123ea4a351fedf66df404c31f3fed0e1474b0e"
+source = "git+https://github.com/mkeeter/fidget#db0f6a17515b41b0a05f4cc85829dfef3c1848b3"
 dependencies = [
  "document-features",
  "fidget-bytecode",
@@ -1509,7 +1497,7 @@ dependencies = [
 [[package]]
 name = "fidget-bytecode"
 version = "0.5.0"
-source = "git+https://github.com/mkeeter/fidget#94123ea4a351fedf66df404c31f3fed0e1474b0e"
+source = "git+https://github.com/mkeeter/fidget#db0f6a17515b41b0a05f4cc85829dfef3c1848b3"
 dependencies = [
  "fidget-core",
  "serde",
@@ -1522,7 +1510,7 @@ dependencies = [
 [[package]]
 name = "fidget-core"
 version = "0.5.0"
-source = "git+https://github.com/mkeeter/fidget#94123ea4a351fedf66df404c31f3fed0e1474b0e"
+source = "git+https://github.com/mkeeter/fidget#db0f6a17515b41b0a05f4cc85829dfef3c1848b3"
 dependencies = [
  "facet",
  "getrandom 0.2.17",
@@ -1541,7 +1529,7 @@ dependencies = [
 [[package]]
 name = "fidget-gui"
 version = "0.5.0"
-source = "git+https://github.com/mkeeter/fidget#94123ea4a351fedf66df404c31f3fed0e1474b0e"
+source = "git+https://github.com/mkeeter/fidget#db0f6a17515b41b0a05f4cc85829dfef3c1848b3"
 dependencies = [
  "fidget-core",
  "nalgebra",
@@ -1552,7 +1540,7 @@ dependencies = [
 [[package]]
 name = "fidget-jit"
 version = "0.5.0"
-source = "git+https://github.com/mkeeter/fidget#94123ea4a351fedf66df404c31f3fed0e1474b0e"
+source = "git+https://github.com/mkeeter/fidget#db0f6a17515b41b0a05f4cc85829dfef3c1848b3"
 dependencies = [
  "arrayvec",
  "dynasmrt",
@@ -1566,7 +1554,7 @@ dependencies = [
 [[package]]
 name = "fidget-mesh"
 version = "0.5.0"
-source = "git+https://github.com/mkeeter/fidget#94123ea4a351fedf66df404c31f3fed0e1474b0e"
+source = "git+https://github.com/mkeeter/fidget#db0f6a17515b41b0a05f4cc85829dfef3c1848b3"
 dependencies = [
  "arrayvec",
  "fidget-core",
@@ -1580,7 +1568,7 @@ dependencies = [
 [[package]]
 name = "fidget-raster"
 version = "0.5.1"
-source = "git+https://github.com/mkeeter/fidget#94123ea4a351fedf66df404c31f3fed0e1474b0e"
+source = "git+https://github.com/mkeeter/fidget#db0f6a17515b41b0a05f4cc85829dfef3c1848b3"
 dependencies = [
  "fidget-core",
  "nalgebra",
@@ -1595,7 +1583,7 @@ dependencies = [
 [[package]]
 name = "fidget-rhai"
 version = "0.5.0"
-source = "git+https://github.com/mkeeter/fidget#94123ea4a351fedf66df404c31f3fed0e1474b0e"
+source = "git+https://github.com/mkeeter/fidget#db0f6a17515b41b0a05f4cc85829dfef3c1848b3"
 dependencies = [
  "enum-map",
  "facet",
@@ -1610,7 +1598,7 @@ dependencies = [
 [[package]]
 name = "fidget-shapes"
 version = "0.5.0"
-source = "git+https://github.com/mkeeter/fidget#94123ea4a351fedf66df404c31f3fed0e1474b0e"
+source = "git+https://github.com/mkeeter/fidget#db0f6a17515b41b0a05f4cc85829dfef3c1848b3"
 dependencies = [
  "enum-map",
  "facet",
@@ -1624,7 +1612,7 @@ dependencies = [
 [[package]]
 name = "fidget-solver"
 version = "0.5.0"
-source = "git+https://github.com/mkeeter/fidget#94123ea4a351fedf66df404c31f3fed0e1474b0e"
+source = "git+https://github.com/mkeeter/fidget#db0f6a17515b41b0a05f4cc85829dfef3c1848b3"
 dependencies = [
  "fidget-core",
  "nalgebra",
@@ -1636,7 +1624,7 @@ dependencies = [
 [[package]]
 name = "fidget-wgpu"
 version = "0.5.1"
-source = "git+https://github.com/mkeeter/fidget#94123ea4a351fedf66df404c31f3fed0e1474b0e"
+source = "git+https://github.com/mkeeter/fidget#db0f6a17515b41b0a05f4cc85829dfef3c1848b3"
 dependencies = [
  "fidget-bytecode",
  "fidget-core",
@@ -1646,6 +1634,7 @@ dependencies = [
  "log",
  "naga",
  "nalgebra",
+ "pollster",
  "static_assertions",
  "thiserror 2.0.18",
  "wgpu",
@@ -2077,7 +2066,6 @@ dependencies = [
  "nalgebra",
  "nonempty",
  "ordered-float",
- "palette",
  "pollster",
  "rayon",
  "rfd",
@@ -3197,30 +3185,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "palette"
-version = "0.7.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4cbf71184cc5ecc2e4e1baccdb21026c20e5fc3dcf63028a086131b3ab00b6e6"
-dependencies = [
- "approx",
- "fast-srgb8",
- "palette_derive",
- "phf",
-]
-
-[[package]]
-name = "palette_derive"
-version = "0.7.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5030daf005bface118c096f510ffb781fc28f9ab6a32ab224d8631be6851d30"
-dependencies = [
- "by_address",
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3856,7 +3820,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3869,7 +3833,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4297,7 +4261,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5150,7 +5114,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5514,7 +5478,7 @@ dependencies = [
 [[package]]
 name = "workspace-hack"
 version = "0.1.0"
-source = "git+https://github.com/mkeeter/fidget#94123ea4a351fedf66df404c31f3fed0e1474b0e"
+source = "git+https://github.com/mkeeter/fidget#db0f6a17515b41b0a05f4cc85829dfef3c1848b3"
 dependencies = [
  "ahash",
  "anstream",

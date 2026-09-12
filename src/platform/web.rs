@@ -85,12 +85,13 @@ pub fn run() {
     }
 
     let example = params.and_then(|p| p.get("example"));
+    const RENDER_POOL_WORKER_COUNT: usize = 4;
     wasm_bindgen_futures::spawn_local(async move {
         // Start the render workers before doing any other work
         start_workers(
             wasm_bindgen::module(),
             wasm_bindgen::memory(),
-            wbg_RenderPoolBuilder::new(16),
+            wbg_RenderPoolBuilder::new(RENDER_POOL_WORKER_COUNT),
         )
         .await
         .expect("failed to start workers");
@@ -511,8 +512,63 @@ pub async fn wbg_render_start_worker(
         .expect("you were supposed to send me a receiver");
 
     start.ready.send(()).expect("failed to send ready");
+    let gpu = crate::render::GpuWorker::new().await;
 
-    while let Ok(task) = start.rx.recv_async().await {
-        task.run();
+    // Workaround for https://bugzilla.mozilla.org/show_bug.cgi?id=1870699 :
+    // If we are on Firefox, then while rendering is active, spam WebGPU
+    // submission at 100 Hz to keep the worker thread polling the GPU.
+    let (wake_tx, wake_rx) = flume::bounded::<bool>(4);
+    let navigator = js_sys::Reflect::get(
+        &js_sys::global(),
+        &JsValue::from_str("navigator"),
+    )
+    .expect("navigator should exist on any global scope");
+    let navigator: web_sys::Navigator = navigator.unchecked_into();
+    if navigator
+        .user_agent()
+        .is_ok_and(|ua| ua.contains("Firefox"))
+    {
+        let device = gpu.gpu.device.clone();
+        let queue = gpu.gpu.queue.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            loop {
+                while let Ok(c) = wake_rx.recv_async().await {
+                    if !c {
+                        continue;
+                    }
+                    // Inner poll loop
+                    info!("polling started");
+                    loop {
+                        let encoder = device.create_command_encoder(
+                            &egui_wgpu::wgpu::CommandEncoderDescriptor {
+                                label: Some("heartbeat"),
+                            },
+                        );
+                        queue.submit(std::iter::once(encoder.finish()));
+                        sleep(10).await;
+                        match wake_rx.try_recv() {
+                            Ok(false) => break,
+                            Ok(true) => warn!("received wake(true) twice"),
+                            Err(flume::TryRecvError::Disconnected) => break,
+                            Err(flume::TryRecvError::Empty) => (),
+                        }
+                    }
+                    info!("polling stopped");
+                }
+            }
+        });
     }
+
+    crate::render::render_worker(gpu, start.rx, wake_tx).await;
+}
+
+async fn sleep(ms: i32) {
+    let global = js_sys::global();
+    let scope: web_sys::DedicatedWorkerGlobalScope = global.unchecked_into();
+    let promise = js_sys::Promise::new(&mut |resolve, _reject| {
+        scope
+            .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, ms)
+            .unwrap();
+    });
+    js_sys::futures::JsFuture::from(promise).await.unwrap();
 }

@@ -32,6 +32,23 @@ pub enum Color {
     Hsl([fidget::context::Tree; 3]),
 }
 
+impl From<&Color> for fidget::wgpu::color::ShapeColor<fidget::vm::VmShape> {
+    fn from(value: &Color) -> Self {
+        match value {
+            Color::Rgb([r, g, b]) => fidget::wgpu::color::ShapeColor::Rgb {
+                r: r.clone().into(),
+                g: g.clone().into(),
+                b: b.clone().into(),
+            },
+            Color::Hsl([h, s, l]) => fidget::wgpu::color::ShapeColor::Hsl {
+                h: h.clone().into(),
+                s: s.clone().into(),
+                l: l.clone().into(),
+            },
+        }
+    }
+}
+
 impl rhai::CustomType for Color {
     fn build(mut builder: rhai::TypeBuilder<Self>) {
         builder
@@ -119,20 +136,20 @@ impl rhai::CustomType for Color {
 
 #[derive(Clone, PartialEq)]
 pub struct Scene {
-    pub shapes: Vec<Drawable>,
+    pub shapes: std::sync::Arc<[Drawable]>,
 }
 
 impl From<fidget::context::Tree> for Scene {
     fn from(tree: fidget::context::Tree) -> Self {
         Scene {
-            shapes: vec![Drawable { tree, color: None }],
+            shapes: [Drawable { tree, color: None }].into(),
         }
     }
 }
 
 impl From<Drawable> for Scene {
     fn from(d: Drawable) -> Self {
-        Scene { shapes: vec![d] }
+        Scene { shapes: [d].into() }
     }
 }
 
@@ -187,7 +204,9 @@ fn build_scene(
             }
         })
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(Scene { shapes })
+    Ok(Scene {
+        shapes: shapes.into(),
+    })
 }
 
 scene_builder!(build_scene1, a);

@@ -7,6 +7,7 @@ use crate::{
     state::ViewState,
     world::Scene,
 };
+use fidget::raster::pixel::RawDistancePixel;
 use std::sync::Arc;
 
 pub use state::{ViewMode2, ViewMode3};
@@ -169,7 +170,7 @@ impl From<ViewState> for ViewCanvas {
 
 #[derive(Clone)]
 pub struct PixelImage {
-    pub distance: Arc<[f32]>,
+    pub distance: Arc<[RawDistancePixel]>,
     pub color: Option<Arc<[[u8; 4]]>>,
     pub view: fidget::gui::View2,
     pub size: fidget::render::ImageSize,
@@ -182,7 +183,7 @@ pub struct RgbaImage {
     /// Pre-baked color
     ///
     /// This is greyscale for a heightmap rendering, or RGB for shaded
-    pub color: Arc<[[u8; 4]]>,
+    pub color: Arc<[u32]>,
     pub view: fidget::gui::View3,
     pub size: fidget::render::VoxelSize,
     pub level: usize,

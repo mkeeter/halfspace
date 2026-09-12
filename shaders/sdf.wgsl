@@ -120,11 +120,13 @@ fn fs_main(@location(0) tex_coords: vec2<f32>) -> Rgba {
     var color: vec4<f32>;
     if (uniforms.has_color != 0) {
         let stripes = color_stripe(d + 1.0 / 140.0);
-        if (uniforms.has_color != 0) {
-            var rgb = textureSample(t_color, s_color, tex_coords).rgb;
+        var rgb = textureSample(t_color, s_color, tex_coords).rgb;
+        if d <= 0.0 {
+            // Inside pixels have color
             color = vec4<f32>(rgb * stripes, 1.0);
         } else {
-            color = vec4<f32>(stripes * vec3<f32>(1.0), 1.0);
+            // Outside pixels are always greyscale
+            color = vec4<f32>(stripes, stripes, stripes, 1.0);
         }
     } else {
         color = color_orange_to_blue(d);

@@ -1,7 +1,6 @@
 // Uniform buffer containing the transform matrix
 struct Uniforms {
     transform: mat4x4<f32>,
-    max_depth: f32,
 }
 
 @group(0) @binding(0) var t_diffuse: texture_2d<f32>;
