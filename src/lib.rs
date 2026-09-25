@@ -713,6 +713,9 @@ impl<P: Platform> App<P> {
                 if ui.button("\u{eb32} About").clicked() {
                     self.on_about();
                 }
+                if ui.button("\u{f078b} Scripting guide").clicked() {
+                    self.on_scripting_guide(ui.ctx());
+                }
                 if self.debug {
                     ui.checkbox(&mut self.show_inspection_ui, "Debug");
                 }
@@ -1332,6 +1335,12 @@ impl<P: Platform> App<P> {
         } else {
             self.modal = Some(Modal::About);
         }
+    }
+
+    fn on_scripting_guide(&mut self, ctx: &egui::Context) {
+        ctx.open_url(egui::OpenUrl::new_tab(
+            "https://docs.rs/fidget-rhai/latest/fidget_rhai/",
+        ));
     }
 
     fn on_open(&mut self) {
