@@ -197,7 +197,7 @@ pub enum ViewImage {
     Voxel(RgbaImage),
 }
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ViewCanvasType {
     Bitfield,
     Sdf,
@@ -404,7 +404,7 @@ pub fn edit_button(
                     mode: match tag {
                         ViewCanvasType::Sdf => ViewMode2::Sdf,
                         ViewCanvasType::Bitfield => ViewMode2::Bitfield,
-                        _ => unreachable!(),
+                        _ => unreachable!("invalid 2d canvas tag {tag:?}"),
                     },
                 }
             }
@@ -419,7 +419,7 @@ pub fn edit_button(
                     mode: match tag {
                         ViewCanvasType::Heightmap => ViewMode3::Heightmap,
                         ViewCanvasType::Shaded => ViewMode3::Shaded,
-                        _ => unreachable!(),
+                        _ => unreachable!("invalid 3d canvas tag {tag:?}"),
                     },
                     perspective: false,
                 }

@@ -537,7 +537,6 @@ pub async fn wbg_render_start_worker(
                         continue;
                     }
                     // Inner poll loop
-                    info!("polling started");
                     loop {
                         let encoder = device.create_command_encoder(
                             &egui_wgpu::wgpu::CommandEncoderDescriptor {
@@ -553,7 +552,6 @@ pub async fn wbg_render_start_worker(
                             Err(flume::TryRecvError::Empty) => (),
                         }
                     }
-                    info!("polling stopped");
                 }
             }
         });

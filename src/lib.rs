@@ -996,7 +996,7 @@ impl<P: Platform> App<P> {
                 });
                 if r {
                     let Some(Modal::Unsaved(d)) = self.modal.take() else {
-                        unreachable!()
+                        unreachable!("modal must be unsaved")
                     };
                     match d {
                         NextAction::New => {
