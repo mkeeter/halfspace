@@ -31,6 +31,7 @@ dist-fast:
 _dist opt:
     rustup +nightly target add wasm32-unknown-unknown
     {{cargo-web}} build --lib --release --target wasm32-unknown-unknown
+    rm -rf {{PKG_DIR}}/*
     wasm-bindgen target/wasm32-unknown-unknown/release/halfspace.wasm --out-dir {{PKG_DIR}} --target web
     wasm-opt {{opt}} pkg/halfspace_bg.wasm -o {{PKG_WA}}
     mkdir -p {{DIST_DIR}}
