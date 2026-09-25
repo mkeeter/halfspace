@@ -202,6 +202,16 @@ fn theme_visuals() -> egui::Visuals {
             active: w(base.widgets.active),
             open: w(base.widgets.open),
         },
+
+        ime_composition: egui::style::ImeComposition {
+            active_underline_stroke: s(base
+                .ime_composition
+                .active_underline_stroke),
+            inactive_underline_stroke: s(base
+                .ime_composition
+                .inactive_underline_stroke),
+            legacy_visuals: base.ime_composition.legacy_visuals,
+        },
     }
 }
 
@@ -1244,7 +1254,7 @@ impl<P: Platform> App<P> {
     #[must_use]
     fn draw_ui(&mut self, ui: &mut egui::Ui) -> bool {
         let mut changed = false;
-        egui::Panel::top("menu").show_inside(ui, |ui| {
+        egui::Panel::top("menu").show(ui, |ui| {
             ui.add_space(2.0);
             self.draw_menu(ui);
             ui.add_space(2.0);
@@ -1252,7 +1262,7 @@ impl<P: Platform> App<P> {
 
         changed |= egui::Panel::left("left_panel")
             .min_size(250.0)
-            .show_inside(ui, |ui| self.draw_block_list(ui))
+            .show(ui, |ui| self.draw_block_list(ui))
             .inner;
 
         let size = egui::CentralPanel::default()
@@ -1261,7 +1271,7 @@ impl<P: Platform> App<P> {
                     .inner_margin(0.0)
                     .fill(egui::Color32::TRANSPARENT),
             )
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 let size = ui.available_size();
                 changed |= self.draw_tab_region(ui);
                 size

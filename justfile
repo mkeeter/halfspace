@@ -7,7 +7,7 @@ cargo-web := "RUSTFLAGS='-C target-feature=+atomics,+bulk-memory  \
 -C link-arg=--export=__tls_align \
 -C link-arg=--export=__tls_base \
 --cfg getrandom_backend=\"wasm_js\"' \
-rustup run nightly-2026-04-10 \
+rustup run nightly-2026-09-10 \
 cargo -Z build-std=std,panic_abort"
 
 _default:
