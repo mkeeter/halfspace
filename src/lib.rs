@@ -40,6 +40,7 @@ pub async fn wgpu_setup() -> Result<egui_wgpu::WgpuSetupExisting, WgpuError> {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: None,
             force_fallback_adapter: false,
+            apply_limit_buckets: false,
         })
         .await?;
 
@@ -132,7 +133,6 @@ fn theme_visuals() -> egui::Visuals {
                 )
             }
         } else {
-            warn!("unknown color {c:?}");
             c
         }
     };
@@ -193,7 +193,6 @@ fn theme_visuals() -> egui::Visuals {
         numeric_color_space: base.numeric_color_space,
 
         button_frame: base.button_frame,
-        clip_rect_margin: base.clip_rect_margin,
 
         widgets: egui::style::Widgets {
             noninteractive: w(base.widgets.noninteractive),
@@ -203,15 +202,11 @@ fn theme_visuals() -> egui::Visuals {
             open: w(base.widgets.open),
         },
 
-        ime_composition: egui::style::ImeComposition {
-            active_underline_stroke: s(base
-                .ime_composition
-                .active_underline_stroke),
-            inactive_underline_stroke: s(base
-                .ime_composition
-                .inactive_underline_stroke),
-            legacy_visuals: base.ime_composition.legacy_visuals,
-        },
+        // XXX should we theme this as well?
+        ime_composition: base.ime_composition,
+
+        #[allow(deprecated)]
+        clip_rect_margin: base.clip_rect_margin,
     }
 }
 
