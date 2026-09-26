@@ -133,7 +133,7 @@ let upper = input("upper");
 let min_feature = input("min_feature");
 export_mesh(shape, vec3(lower), vec3(upper), min_feature.to_float());"#;
 
-const EXPORT_IMAGE_SCRIPT: &str = r#"// Script to export a mesh
+const EXPORT_IMAGE_SCRIPT: &str = r#"// Script to export an image
 let scene = input("scene");
 let lower = input("lower");
 let upper = input("upper");

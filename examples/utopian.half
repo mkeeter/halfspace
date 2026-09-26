@@ -28,7 +28,7 @@
       "4": {
         "Script": {
           "name": "export_image",
-          "script": "// Script to export a mesh\nlet scene = input(\"scene\");\nlet lower = input(\"lower\");\nlet upper = input(\"upper\");\nlet resolution = input(\"resolution\");\nexport_image(scene(scene), vec2(lower), vec2(upper), resolution.to_float());",
+          "script": "// Script to export an image\nlet scene = input(\"scene\");\nlet lower = input(\"lower\");\nlet upper = input(\"upper\");\nlet resolution = input(\"resolution\");\nexport_image(scene(scene), vec2(lower), vec2(upper), resolution.to_float());",
           "inputs": {
             "scene": "flag.scene",
             "lower": "flag.min",
