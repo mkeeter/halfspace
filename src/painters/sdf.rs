@@ -3,14 +3,13 @@ use super::WgpuResources;
 
 use crate::{
     painters::cache::{CacheHit, WgpuTextureCache},
-    view::{PixelImage, ViewMode2},
+    view::{Float16, PixelImage, ViewMode2},
     world::BlockIndex,
 };
 use eframe::{
     egui,
     egui_wgpu::{self, wgpu},
 };
-use fidget::raster::pixel::RawDistancePixel;
 use std::collections::HashMap;
 use zerocopy::IntoBytes;
 
@@ -67,7 +66,7 @@ pub(crate) struct SdfResources {
     bound_data: HashMap<BlockIndex, SdfData>,
 
     color_cache: WgpuTextureCache<[[u8; 4]]>,
-    distance_cache: WgpuTextureCache<[RawDistancePixel]>,
+    distance_cache: WgpuTextureCache<[Float16]>,
 
     /// Empty texture used when we don't have a color channel
     dummy_color_texture: wgpu::Texture,
@@ -324,7 +323,7 @@ impl SdfResources {
                         mip_level_count: 1,
                         sample_count: 1,
                         dimension: wgpu::TextureDimension::D2,
-                        format: wgpu::TextureFormat::R32Float,
+                        format: wgpu::TextureFormat::R16Float,
                         usage: wgpu::TextureUsages::TEXTURE_BINDING
                             | wgpu::TextureUsages::COPY_DST,
                         view_formats: &[],

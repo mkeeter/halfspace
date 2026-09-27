@@ -7,7 +7,6 @@ use crate::{
     state::ViewState,
     world::Scene,
 };
-use fidget::raster::pixel::RawDistancePixel;
 use std::sync::Arc;
 
 pub use state::{ViewMode2, ViewMode3};
@@ -168,9 +167,19 @@ impl From<ViewState> for ViewCanvas {
     }
 }
 
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    zerocopy::IntoBytes,
+    zerocopy::FromBytes,
+    zerocopy::Immutable,
+)]
+pub struct Float16(pub u16);
+
 #[derive(Clone)]
 pub struct PixelImage {
-    pub distance: Arc<[RawDistancePixel]>,
+    pub distance: Arc<[Float16]>,
     pub color: Option<Arc<[[u8; 4]]>>,
     pub view: fidget::gui::View2,
     pub size: fidget::render::ImageSize,

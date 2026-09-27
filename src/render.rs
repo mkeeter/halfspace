@@ -49,11 +49,14 @@ use crate::{
     export::ExportError,
     platform::Notify,
     view::{
-        PixelImage, RgbaImage, ViewCanvas, ViewImage, ViewMode2, ViewMode3,
+        Float16, PixelImage, RgbaImage, ViewCanvas, ViewImage, ViewMode2,
+        ViewMode3,
     },
     world::Scene,
 };
 
+use egui_wgpu::wgpu;
+use fidget::raster::pixel::RawDistancePixel;
 use web_time::Instant;
 use zerocopy::{FromBytes, IntoBytes};
 
@@ -254,10 +257,10 @@ pub(crate) async fn render_worker<N: Notify>(
                 }
                 let data = match &task.settings {
                     RenderSettings::Voxel(vs) => {
-                        gpu.render_voxel(vs, level).await
+                        ViewImage::Voxel(gpu.render_voxel(vs, level).await)
                     }
                     RenderSettings::Image(rs) => {
-                        gpu.render_pixel(rs, level).await
+                        ViewImage::Pixel(gpu.render_pixel_f16(rs, level).await)
                     }
                 };
                 reply.send(Message::RenderView(RenderViewReply {
@@ -281,12 +284,22 @@ pub(crate) async fn render_worker<N: Notify>(
                 // We can't pass cancellation through to the GPU, unfortunately,
                 // so we'll kick off a rendering then check cancellation again
                 // after we're done.
+                enum ExportImage {
+                    Rgba(RgbaImage),
+                    Distance {
+                        distance: Vec<RawDistancePixel>,
+                        color: Option<Vec<[u8; 4]>>,
+                    },
+                }
                 let (data, image_size) = match &task.settings {
-                    RenderSettings::Voxel(vs) => {
-                        (gpu.render_voxel(vs, 0).await, vs.size.into())
-                    }
+                    RenderSettings::Voxel(vs) => (
+                        ExportImage::Rgba(gpu.render_voxel(vs, 0).await),
+                        vs.size.into(),
+                    ),
                     RenderSettings::Image(rs) => {
-                        (gpu.render_pixel(rs, 0).await, rs.size)
+                        let (distance, color) =
+                            gpu.render_pixel_f32(rs, 0).await;
+                        (ExportImage::Distance { distance, color }, rs.size)
                     }
                 };
 
@@ -302,11 +315,11 @@ pub(crate) async fn render_worker<N: Notify>(
                 }
 
                 let out = match &data {
-                    ViewImage::Pixel(px) => {
-                        if let Some(c) = &px.color {
+                    ExportImage::Distance { distance, color } => {
+                        if let Some(c) = color {
                             std::borrow::Cow::Borrowed(c.as_bytes())
                         } else {
-                            px.distance
+                            distance
                                 .iter()
                                 .flat_map(|p| {
                                     if p.inside() {
@@ -318,7 +331,7 @@ pub(crate) async fn render_worker<N: Notify>(
                                 .collect()
                         }
                     }
-                    ViewImage::Voxel(im) => {
+                    ExportImage::Rgba(im) => {
                         std::borrow::Cow::Borrowed(im.color.as_bytes())
                     }
                 };
@@ -361,13 +374,24 @@ pub(crate) struct GpuWorker {
     pixel_effects: fidget::wgpu::pixel::effects::Context,
     pixel_workspace: fidget::wgpu::pixel::Workspace,
     pixel_merge_workspace: fidget::wgpu::pixel::effects::MergeWorkspace,
-    pixel_read_distance_buffer: fidget::wgpu::buf::ReadBuffer<
+    pixel_read_distance_buffer_f16:
+        fidget::wgpu::buf::ReadBuffer<Float16BufferTag>,
+    pixel_read_distance_buffer_f32: fidget::wgpu::buf::ReadBuffer<
         fidget::wgpu::pixel::effects::PixelDistanceBufferTag,
     >,
     pixel_read_color_buffer: fidget::wgpu::buf::ReadBuffer<
         fidget::wgpu::pixel::effects::PixelColorBufferTag,
     >,
     pixel_color_workspace: fidget::wgpu::pixel::effects::ColorWorkspace,
+}
+
+pub struct Float16BufferTag;
+impl fidget::wgpu::buf::BufferTag for Float16BufferTag {
+    type T = Float16;
+    type S = fidget::render::ImageSize;
+    fn usage() -> u32 {
+        wgpu::BufferUsages::STORAGE.bits() | wgpu::BufferUsages::COPY_SRC.bits()
+    }
 }
 
 impl GpuWorker {
@@ -387,7 +411,10 @@ impl GpuWorker {
         let pixel_merge_workspace = pixel_effects.merge_workspace();
         let pixel_workspace = pixel_ctx.workspace();
         let pixel_read_color_buffer = gpu.read_buffer("pixel color read");
-        let pixel_read_distance_buffer = gpu.read_buffer("pixel distance read");
+        let pixel_read_distance_buffer_f32 =
+            gpu.read_buffer("pixel distance read");
+        let pixel_read_distance_buffer_f16 =
+            gpu.read_buffer("pixel distance read");
         let pixel_color_workspace = pixel_effects.color_workspace();
 
         Self {
@@ -406,7 +433,8 @@ impl GpuWorker {
             pixel_workspace,
             pixel_merge_workspace,
             pixel_read_color_buffer,
-            pixel_read_distance_buffer,
+            pixel_read_distance_buffer_f16,
+            pixel_read_distance_buffer_f32,
             pixel_color_workspace,
         }
     }
@@ -415,7 +443,7 @@ impl GpuWorker {
         &mut self,
         vs: &VoxelRenderSettings,
         level: usize,
-    ) -> ViewImage {
+    ) -> RgbaImage {
         let VoxelRenderSettings {
             scene,
             mode,
@@ -507,21 +535,89 @@ impl GpuWorker {
         let image = mapped_image.image();
         let color = image.take().0.into();
 
-        let image = RgbaImage {
+        RgbaImage {
             view: *view,
             size: *size,
             level,
             color,
             mode: *mode,
-        };
-        ViewImage::Voxel(image)
+        }
     }
 
-    async fn render_pixel(
+    async fn render_pixel_f16(
         &mut self,
         vs: &ImageRenderSettings,
         level: usize,
-    ) -> ViewImage {
+    ) -> PixelImage {
+        self.submit_pixel(vs, level);
+
+        let color = if let Some(c) = self.pixel_merge_workspace.output_color() {
+            self.gpu.copy(c, &mut self.pixel_read_color_buffer);
+            let mapped_color_image = self
+                .gpu
+                .map_image_async(&mut self.pixel_read_color_buffer)
+                .await;
+            let data = mapped_color_image.image().take().0;
+            Some(<[[u8; 4]]>::ref_from_bytes(data.as_bytes()).unwrap().into())
+        } else {
+            None
+        };
+
+        // TODO submit compute pass to do f32 -> f16
+        self.gpu.copy(
+            self.pixel_merge_workspace.output_distance(),
+            &mut self.pixel_read_distance_buffer_f16,
+        );
+        let mapped_distance_image = self
+            .gpu
+            .map_image_async(&mut self.pixel_read_distance_buffer_f16)
+            .await;
+        let distance_img = mapped_distance_image.image();
+        let distance = distance_img.take().0.into();
+
+        PixelImage {
+            distance,
+            view: vs.view,
+            size: vs.size,
+            level,
+            color,
+            mode: vs.mode,
+        }
+    }
+
+    async fn render_pixel_f32(
+        &mut self,
+        vs: &ImageRenderSettings,
+        level: usize,
+    ) -> (Vec<RawDistancePixel>, Option<Vec<[u8; 4]>>) {
+        self.submit_pixel(vs, level);
+
+        let color = if let Some(c) = self.pixel_merge_workspace.output_color() {
+            self.gpu.copy(c, &mut self.pixel_read_color_buffer);
+            let mapped_color_image = self
+                .gpu
+                .map_image_async(&mut self.pixel_read_color_buffer)
+                .await;
+            let data = mapped_color_image.image().take().0;
+            Some(<[[u8; 4]]>::ref_from_bytes(data.as_bytes()).unwrap().into())
+        } else {
+            None
+        };
+
+        self.gpu.copy(
+            self.pixel_merge_workspace.output_distance(),
+            &mut self.pixel_read_distance_buffer_f32,
+        );
+        let mapped_distance_image = self
+            .gpu
+            .map_image_async(&mut self.pixel_read_distance_buffer_f32)
+            .await;
+        let distance_img = mapped_distance_image.image();
+        let distance = distance_img.take().0;
+        (distance, color)
+    }
+
+    fn submit_pixel(&mut self, vs: &ImageRenderSettings, level: usize) {
         let ImageRenderSettings {
             scene,
             mode,
@@ -570,38 +666,5 @@ impl GpuWorker {
                 )
                 .expect("failed to submit color rendering");
         }
-
-        let color = if let Some(c) = self.pixel_merge_workspace.output_color() {
-            self.gpu.copy(c, &mut self.pixel_read_color_buffer);
-            let mapped_color_image = self
-                .gpu
-                .map_image_async(&mut self.pixel_read_color_buffer)
-                .await;
-            let data = mapped_color_image.image().take().0;
-            Some(<[[u8; 4]]>::ref_from_bytes(data.as_bytes()).unwrap().into())
-        } else {
-            None
-        };
-
-        self.gpu.copy(
-            self.pixel_merge_workspace.output_distance(),
-            &mut self.pixel_read_distance_buffer,
-        );
-        let mapped_distance_image = self
-            .gpu
-            .map_image_async(&mut self.pixel_read_distance_buffer)
-            .await;
-        let distance_img = mapped_distance_image.image();
-        let distance = distance_img.take().0.into();
-
-        let image = PixelImage {
-            distance,
-            view: *view,
-            size: *size,
-            level,
-            color,
-            mode: *mode,
-        };
-        ViewImage::Pixel(image)
     }
 }
