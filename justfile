@@ -6,6 +6,7 @@ cargo-web := "RUSTFLAGS='-C target-feature=+atomics,+bulk-memory  \
 -C link-arg=--export=__tls_size \
 -C link-arg=--export=__tls_align \
 -C link-arg=--export=__tls_base \
+-C link-arg=--export=__heap_base \
 --cfg getrandom_backend=\"wasm_js\"' \
 rustup run nightly-2026-09-10 \
 cargo -Z build-std=std,panic_abort"
