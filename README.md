@@ -1,12 +1,14 @@
 # Halfspace
-[Try the demo](https://www.mattkeeter.com/projects/halfspace/demo/?example=spinner.half)
+[Try the demo](https://www.mattkeeter.com/projects/halfspace/demo/?example=spinner.half)  
+[Project writeup](https://mattkeeter.com/projects/halfspace)
 
 Halfspace is an experimental IDE for doing solid modeling with distance fields.
 
-It is lamentably undocumented.
-See the [`fidget::rhai`](https://docs.rs/fidget-rhai/latest/fidget_rhai/index.html)
-documentation for details on scripting; otherwise, look to the examples for
-inspiration.  When in doubt, read the source code!
+It is lamentably undocumented, but ships with a comprehensive set of examples!
+
+For more details on scripting, check out the
+[`fidget::rhai`](https://docs.rs/fidget-rhai/latest/fidget_rhai/index.html)
+documentation (also linked in the *Help* menu).
 
 ## Platforms
 Halfspace runs as either a web or native application.
