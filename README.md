@@ -4,7 +4,8 @@
 
 Halfspace is an experimental IDE for doing solid modeling with distance fields.
 
-It is lamentably undocumented, but ships with a comprehensive set of examples!
+It is lamentably underdocumented, but ships with a comprehensive set of
+examples (available in the *Examples* menu).
 
 For more details on scripting, check out the
 [`fidget::rhai`](https://docs.rs/fidget-rhai/latest/fidget_rhai/index.html)
