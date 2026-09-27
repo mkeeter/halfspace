@@ -1,3 +1,5 @@
+NIGHTLY_VERSION := "nightly-2026-09-10"
+
 cargo-web := "RUSTFLAGS='-C target-feature=+atomics,+bulk-memory  \
 -C link-arg=--shared-memory \
 -C link-arg=--max-memory=1073741824 \
@@ -8,8 +10,7 @@ cargo-web := "RUSTFLAGS='-C target-feature=+atomics,+bulk-memory  \
 -C link-arg=--export=__tls_base \
 -C link-arg=--export=__heap_base \
 --cfg getrandom_backend=\"wasm_js\"' \
-rustup run nightly-2026-09-10 \
-cargo -Z build-std=std,panic_abort"
+rustup run " + NIGHTLY_VERSION + " cargo -Z build-std=std,panic_abort"
 
 _default:
   just --list --unsorted
@@ -30,7 +31,7 @@ dist-fast:
     just _dist ''
 
 _dist opt:
-    rustup +nightly target add wasm32-unknown-unknown
+    rustup target add wasm32-unknown-unknown --toolchain {{NIGHTLY_VERSION}}
     {{cargo-web}} build --lib --release --target wasm32-unknown-unknown
     rm -rf {{PKG_DIR}}/*
     wasm-bindgen target/wasm32-unknown-unknown/release/halfspace.wasm --out-dir {{PKG_DIR}} --target web
