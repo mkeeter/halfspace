@@ -1505,8 +1505,7 @@ checksum = "b97b65636e5b9ef369943878ac74335ba1c55c1cb6adbf1e2c293c624248d693"
 [[package]]
 name = "fidget"
 version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69298d7641ec13971a5359ab20961a92482eab6201c7a89a1372a4ceac1f6987"
+source = "git+https://github.com/mkeeter/fidget#dad9e3f739d0d523b22f25f0b922fab45e288264"
 dependencies = [
  "document-features",
  "fidget-bytecode",
@@ -1525,8 +1524,7 @@ dependencies = [
 [[package]]
 name = "fidget-bytecode"
 version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7e48781d3ff5c9e247387ed4a9cadc03d0fa8d0261d891d591bfc29126be5bf"
+source = "git+https://github.com/mkeeter/fidget#dad9e3f739d0d523b22f25f0b922fab45e288264"
 dependencies = [
  "fidget-core",
  "serde",
@@ -1539,8 +1537,7 @@ dependencies = [
 [[package]]
 name = "fidget-core"
 version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b72374bb0a76f138aacd08b0611de2154cbb5eea0cf8251b11ed7bf3447e9a58"
+source = "git+https://github.com/mkeeter/fidget#dad9e3f739d0d523b22f25f0b922fab45e288264"
 dependencies = [
  "facet",
  "getrandom 0.2.17",
@@ -1559,8 +1556,7 @@ dependencies = [
 [[package]]
 name = "fidget-gui"
 version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "940921e8d8674a783144e7cb702b045302f6a34c89465ae4c5c728a712a7478e"
+source = "git+https://github.com/mkeeter/fidget#dad9e3f739d0d523b22f25f0b922fab45e288264"
 dependencies = [
  "fidget-core",
  "nalgebra",
@@ -1571,8 +1567,7 @@ dependencies = [
 [[package]]
 name = "fidget-jit"
 version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a26c5c6c91f9b913b265c4c9888ff73ee7dfa93e169b295799e63cbe128b1fed"
+source = "git+https://github.com/mkeeter/fidget#dad9e3f739d0d523b22f25f0b922fab45e288264"
 dependencies = [
  "arrayvec",
  "dynasmrt",
@@ -1586,8 +1581,7 @@ dependencies = [
 [[package]]
 name = "fidget-mesh"
 version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d69e5b061d296f0eadec87045a64c208da2209e1f43565684db2c2761bcb1017"
+source = "git+https://github.com/mkeeter/fidget#dad9e3f739d0d523b22f25f0b922fab45e288264"
 dependencies = [
  "arrayvec",
  "fidget-core",
@@ -1601,8 +1595,7 @@ dependencies = [
 [[package]]
 name = "fidget-raster"
 version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7e8908e9339218b9973217ab3dbcdd9c441579ae7ebbd6ddfe39a8f4a7a1f3e"
+source = "git+https://github.com/mkeeter/fidget#dad9e3f739d0d523b22f25f0b922fab45e288264"
 dependencies = [
  "fidget-core",
  "nalgebra",
@@ -1617,8 +1610,7 @@ dependencies = [
 [[package]]
 name = "fidget-rhai"
 version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d14cff5da2bbd66da8d4125885a16b1d84f3637cdf04115d7809b3e83813608"
+source = "git+https://github.com/mkeeter/fidget#dad9e3f739d0d523b22f25f0b922fab45e288264"
 dependencies = [
  "enum-map 3.1.0",
  "facet",
@@ -1633,8 +1625,7 @@ dependencies = [
 [[package]]
 name = "fidget-shapes"
 version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d1951ccdff08fbc701421091a00b8799d0cbf10b87cc87a8d16075d3ad2f564"
+source = "git+https://github.com/mkeeter/fidget#dad9e3f739d0d523b22f25f0b922fab45e288264"
 dependencies = [
  "enum-map 3.1.0",
  "facet",
@@ -1648,8 +1639,7 @@ dependencies = [
 [[package]]
 name = "fidget-solver"
 version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a12a619d7cba5a92ec8826fae78a97a3c59a8f4267c3ab5222582b36d9dbc3a7"
+source = "git+https://github.com/mkeeter/fidget#dad9e3f739d0d523b22f25f0b922fab45e288264"
 dependencies = [
  "fidget-core",
  "nalgebra",
@@ -1661,8 +1651,7 @@ dependencies = [
 [[package]]
 name = "fidget-wgpu"
 version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eab2d77a6a8653df6863c8b263d2bb4e22f9d466ed47bb0adb99f45e6e291201"
+source = "git+https://github.com/mkeeter/fidget#dad9e3f739d0d523b22f25f0b922fab45e288264"
 dependencies = [
  "fidget-bytecode",
  "fidget-core",
@@ -2632,7 +2621,7 @@ checksum = "1706dc14a2e140dec0a7a07109d9a3d5890b81e85bd6c60b906b249a77adf0ca"
 dependencies = [
  "mime",
  "phf",
- "phf_shared",
+ "phf_shared 0.11.3",
  "unicase",
 ]
 
@@ -3309,7 +3298,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fd6780a80ae0c52cc120a26a1a42c1ae51b247a253e4e06113d23d2c2edd078"
 dependencies = [
  "phf_macros",
- "phf_shared",
+ "phf_shared 0.11.3",
 ]
 
 [[package]]
@@ -3318,7 +3307,7 @@ version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c80231409c20246a13fddb31776fb942c38553c51e871f8cbd687a4cfb5843d"
 dependencies = [
- "phf_shared",
+ "phf_shared 0.11.3",
  "rand 0.8.8",
 ]
 
@@ -3329,7 +3318,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f84ac04429c13a7ff43785d75ad27569f2951ce0ffd30a3321230db2fc727216"
 dependencies = [
  "phf_generator",
- "phf_shared",
+ "phf_shared 0.11.3",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -3344,6 +3333,15 @@ checksum = "67eabc2ef2a60eb7faa00097bd1ffdb5bd28e62bf39990626a582201b7a754e5"
 dependencies = [
  "siphasher",
  "unicase",
+]
+
+[[package]]
+name = "phf_shared"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e57fef6bc5981e38c2ce2d63bfa546861309f875b8a75f092d1d54ae2d64f266"
+dependencies = [
+ "siphasher",
 ]
 
 [[package]]
@@ -5472,8 +5470,49 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 [[package]]
 name = "workspace-hack"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "beffa227304dbaea3ad6a06ac674f9bc83a3dec3b7f63eeb442de37e7cb6bb01"
+source = "git+https://github.com/mkeeter/fidget#dad9e3f739d0d523b22f25f0b922fab45e288264"
+dependencies = [
+ "ahash",
+ "anstream",
+ "approx",
+ "arrayvec",
+ "bitflags 2.13.2",
+ "bytemuck",
+ "clap",
+ "clap_builder",
+ "either",
+ "fastrand",
+ "futures-core",
+ "half",
+ "hashbrown 0.17.1",
+ "image",
+ "indexmap",
+ "libc",
+ "log",
+ "memchr",
+ "num-traits",
+ "objc2-core-graphics",
+ "objc2-foundation 0.3.2",
+ "once_cell",
+ "ordered-float",
+ "phf_shared 0.13.1",
+ "proc-macro2",
+ "quote",
+ "raw-window-handle",
+ "regex",
+ "regex-automata",
+ "serde",
+ "serde_core",
+ "smallvec 1.16.2",
+ "syn 2.0.119",
+ "syn 3.0.6",
+ "thiserror 2.0.21",
+ "wgpu",
+ "wgpu-core",
+ "wgpu-hal",
+ "wgpu-types",
+ "zerocopy",
+]
 
 [[package]]
 name = "writeable"

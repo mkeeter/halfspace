@@ -342,7 +342,7 @@ impl SdfResources {
                 image.distance.as_bytes(),
                 wgpu::TexelCopyBufferLayout {
                     offset: 0,
-                    bytes_per_row: Some(4 * size.width),
+                    bytes_per_row: Some(2 * size.width),
                     rows_per_image: Some(size.height),
                 },
                 size,

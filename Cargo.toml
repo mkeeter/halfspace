@@ -28,7 +28,7 @@ egui_dnd = "0.17.0"
 egui_dock = { version = "0.21.1", features = ["serde"] }
 egui_extras = { version = "0.36.0", features = ["syntect"] }
 facet = "0.46"
-fidget = { version = "0.5.1" }
+fidget = { git = "https://github.com/mkeeter/fidget" } # { version = "0.5.1" }
 git-version = "0.3.9"
 heck = "0.5"
 image = { version = "0.25", default-features = false, features = ["png"] }

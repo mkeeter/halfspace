@@ -374,6 +374,7 @@ pub(crate) struct GpuWorker {
     pixel_effects: fidget::wgpu::pixel::effects::Context,
     pixel_workspace: fidget::wgpu::pixel::Workspace,
     pixel_merge_workspace: fidget::wgpu::pixel::effects::MergeWorkspace,
+    pixel_distance_buffer_f16: fidget::wgpu::buf::FlexBuffer<Float16BufferTag>,
     pixel_read_distance_buffer_f16:
         fidget::wgpu::buf::ReadBuffer<Float16BufferTag>,
     pixel_read_distance_buffer_f32: fidget::wgpu::buf::ReadBuffer<
@@ -383,6 +384,8 @@ pub(crate) struct GpuWorker {
         fidget::wgpu::pixel::effects::PixelColorBufferTag,
     >,
     pixel_color_workspace: fidget::wgpu::pixel::effects::ColorWorkspace,
+    pixel_downfloat_pipeline: wgpu::ComputePipeline,
+    pixel_downfloat_bind_group_layout: wgpu::BindGroupLayout,
 }
 
 pub struct Float16BufferTag;
@@ -411,11 +414,79 @@ impl GpuWorker {
         let pixel_merge_workspace = pixel_effects.merge_workspace();
         let pixel_workspace = pixel_ctx.workspace();
         let pixel_read_color_buffer = gpu.read_buffer("pixel color read");
+        let pixel_distance_buffer_f16 = fidget::wgpu::buf::FlexBuffer::new(
+            &gpu.device,
+            "distance16",
+            64.into(),
+        )
+        .expect("could not build pixel distance read buffer");
         let pixel_read_distance_buffer_f32 =
             gpu.read_buffer("pixel distance read");
         let pixel_read_distance_buffer_f16 =
             gpu.read_buffer("pixel distance read");
         let pixel_color_workspace = pixel_effects.color_workspace();
+
+        // We're going to build a simple pipeline for f32 -> f16 conversion
+        let pixel_downfloat_bind_group_layout = gpu
+            .device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("common bind group layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage {
+                                read_only: true,
+                            },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage {
+                                read_only: false,
+                            },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+        let pipeline_layout = gpu.device.create_pipeline_layout(
+            &wgpu::PipelineLayoutDescriptor {
+                label: Some("float conversion pipeline"),
+                bind_group_layouts: &[Some(&pixel_downfloat_bind_group_layout)],
+                immediate_size: 0u32,
+            },
+        );
+        let shader_module =
+            gpu.device
+                .create_shader_module(wgpu::ShaderModuleDescriptor {
+                    label: Some("float shader module"),
+                    source: wgpu::ShaderSource::Wgsl(
+                        include_str!(concat!(
+                            env!("CARGO_MANIFEST_DIR"),
+                            "/shaders/downfloat.wgsl"
+                        ))
+                        .into(),
+                    ),
+                });
+        let pixel_downfloat_pipeline = gpu.device.create_compute_pipeline(
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("float compute pipeline"),
+                layout: Some(&pipeline_layout),
+                module: &shader_module,
+                entry_point: Some("float_main"),
+                compilation_options: Default::default(),
+                cache: None,
+            },
+        );
 
         Self {
             gpu,
@@ -435,6 +506,9 @@ impl GpuWorker {
             pixel_read_color_buffer,
             pixel_read_distance_buffer_f16,
             pixel_read_distance_buffer_f32,
+            pixel_distance_buffer_f16,
+            pixel_downfloat_pipeline,
+            pixel_downfloat_bind_group_layout,
             pixel_color_workspace,
         }
     }
@@ -563,9 +637,52 @@ impl GpuWorker {
             None
         };
 
-        // TODO submit compute pass to do f32 -> f16
+        // Do a compute pass to downsample the f32 buffer to f16
+        let mut encoder = self.gpu.device.create_command_encoder(
+            &wgpu::CommandEncoderDescriptor {
+                label: Some("downfloat"),
+            },
+        );
+        {
+            // compute_pass scope
+            let mut compute_pass = encoder
+                .begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+            self.pixel_distance_buffer_f16
+                .grow_to_fit(&self.gpu.device, vs.size)
+                .unwrap();
+            // TODO this creates a bind group on each evaluation
+            let bg =
+                self.gpu
+                    .device
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("merge bind group"),
+                        layout: &self.pixel_downfloat_bind_group_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: self
+                                    .pixel_workspace
+                                    .output()
+                                    .bind_active(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: self
+                                    .pixel_distance_buffer_f16
+                                    .bind_active(),
+                            },
+                        ],
+                    });
+            compute_pass.set_bind_group(0, Some(&bg), &[]);
+            compute_pass.set_pipeline(&self.pixel_downfloat_pipeline);
+            let nx = (u64::from(vs.size.width()) * u64::from(vs.size.height()))
+                .div_ceil(2)
+                .div_ceil(64);
+            compute_pass.dispatch_workgroups(nx.try_into().unwrap(), 1, 1);
+        }
+        self.gpu.queue.submit(std::iter::once(encoder.finish()));
         self.gpu.copy(
-            self.pixel_merge_workspace.output_distance(),
+            &self.pixel_distance_buffer_f16,
             &mut self.pixel_read_distance_buffer_f16,
         );
         let mapped_distance_image = self

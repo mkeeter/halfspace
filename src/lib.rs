@@ -30,7 +30,9 @@ pub enum WgpuError {
     RequestDeviceError(#[from] wgpu::RequestDeviceError),
 }
 
-/// Manually open a WebGPU session with `float32-filterable`
+/// Manually open a WebGPU session
+///
+/// This is where we could expose specific adapter features if we need them.
 pub async fn wgpu_setup() -> Result<egui_wgpu::WgpuSetupExisting, WgpuError> {
     let instance = wgpu::Instance::default();
     info!("calling wgpu_setup...");
@@ -44,17 +46,10 @@ pub async fn wgpu_setup() -> Result<egui_wgpu::WgpuSetupExisting, WgpuError> {
         })
         .await?;
 
-    let adapter_features = adapter.features();
-    if !adapter_features.contains(wgpu::Features::FLOAT32_FILTERABLE) {
-        return Err(WgpuError::MissingFeature("float32-filterable"));
-    }
-
-    let required_features = wgpu::Features::FLOAT32_FILTERABLE;
-
     let (device, queue) = adapter
         .request_device(&wgpu::DeviceDescriptor {
-            label: Some("Device with float32-filterable"),
-            required_features,
+            label: None,
+            required_features: wgpu::Features::empty(),
             required_limits: wgpu::Limits::default(),
             memory_hints: wgpu::MemoryHints::default(),
             experimental_features: wgpu::ExperimentalFeatures::disabled(),
