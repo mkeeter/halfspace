@@ -661,8 +661,8 @@ impl GpuWorker {
                             wgpu::BindGroupEntry {
                                 binding: 0,
                                 resource: self
-                                    .pixel_workspace
-                                    .output()
+                                    .pixel_merge_workspace
+                                    .output_distance()
                                     .bind_active(),
                             },
                             wgpu::BindGroupEntry {
