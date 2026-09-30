@@ -10,7 +10,7 @@
 
     <script type="module">
         import init, { run, initThreadPool} from './halfspace.JSHASH.js';
-        await init('./halfspace.WAHASH.wasm');
+        await init({ module_or_path: './halfspace.WAHASH.wasm' });
         await initThreadPool(navigator.hardwareConcurrency);
         run();
     </script>
