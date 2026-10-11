@@ -1,5 +1,3 @@
-use crate::render::RenderShape;
-
 use fidget::{
     context::Tree,
     mesh::{Octree, Settings},
@@ -77,6 +75,13 @@ pub(crate) fn mesh_settings(
     Ok(settings)
 }
 
+// Select shape type based on platform
+#[cfg(not(target_arch = "wasm32"))]
+type ExportShape = fidget::jit::JitShape;
+
+#[cfg(target_arch = "wasm32")]
+type ExportShape = fidget::vm::VmShape;
+
 /// Returns an exported STL
 pub(crate) fn build_stl(
     tree: Tree,
@@ -91,7 +96,7 @@ pub(crate) fn build_stl(
         input: vec![tree, Box { lower, upper }.into()],
     }
     .into();
-    let shape = RenderShape::from(bounded);
+    let shape = ExportShape::from(bounded);
 
     // XXX we do this calculation multiple times: once for the UI, and once
     // again here.  It's cheap, so probably not an issue.

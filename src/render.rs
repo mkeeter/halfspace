@@ -60,14 +60,6 @@ use fidget::raster::pixel::RawDistancePixel;
 use web_time::Instant;
 use zerocopy::{FromBytes, IntoBytes};
 
-#[cfg(all(feature = "jit", not(target_arch = "wasm32")))]
-pub(crate) type RenderFunction = fidget::jit::JitFunction;
-
-#[cfg(any(target_arch = "wasm32", not(feature = "jit")))]
-pub(crate) type RenderFunction = fidget::vm::VmFunction;
-
-pub(crate) type RenderShape = fidget::shape::Shape<RenderFunction>;
-
 /// State representing an in-progress render
 ///
 /// This lives in the main thread; the work itself lives in [`RenderTask`] in
