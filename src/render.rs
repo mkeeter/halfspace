@@ -160,7 +160,7 @@ impl<N: Notify> RenderWorkerPool<N> {
             settings: settings.clone(),
             cancel: cancel.clone(),
         };
-        self.tx.send(task).expect("all render threads stopped");
+        self.tx.send(task).expect("render thread stopped");
         RenderTaskHandle { settings, cancel }
     }
 
@@ -176,7 +176,7 @@ impl<N: Notify> RenderWorkerPool<N> {
             settings,
             cancel: cancel.clone(),
         };
-        self.tx.send(task).expect("all render threads stopped");
+        self.tx.send(task).expect("render thread stopped");
         cancel
     }
 }

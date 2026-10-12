@@ -35,7 +35,7 @@ if (name === "render_pool_worker") {
   });
 }
 
-export async function startWorkers(module, memory, builder) {
+export async function startWorker(module, memory, builder) {
   const workerInit = {
     type: 'render_pool_worker_init',
     init: { module, memory },
@@ -43,23 +43,19 @@ export async function startWorkers(module, memory, builder) {
     mainJS: builder.mainJS()
   };
 
-  await Promise.all(
-    Array.from({ length: builder.numThreads() }, async () => {
-      // Self-spawn into a new Worker.
-      // The script is fetched as a blob so it works even if this script is
-      // hosted remotely (e.g. on a CDN). This avoids a cross-origin
-      // security error.
-      let scriptBlob = await fetch(import.meta.url).then(r => r.blob());
-      let url = URL.createObjectURL(scriptBlob);
-      const worker = new Worker(url, {
-        type: 'module',
-        name: 'render_pool_worker'
-      });
-      worker.postMessage(workerInit);
-      await waitForMsgType(worker, 'render_pool_worker_ready');
-      URL.revokeObjectURL(url);
-      return worker;
-    })
-  );
+  // Self-spawn into a new Worker.
+  // The script is fetched as a blob so it works even if this script is
+  // hosted remotely (e.g. on a CDN). This avoids a cross-origin
+  // security error.
+  let scriptBlob = await fetch(import.meta.url).then(r => r.blob());
+  let url = URL.createObjectURL(scriptBlob);
+  const worker = new Worker(url, {
+    type: 'module',
+    name: 'render_pool_worker'
+  });
+  worker.postMessage(workerInit);
+  await waitForMsgType(worker, 'render_pool_worker_ready');
+  URL.revokeObjectURL(url);
+
   await builder.build();
 }

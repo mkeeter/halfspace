@@ -89,13 +89,12 @@ pub fn run() {
     }
 
     let example = params.and_then(|p| p.get("example"));
-    const RENDER_POOL_WORKER_COUNT: usize = 4;
     wasm_bindgen_futures::spawn_local(async move {
-        // Start the render workers before doing any other work
-        start_workers(
+        // Start the render worker before doing any other work
+        start_worker(
             wasm_bindgen::module(),
             wasm_bindgen::memory(),
-            wbg_RenderPoolBuilder::new(RENDER_POOL_WORKER_COUNT),
+            wbg_RenderPoolBuilder::new(),
         )
         .await
         .expect("failed to start workers");
@@ -413,8 +412,8 @@ pub(crate) async fn dialog_worker(
 
 #[wasm_bindgen(module = "/src/platform/renderWorkers.js")]
 extern "C" {
-    #[wasm_bindgen(js_name = startWorkers)]
-    fn start_workers(
+    #[wasm_bindgen(js_name = startWorker)]
+    fn start_worker(
         module: JsValue,
         memory: JsValue,
         builder: wbg_RenderPoolBuilder,
@@ -425,7 +424,6 @@ extern "C" {
 #[wasm_bindgen]
 #[doc(hidden)]
 struct wbg_RenderPoolBuilder {
-    num_threads: usize,
     rx: flume::Receiver<RenderTask<Notify>>,
     sender: flume::Sender<StartTask>,
     receiver: flume::Receiver<StartTask>,
@@ -442,12 +440,11 @@ static TX_CHANNEL: std::sync::OnceLock<flume::Sender<RenderTask<Notify>>> =
 
 #[wasm_bindgen]
 impl wbg_RenderPoolBuilder {
-    fn new(num_threads: usize) -> Self {
-        let (sender, receiver) = flume::bounded(num_threads);
+    fn new() -> Self {
+        let (sender, receiver) = flume::bounded(1);
         let (tx, rx) = flume::unbounded();
         TX_CHANNEL.set(tx).unwrap();
         Self {
-            num_threads,
             sender,
             receiver,
             rx,
@@ -470,34 +467,19 @@ impl wbg_RenderPoolBuilder {
         URL.with(Clone::clone)
     }
 
-    #[wasm_bindgen(js_name = numThreads)]
-    pub fn num_threads(&self) -> usize {
-        self.num_threads
-    }
-
     pub fn receiver(&self) -> *const flume::Receiver<StartTask> {
         &self.receiver
     }
 
     pub async fn build(&mut self) {
-        let mut wait_for = Vec::with_capacity(self.num_threads);
-        for _i in 0..self.num_threads {
-            let (tx, rx) = flume::bounded(0);
-            self.sender
-                .send(StartTask {
-                    rx: self.rx.clone(),
-                    ready: tx,
-                })
-                .unwrap();
-            wait_for.push(rx);
-        }
-        // We have to keep the builder alive until all of the children are done,
-        // because they're using its memory (accessed through `receiver`).
-        //
-        // Crimes, I tell you, crimes!
-        for r in wait_for {
-            r.recv_async().await.expect("failed to get wait_for rx");
-        }
+        let (tx, rx) = flume::bounded(0);
+        self.sender
+            .send(StartTask {
+                rx: self.rx.clone(),
+                ready: tx,
+            })
+            .unwrap();
+        rx.recv_async().await.expect("failed to get wait_for rx");
     }
 }
 
