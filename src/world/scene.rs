@@ -180,12 +180,11 @@ impl Scene {
                         .as_ref()
                         .map(fidget::wgpu::color::ShapeColor::from)
                         .unwrap_or_else(|| {
-                            let c =
-                                || fidget::context::Tree::constant(1.0).into();
+                            let c = fidget::context::Tree::constant(1.0);
                             fidget::wgpu::color::ShapeColor::Rgb {
-                                r: c(),
-                                g: c(),
-                                b: c(),
+                                r: c.clone().into(),
+                                g: c.clone().into(),
+                                b: c.clone().into(),
                             }
                         })
                 })
