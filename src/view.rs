@@ -253,7 +253,8 @@ impl ViewData {
         const MAX_LEVEL: usize = 10;
         let render_time = r.start_time.elapsed();
 
-        // Adjust self.start_level to hit a render time target
+        // Adjust self.start_level to hit a render time target, with some
+        // hysteresis to avoid bouncing between levels
         if r.data.level() == self.start_level {
             if render_time > TARGET_RENDER_TIME && r.data.level() < MAX_LEVEL {
                 self.start_level += 1;
@@ -297,8 +298,8 @@ impl ViewData {
 
     /// Gets the image, kicking off new render jobs if needed
     ///
-    /// This should be called in the main GUI loop, or whenever `notify` has
-    /// pinged the main loop.
+    /// This should be called in the main GUI loop while visiting the editor
+    /// tabs, when images are needed.
     pub(crate) fn image<N: Notify>(
         &mut self,
         block: BlockIndex,
