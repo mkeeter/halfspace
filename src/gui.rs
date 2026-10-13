@@ -306,7 +306,7 @@ impl<'a, N: Notify> WorldView<'a, N> {
                         ERROR,
                         Some(
                             "block has errors and no previous \
-                                 image in this mode",
+                             image in this mode",
                         ),
                     )
                 };
