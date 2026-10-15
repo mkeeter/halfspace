@@ -262,8 +262,9 @@ impl ViewData {
 
         // Adjust self.start_level to hit a render time target, with some
         // hysteresis to avoid bouncing between levels
-        if r.level == self.start_level {
-            if render_time > TARGET_RENDER_TIME && r.level < MAX_LEVEL {
+        let level = r.image.level();
+        if level == self.start_level {
+            if render_time > TARGET_RENDER_TIME && level < MAX_LEVEL {
                 self.start_level += 1;
             } else if render_time < TARGET_RENDER_TIME * 3 / 4 {
                 self.start_level = self.start_level.saturating_sub(1);
@@ -271,33 +272,34 @@ impl ViewData {
         }
         if r.generation == self.generation {
             let _ = self.task.take();
-            if let Some(next) = r.level.checked_sub(1) {
+            if let Some(next) = level.checked_sub(1) {
                 self.spawn_render_task(
                     r.block,
-                    r.settings.clone(),
+                    r.image.settings(),
                     next,
                     rx,
                     render_pool,
                 );
             }
-            self.image = Some(match (r.settings, r.data) {
-                (
-                    RenderSettings::Voxel(settings),
-                    RenderImage::Voxel(image),
-                ) => ViewImage::Voxel {
+            self.image = Some(match r.image {
+                RenderImage::Voxel {
                     image,
                     settings,
-                    level: r.level,
-                },
-                (
-                    RenderSettings::Image(settings),
-                    RenderImage::Pixel(image),
-                ) => ViewImage::Pixel {
+                    level,
+                } => ViewImage::Voxel {
                     image,
                     settings,
-                    level: r.level,
+                    level,
                 },
-                _ => panic!("mismatch between settings and data"),
+                RenderImage::Pixel {
+                    image,
+                    settings,
+                    level,
+                } => ViewImage::Pixel {
+                    image,
+                    settings,
+                    level,
+                },
             });
         }
     }

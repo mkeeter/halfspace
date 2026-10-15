@@ -220,9 +220,7 @@ struct RenderViewReply {
     block: BlockIndex,
     generation: u64,
     start_time: Instant,
-    settings: render::RenderSettings,
-    level: usize,
-    data: render::RenderImage,
+    image: render::RenderImage,
 }
 
 /// Message sender for worker tasks

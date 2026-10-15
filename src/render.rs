@@ -60,8 +60,36 @@ use zerocopy::{FromBytes, IntoBytes};
 /// Rendered image to be sent back to the main thread
 #[derive(Clone)]
 pub enum RenderImage {
-    Pixel(PixelImage),
-    Voxel(RgbaImage),
+    Pixel {
+        image: PixelImage,
+        settings: ImageRenderSettings,
+        level: usize,
+    },
+    Voxel {
+        image: RgbaImage,
+        settings: VoxelRenderSettings,
+        level: usize,
+    },
+}
+
+impl RenderImage {
+    pub fn level(&self) -> usize {
+        match self {
+            RenderImage::Pixel { level, .. }
+            | RenderImage::Voxel { level, .. } => *level,
+        }
+    }
+
+    pub fn settings(&self) -> RenderSettings {
+        match self {
+            RenderImage::Pixel { settings, .. } => {
+                RenderSettings::Image(settings.clone())
+            }
+            RenderImage::Voxel { settings, .. } => {
+                RenderSettings::Voxel(settings.clone())
+            }
+        }
+    }
 }
 
 /// State representing an in-progress render
@@ -251,21 +279,23 @@ pub(crate) async fn render_worker<N: Notify>(
                 if task.cancel.is_cancelled() {
                     continue;
                 }
-                let data = match &task.settings {
-                    RenderSettings::Voxel(vs) => {
-                        RenderImage::Voxel(gpu.render_voxel(vs, level).await)
-                    }
-                    RenderSettings::Image(rs) => RenderImage::Pixel(
-                        gpu.render_pixel_f16(rs, level).await,
-                    ),
+                let image = match task.settings {
+                    RenderSettings::Voxel(settings) => RenderImage::Voxel {
+                        image: gpu.render_voxel(&settings, level).await,
+                        settings,
+                        level,
+                    },
+                    RenderSettings::Image(settings) => RenderImage::Pixel {
+                        image: gpu.render_pixel_f16(&settings, level).await,
+                        settings,
+                        level,
+                    },
                 };
                 reply.send(Message::RenderView(RenderViewReply {
                     block,
                     generation,
                     start_time,
-                    data,
-                    level,
-                    settings: task.settings,
+                    image,
                 }))
             }
             TaskKind::Export { reply } => {
