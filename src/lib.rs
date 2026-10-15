@@ -221,7 +221,8 @@ struct RenderViewReply {
     generation: u64,
     start_time: Instant,
     settings: render::RenderSettings,
-    data: view::ViewImage,
+    level: usize,
+    data: render::RenderImage,
 }
 
 /// Message sender for worker tasks

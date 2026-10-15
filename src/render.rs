@@ -48,10 +48,7 @@ use crate::{
     BlockIndex, Message, MessageGenSender, MessageSender, RenderViewReply,
     export::ExportError,
     platform::Notify,
-    view::{
-        Float16, PixelImage, RgbaImage, ViewCanvas, ViewImage, ViewMode2,
-        ViewMode3,
-    },
+    view::{Float16, PixelImage, RgbaImage, ViewCanvas, ViewMode2, ViewMode3},
     world::Scene,
 };
 
@@ -59,6 +56,13 @@ use egui_wgpu::wgpu;
 use fidget::raster::pixel::RawDistancePixel;
 use web_time::Instant;
 use zerocopy::{FromBytes, IntoBytes};
+
+/// Rendered image to be sent back to the main thread
+#[derive(Clone)]
+pub enum RenderImage {
+    Pixel(PixelImage),
+    Voxel(RgbaImage),
+}
 
 /// State representing an in-progress render
 ///
@@ -249,17 +253,18 @@ pub(crate) async fn render_worker<N: Notify>(
                 }
                 let data = match &task.settings {
                     RenderSettings::Voxel(vs) => {
-                        ViewImage::Voxel(gpu.render_voxel(vs, level).await)
+                        RenderImage::Voxel(gpu.render_voxel(vs, level).await)
                     }
-                    RenderSettings::Image(rs) => {
-                        ViewImage::Pixel(gpu.render_pixel_f16(rs, level).await)
-                    }
+                    RenderSettings::Image(rs) => RenderImage::Pixel(
+                        gpu.render_pixel_f16(rs, level).await,
+                    ),
                 };
                 reply.send(Message::RenderView(RenderViewReply {
                     block,
                     generation,
                     start_time,
                     data,
+                    level,
                     settings: task.settings,
                 }))
             }
@@ -601,13 +606,7 @@ impl GpuWorker {
         let image = mapped_image.image();
         let color = image.take().0.into();
 
-        RgbaImage {
-            view: *view,
-            size: *size,
-            level,
-            color,
-            mode: *mode,
-        }
+        RgbaImage { color }
     }
 
     async fn render_pixel_f16(
@@ -684,14 +683,7 @@ impl GpuWorker {
         let distance_img = mapped_distance_image.image();
         let distance = distance_img.take().0.into();
 
-        PixelImage {
-            distance,
-            view: vs.view,
-            size: vs.size,
-            level,
-            color,
-            mode: vs.mode,
-        }
+        PixelImage { distance, color }
     }
 
     async fn render_pixel_f32(

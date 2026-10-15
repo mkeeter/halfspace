@@ -3,6 +3,7 @@ use super::WgpuResources;
 
 use crate::{
     painters::cache::{CacheHit, WgpuTextureCache},
+    render::ImageRenderSettings,
     view::{Float16, PixelImage, ViewMode2},
     world::BlockIndex,
 };
@@ -33,6 +34,10 @@ pub struct WgpuSdfPainter {
 
     /// Image to render
     image: PixelImage,
+
+    /// Settings with which the image was rendered
+    settings: ImageRenderSettings,
+    level: usize,
 }
 
 impl WgpuSdfPainter {
@@ -43,6 +48,8 @@ impl WgpuSdfPainter {
     pub fn new(
         index: BlockIndex,
         image: PixelImage,
+        settings: ImageRenderSettings,
+        level: usize,
         size: fidget::render::ImageSize,
         view: fidget::gui::View2,
     ) -> Self {
@@ -51,6 +58,8 @@ impl WgpuSdfPainter {
             size,
             view,
             image,
+            settings,
+            level,
         }
     }
 }
@@ -308,6 +317,7 @@ impl SdfResources {
     fn get_data(
         &mut self,
         image: &PixelImage,
+        mode: ViewMode2,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         size: wgpu::Extent3d,
@@ -462,6 +472,7 @@ impl SdfResources {
 
         SdfData {
             image: image.clone(),
+            mode,
             distance_texture,
             color_texture,
             bind_group,
@@ -491,6 +502,9 @@ struct SdfData {
     /// Source image (used for pointer-based texture reuse)
     image: PixelImage,
 
+    /// Render mode
+    mode: ViewMode2,
+
     /// Distance texture (`f32`)
     distance_texture: wgpu::Texture,
 
@@ -515,22 +529,28 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
     ) -> Vec<wgpu::CommandBuffer> {
         let gr: &mut WgpuResources = resources.get_mut().unwrap();
 
-        let image_size = self.image.size;
-        let width = (image_size.width() / (1 << self.image.level)).max(1);
-        let height = (image_size.height() / (1 << self.image.level)).max(1);
+        let image_size = self.settings.size;
+        let width = (image_size.width() / (1 << self.level)).max(1);
+        let height = (image_size.height() / (1 << self.level)).max(1);
         let texture_size = wgpu::Extent3d {
             width,
             height,
             depth_or_array_layers: 1,
         };
         let transform = super::transform2(
-            self.image.view,
-            self.image.size,
+            self.settings.view,
+            self.settings.size,
             self.view,
             self.size,
         );
 
-        let data = gr.sdf.get_data(&self.image, device, queue, texture_size);
+        let data = gr.sdf.get_data(
+            &self.image,
+            self.settings.mode,
+            device,
+            queue,
+            texture_size,
+        );
 
         let uniforms = Uniforms {
             transform: transform.into(),
@@ -566,7 +586,7 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
         let data = &rs.sdf.bound_data[&self.index];
 
         rs.clear.paint(render_pass);
-        match data.image.mode {
+        match data.mode {
             ViewMode2::Sdf => rs.sdf.paint_sdf(render_pass, data),
             ViewMode2::Bitfield => rs.sdf.paint_bitfield(render_pass, data),
         }
