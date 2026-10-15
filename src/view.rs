@@ -3,8 +3,8 @@ use crate::{
     gui::{CAMERA, WARN},
     platform::Notify,
     render::{
-        ImageRenderSettings, RenderImage, RenderSettings, RenderTaskHandle,
-        RenderWorkerPool, VoxelRenderSettings,
+        Float16, ImageRenderSettings, RenderImage, RenderSettings,
+        RenderTaskHandle, RenderWorkerPool, VoxelRenderSettings,
     },
     state,
     state::ViewState,
@@ -13,6 +13,8 @@ use crate::{
 use std::sync::Arc;
 
 pub use state::{ViewMode2, ViewMode3};
+
+use egui_wgpu::wgpu;
 use web_time::Duration;
 
 /// State associated with a given view in the GUI
@@ -170,43 +172,36 @@ impl From<ViewState> for ViewCanvas {
     }
 }
 
-#[derive(
-    Copy,
-    Clone,
-    Debug,
-    zerocopy::IntoBytes,
-    zerocopy::FromBytes,
-    zerocopy::Immutable,
-)]
-pub struct Float16(pub u16);
-
-#[derive(Clone)]
-pub struct PixelImage {
-    pub distance: Arc<[Float16]>,
-    pub color: Option<Arc<[[u8; 4]]>>,
-}
-
-#[derive(Clone)]
-pub struct RgbaImage {
-    /// Pre-baked color
-    ///
-    /// This is greyscale for a heightmap rendering, or RGB for shaded
-    pub color: Arc<[u32]>,
-}
-
 /// Rendered image(s) to be drawn, along with the settings that generated it
+///
+/// The `Vec<T>` fields contain image data which should be copied to the
+/// `wgpu::Texture` field when rendered.  As part of copying, the `Vec` is
+/// emptied out; an empty `Vec` indicates that the texture is valid and can be
+/// used for rendering immediately.
 #[derive(Clone)]
 pub enum ViewImage {
     Pixel {
-        image: PixelImage,
+        distance: Vec<Float16>,
+        distance_tex: wgpu::Texture,
+        color: Option<ViewImageColor>,
         settings: ImageRenderSettings,
         level: usize,
     },
     Voxel {
-        image: RgbaImage,
+        /// Pre-baked color
+        ///
+        /// This is greyscale for a heightmap rendering, or RGB for shaded
+        color: Vec<u32>,
+        texture: wgpu::Texture,
         settings: VoxelRenderSettings,
         level: usize,
     },
+}
+
+#[derive(Clone)]
+pub struct ViewImageColor {
+    pub color: Vec<[u8; 4]>,
+    pub texture: wgpu::Texture,
 }
 
 impl ViewImage {
@@ -287,7 +282,8 @@ impl ViewData {
                     settings,
                     level,
                 } => ViewImage::Voxel {
-                    image,
+                    color: image.color,
+                    texture: todo!(),
                     settings,
                     level,
                 },
@@ -296,7 +292,12 @@ impl ViewData {
                     settings,
                     level,
                 } => ViewImage::Pixel {
-                    image,
+                    distance: image.distance,
+                    distance_tex: todo!(),
+                    color: image.color.map(|color| ViewImageColor {
+                        color,
+                        texture: todo!(),
+                    }),
                     settings,
                     level,
                 },
@@ -333,7 +334,7 @@ impl ViewData {
         scene: Scene,
         rx: &MessageReceiver<N>,
         render_pool: &RenderWorkerPool<N>,
-    ) -> Option<&ViewImage> {
+    ) -> Option<&mut ViewImage> {
         let settings = RenderSettings::from_canvas(&self.canvas, scene);
 
         // If the image settings have changed, then start a new render, unless
@@ -363,11 +364,11 @@ impl ViewData {
                 render_pool,
             );
         }
-        self.image.as_ref()
+        self.image.as_mut()
     }
 
-    pub fn prev_image(&self) -> Option<&ViewImage> {
-        self.image.as_ref()
+    pub fn prev_image(&mut self) -> Option<&mut ViewImage> {
+        self.image.as_mut()
     }
 }
 

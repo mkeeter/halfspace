@@ -48,12 +48,13 @@ use crate::{
     BlockIndex, Message, MessageGenSender, MessageSender, RenderViewReply,
     export::ExportError,
     platform::Notify,
-    view::{Float16, PixelImage, RgbaImage, ViewCanvas, ViewMode2, ViewMode3},
+    view::{ViewCanvas, ViewMode2, ViewMode3},
     world::Scene,
 };
 
 use egui_wgpu::wgpu;
 use fidget::raster::pixel::RawDistancePixel;
+use std::sync::Arc;
 use web_time::Instant;
 use zerocopy::{FromBytes, IntoBytes};
 
@@ -90,6 +91,27 @@ impl RenderImage {
             }
         }
     }
+}
+
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    zerocopy::IntoBytes,
+    zerocopy::FromBytes,
+    zerocopy::Immutable,
+)]
+pub struct Float16(pub u16);
+
+#[derive(Clone)]
+pub struct PixelImage {
+    pub distance: Vec<Float16>,
+    pub color: Option<Vec<[u8; 4]>>,
+}
+
+#[derive(Clone)]
+pub struct RgbaImage {
+    pub color: Vec<u32>,
 }
 
 /// State representing an in-progress render

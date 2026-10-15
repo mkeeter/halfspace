@@ -202,11 +202,13 @@ impl<'a, N: Notify> WorldView<'a, N> {
 
         // This is the magic that triggers the GPU callback.  We pick a render
         // mode based on the selected image's settings
-        match (&image, current_canvas) {
+        match (image, current_canvas) {
             // Both distance and bitfield images are drawn by the SDF painter
             (
                 ViewImage::Pixel {
-                    image,
+                    distance,
+                    distance_tex,
+                    color,
                     settings,
                     level,
                 },
@@ -216,7 +218,11 @@ impl<'a, N: Notify> WorldView<'a, N> {
                     rect,
                     crate::painters::WgpuSdfPainter::new(
                         index,
-                        image.clone(),
+                        std::mem::take(distance),
+                        distance_tex.clone(),
+                        color.as_mut().map(|v| {
+                            (std::mem::take(&mut v.color), v.texture.clone())
+                        }),
                         settings.clone(),
                         *level,
                         size,
@@ -227,7 +233,8 @@ impl<'a, N: Notify> WorldView<'a, N> {
             // Both heightmap and shaded images are drawn by the RGBA painter
             (
                 ViewImage::Voxel {
-                    image,
+                    color,
+                    texture,
                     settings,
                     level,
                 },
@@ -237,7 +244,8 @@ impl<'a, N: Notify> WorldView<'a, N> {
                     rect,
                     crate::painters::WgpuRgbaPainter::new(
                         index,
-                        image.clone(),
+                        std::mem::take(color),
+                        texture.clone(),
                         settings.clone(),
                         *level,
                         size,
