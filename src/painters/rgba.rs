@@ -1,6 +1,7 @@
 use super::WgpuResources;
 use crate::{
     painters::cache::{CacheHit, WgpuTextureCache},
+    render::VoxelRenderSettings,
     view::RgbaImage,
     world::BlockIndex,
 };
@@ -22,6 +23,10 @@ pub struct WgpuRgbaPainter {
 
     /// Image(s) to draw to the screen
     image: RgbaImage,
+
+    /// Settings with which the image was rendered
+    settings: VoxelRenderSettings,
+    level: usize,
 }
 
 /// Equivalent to the `struct Uniforms` in the WebGPU shader
@@ -39,12 +44,16 @@ impl WgpuRgbaPainter {
     pub fn new(
         index: BlockIndex,
         image: RgbaImage,
+        settings: VoxelRenderSettings,
+        level: usize,
         size: fidget::render::ImageSize,
         view: fidget::gui::View3,
     ) -> Self {
         Self {
             index,
             image,
+            settings,
+            level,
             size,
             view,
         }
@@ -62,9 +71,9 @@ impl egui_wgpu::CallbackTrait for WgpuRgbaPainter {
     ) -> Vec<wgpu::CommandBuffer> {
         let gr: &mut WgpuResources = resources.get_mut().unwrap();
 
-        let image_size = self.image.size;
-        let width = (image_size.width() / (1 << self.image.level)).max(1);
-        let height = (image_size.height() / (1 << self.image.level)).max(1);
+        let image_size = self.settings.size;
+        let width = (image_size.width() / (1 << self.level)).max(1);
+        let height = (image_size.height() / (1 << self.level)).max(1);
         let texture_size = wgpu::Extent3d {
             width,
             height,
@@ -72,8 +81,8 @@ impl egui_wgpu::CallbackTrait for WgpuRgbaPainter {
         };
 
         let transform = super::transform3(
-            self.image.view,
-            self.image.size,
+            self.settings.view,
+            self.settings.size,
             self.view,
             self.size,
         );

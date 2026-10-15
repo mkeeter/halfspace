@@ -2,7 +2,10 @@ use crate::{
     BlockIndex, MessageReceiver, RenderViewReply, ViewResponse,
     gui::{CAMERA, WARN},
     platform::Notify,
-    render::{RenderSettings, RenderTaskHandle, RenderWorkerPool},
+    render::{
+        ImageRenderSettings, RenderImage, RenderSettings, RenderTaskHandle,
+        RenderWorkerPool, VoxelRenderSettings,
+    },
     state,
     state::ViewState,
     world::Scene,
@@ -24,7 +27,7 @@ pub struct ViewData {
     pub canvas: ViewCanvas,
 
     /// Current image
-    image: Option<(RenderSettings, ViewImage)>,
+    image: Option<ViewImage>,
 
     /// Initial render depth, used to render faster
     start_level: usize,
@@ -181,10 +184,6 @@ pub struct Float16(pub u16);
 pub struct PixelImage {
     pub distance: Arc<[Float16]>,
     pub color: Option<Arc<[[u8; 4]]>>,
-    pub view: fidget::gui::View2,
-    pub size: fidget::render::ImageSize,
-    pub level: usize,
-    pub mode: ViewMode2,
 }
 
 #[derive(Clone)]
@@ -193,17 +192,34 @@ pub struct RgbaImage {
     ///
     /// This is greyscale for a heightmap rendering, or RGB for shaded
     pub color: Arc<[u32]>,
-    pub view: fidget::gui::View3,
-    pub size: fidget::render::VoxelSize,
-    pub level: usize,
-    pub mode: ViewMode3,
 }
 
 /// Rendered image(s) to be drawn, along with the settings that generated it
 #[derive(Clone)]
 pub enum ViewImage {
-    Pixel(PixelImage),
-    Voxel(RgbaImage),
+    Pixel {
+        image: PixelImage,
+        settings: ImageRenderSettings,
+        level: usize,
+    },
+    Voxel {
+        image: RgbaImage,
+        settings: VoxelRenderSettings,
+        level: usize,
+    },
+}
+
+impl ViewImage {
+    fn settings(&self) -> RenderSettings {
+        match self {
+            ViewImage::Pixel { settings, .. } => {
+                RenderSettings::Image(settings.clone())
+            }
+            ViewImage::Voxel { settings, .. } => {
+                RenderSettings::Voxel(settings.clone())
+            }
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -212,15 +228,6 @@ pub enum ViewCanvasType {
     Sdf,
     Heightmap,
     Shaded,
-}
-
-impl ViewImage {
-    pub fn level(&self) -> usize {
-        match self {
-            ViewImage::Pixel(PixelImage { level, .. })
-            | ViewImage::Voxel(RgbaImage { level, .. }) => *level,
-        }
-    }
 }
 
 impl ViewData {
@@ -255,8 +262,9 @@ impl ViewData {
 
         // Adjust self.start_level to hit a render time target, with some
         // hysteresis to avoid bouncing between levels
-        if r.data.level() == self.start_level {
-            if render_time > TARGET_RENDER_TIME && r.data.level() < MAX_LEVEL {
+        let level = r.image.level();
+        if level == self.start_level {
+            if render_time > TARGET_RENDER_TIME && level < MAX_LEVEL {
                 self.start_level += 1;
             } else if render_time < TARGET_RENDER_TIME * 3 / 4 {
                 self.start_level = self.start_level.saturating_sub(1);
@@ -264,16 +272,35 @@ impl ViewData {
         }
         if r.generation == self.generation {
             let _ = self.task.take();
-            if let Some(next) = r.data.level().checked_sub(1) {
+            if let Some(next) = level.checked_sub(1) {
                 self.spawn_render_task(
                     r.block,
-                    r.settings.clone(),
+                    r.image.settings(),
                     next,
                     rx,
                     render_pool,
                 );
             }
-            self.image = Some((r.settings, r.data));
+            self.image = Some(match r.image {
+                RenderImage::Voxel {
+                    image,
+                    settings,
+                    level,
+                } => ViewImage::Voxel {
+                    image,
+                    settings,
+                    level,
+                },
+                RenderImage::Pixel {
+                    image,
+                    settings,
+                    level,
+                } => ViewImage::Pixel {
+                    image,
+                    settings,
+                    level,
+                },
+            });
         }
     }
 
@@ -326,7 +353,7 @@ impl ViewData {
             && self
                 .image
                 .as_ref()
-                .is_none_or(|(prev_settings, _)| &settings != prev_settings)
+                .is_none_or(|image| settings != image.settings())
         {
             self.spawn_render_task(
                 block,
@@ -336,11 +363,11 @@ impl ViewData {
                 render_pool,
             );
         }
-        self.image.as_ref().map(|(_, image)| image)
+        self.image.as_ref()
     }
 
     pub fn prev_image(&self) -> Option<&ViewImage> {
-        self.image.as_ref().map(|(_, image)| image)
+        self.image.as_ref()
     }
 }
 

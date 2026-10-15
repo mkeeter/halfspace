@@ -6,10 +6,7 @@ use crate::{
     BlockResponse, MessageReceiver, ViewResponse, export,
     platform::Notify,
     render,
-    view::{
-        self, PixelImage, RgbaImage, ViewCanvas, ViewData, ViewImage,
-        ViewMode2, ViewMode3,
-    },
+    view::{self, ViewCanvas, ViewData, ViewImage},
     world::{
         Block, BlockError, BlockIndex, IoValue, ScriptBlock, ValueBlock, World,
     },
@@ -206,45 +203,22 @@ impl<'a, N: Notify> WorldView<'a, N> {
         // This is the magic that triggers the GPU callback.  We pick a render
         // mode based on the selected image's settings
         match (&image, current_canvas) {
+            // Both distance and bitfield images are drawn by the SDF painter
             (
-                ViewImage::Pixel(
-                    image @ PixelImage {
-                        mode: ViewMode2::Bitfield,
-                        ..
-                    },
-                ),
-                ViewCanvas::Canvas2 {
-                    mode: ViewMode2::Bitfield,
-                    canvas,
+                ViewImage::Pixel {
+                    image,
+                    settings,
+                    level,
                 },
-            ) => {
+                ViewCanvas::Canvas2 { mode, canvas },
+            ) if settings.mode == mode => {
                 ui.painter().add(egui_wgpu::Callback::new_paint_callback(
                     rect,
                     crate::painters::WgpuSdfPainter::new(
                         index,
                         image.clone(),
-                        size,
-                        canvas.view(),
-                    ),
-                ));
-            }
-            (
-                ViewImage::Pixel(
-                    image @ PixelImage {
-                        mode: ViewMode2::Sdf,
-                        ..
-                    },
-                ),
-                ViewCanvas::Canvas2 {
-                    mode: ViewMode2::Sdf,
-                    canvas,
-                },
-            ) => {
-                ui.painter().add(egui_wgpu::Callback::new_paint_callback(
-                    rect,
-                    crate::painters::WgpuSdfPainter::new(
-                        index,
-                        image.clone(),
+                        settings.clone(),
+                        *level,
                         size,
                         canvas.view(),
                     ),
@@ -252,36 +226,20 @@ impl<'a, N: Notify> WorldView<'a, N> {
             }
             // Both heightmap and shaded images are drawn by the RGBA painter
             (
-                ViewImage::Voxel(
-                    image @ RgbaImage {
-                        mode: ViewMode3::Heightmap,
-                        ..
-                    },
-                ),
-                ViewCanvas::Canvas3 {
-                    mode: ViewMode3::Heightmap,
-                    canvas,
-                    ..
+                ViewImage::Voxel {
+                    image,
+                    settings,
+                    level,
                 },
-            )
-            | (
-                ViewImage::Voxel(
-                    image @ RgbaImage {
-                        mode: ViewMode3::Shaded,
-                        ..
-                    },
-                ),
-                ViewCanvas::Canvas3 {
-                    mode: ViewMode3::Shaded,
-                    canvas,
-                    ..
-                },
-            ) => {
+                ViewCanvas::Canvas3 { mode, canvas, .. },
+            ) if settings.mode == mode => {
                 ui.painter().add(egui_wgpu::Callback::new_paint_callback(
                     rect,
                     crate::painters::WgpuRgbaPainter::new(
                         index,
                         image.clone(),
+                        settings.clone(),
+                        *level,
                         size,
                         canvas.view(),
                     ),
