@@ -38,6 +38,24 @@ pub struct ViewData {
     generation: u64,
 }
 
+/// Tuple of data to be loaded and its corresponding WGPU texture
+pub struct TextureData<T> {
+    /// Image data to copy to the texture
+    ///
+    /// If this is empty, then the texture is presumed to already be populated
+    pub data: Vec<T>,
+    pub texture: wgpu::Texture,
+}
+
+impl<T> TextureData<T> {
+    pub fn take(&mut self) -> Self {
+        TextureData {
+            data: std::mem::take(&mut self.data),
+            texture: self.texture.clone(),
+        }
+    }
+}
+
 impl ViewData {
     /// Returns a characteristic transform matrix for this view
     ///
@@ -178,12 +196,10 @@ impl From<ViewState> for ViewCanvas {
 /// `wgpu::Texture` field when rendered.  As part of copying, the `Vec` is
 /// emptied out; an empty `Vec` indicates that the texture is valid and can be
 /// used for rendering immediately.
-#[derive(Clone)]
 pub enum ViewImage {
     Pixel {
-        distance: Vec<Float16>,
-        distance_tex: wgpu::Texture,
-        color: Option<ViewImageColor>,
+        distance: TextureData<Float16>,
+        color: Option<TextureData<[u8; 4]>>,
         settings: ImageRenderSettings,
         level: usize,
     },
@@ -191,17 +207,10 @@ pub enum ViewImage {
         /// Pre-baked color
         ///
         /// This is greyscale for a heightmap rendering, or RGB for shaded
-        color: Vec<u32>,
-        texture: wgpu::Texture,
+        color: TextureData<u32>,
         settings: VoxelRenderSettings,
         level: usize,
     },
-}
-
-#[derive(Clone)]
-pub struct ViewImageColor {
-    pub color: Vec<[u8; 4]>,
-    pub texture: wgpu::Texture,
 }
 
 impl ViewImage {
@@ -282,8 +291,10 @@ impl ViewData {
                     settings,
                     level,
                 } => ViewImage::Voxel {
-                    color: image.color,
-                    texture: todo!(),
+                    color: TextureData {
+                        data: image.color,
+                        texture: todo!(),
+                    },
                     settings,
                     level,
                 },
@@ -292,10 +303,12 @@ impl ViewData {
                     settings,
                     level,
                 } => ViewImage::Pixel {
-                    distance: image.distance,
-                    distance_tex: todo!(),
-                    color: image.color.map(|color| ViewImageColor {
-                        color,
+                    distance: TextureData {
+                        data: image.distance,
+                        texture: todo!(),
+                    },
+                    color: image.color.map(|data| TextureData {
+                        data,
                         texture: todo!(),
                     }),
                     settings,

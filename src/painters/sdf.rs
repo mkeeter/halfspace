@@ -2,7 +2,9 @@
 use super::WgpuResources;
 
 use crate::{
-    render::Float16, render::ImageRenderSettings, view::ViewMode2,
+    render::Float16,
+    render::ImageRenderSettings,
+    view::{TextureData, ViewMode2},
     world::BlockIndex,
 };
 use eframe::{
@@ -30,10 +32,8 @@ pub struct WgpuSdfPainter {
     /// Index of the block being rendered
     index: BlockIndex,
 
-    distance_data: Vec<Float16>,
-    distance_texture: wgpu::Texture,
-
-    color: Option<(Vec<[u8; 4]>, wgpu::Texture)>,
+    distance: TextureData<Float16>,
+    color: Option<TextureData<[u8; 4]>>,
 
     /// Settings with which the image was rendered
     settings: ImageRenderSettings,
@@ -47,9 +47,8 @@ impl WgpuSdfPainter {
     /// quad; the `image` contains its own size and view transforms.
     pub fn new(
         index: BlockIndex,
-        distance_data: Vec<Float16>,
-        distance_texture: wgpu::Texture,
-        color: Option<(Vec<[u8; 4]>, wgpu::Texture)>,
+        distance: TextureData<Float16>,
+        color: Option<TextureData<[u8; 4]>>,
         settings: ImageRenderSettings,
         level: usize,
         size: fidget::render::ImageSize,
@@ -59,8 +58,7 @@ impl WgpuSdfPainter {
             index,
             size,
             view,
-            distance_data,
-            distance_texture,
+            distance,
             color,
             settings,
             level,
@@ -308,22 +306,22 @@ impl SdfResources {
 
     fn get_data(
         &mut self,
-        distance: (&[Float16], wgpu::Texture),
-        color: Option<(&[[u8; 4]], wgpu::Texture)>,
+        distance: &TextureData<Float16>,
+        color: Option<&TextureData<[u8; 4]>>,
         mode: ViewMode2,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         size: wgpu::Extent3d,
     ) -> SdfData {
-        if !distance.0.is_empty() {
+        if !distance.data.is_empty() {
             queue.write_texture(
                 wgpu::TexelCopyTextureInfo {
-                    texture: &distance.1,
+                    texture: &distance.texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d::ZERO,
                     aspect: wgpu::TextureAspect::All,
                 },
-                distance.0.as_bytes(),
+                distance.data.as_bytes(),
                 wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(2 * size.width),
@@ -332,7 +330,8 @@ impl SdfResources {
                 size,
             );
         }
-        let distance_texture_view = distance.1.create_view(&Default::default());
+        let distance_texture_view =
+            distance.texture.create_view(&Default::default());
         let distance_sampler =
             device.create_sampler(&wgpu::SamplerDescriptor {
                 label: Some("sdf distance sampler"),
@@ -348,16 +347,16 @@ impl SdfResources {
         // If the image has a color channel, then get a color texture;
         // otherwise, just return the dummy texture (which will be unused in the
         // shader itself).
-        let color_texture = if let Some((color, tex)) = color {
-            if !color.is_empty() {
+        let color_texture = if let Some(color) = color {
+            if !color.data.is_empty() {
                 queue.write_texture(
                     wgpu::TexelCopyTextureInfo {
-                        texture: &tex,
+                        texture: &color.texture,
                         mip_level: 0,
                         origin: wgpu::Origin3d::ZERO,
                         aspect: wgpu::TextureAspect::All,
                     },
-                    color.as_bytes(),
+                    color.data.as_bytes(),
                     wgpu::TexelCopyBufferLayout {
                         offset: 0,
                         bytes_per_row: Some(4 * size.width),
@@ -366,7 +365,7 @@ impl SdfResources {
                     size,
                 );
             }
-            tex.clone()
+            color.texture.clone()
         } else {
             self.dummy_color_texture.clone()
         };
@@ -487,8 +486,8 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
         );
 
         let data = gr.sdf.get_data(
-            (&self.distance_data, self.distance_texture.clone()),
-            self.color.as_ref().map(|(c, t)| (c.as_slice(), t.clone())),
+            &self.distance,
+            self.color.as_ref(),
             self.settings.mode,
             device,
             queue,

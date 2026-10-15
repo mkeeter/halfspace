@@ -6,7 +6,7 @@ use crate::{
     BlockResponse, MessageReceiver, ViewResponse, export,
     platform::Notify,
     render,
-    view::{self, ViewCanvas, ViewData, ViewImage},
+    view::{self, TextureData, ViewCanvas, ViewData, ViewImage},
     world::{
         Block, BlockError, BlockIndex, IoValue, ScriptBlock, ValueBlock, World,
     },
@@ -207,7 +207,6 @@ impl<'a, N: Notify> WorldView<'a, N> {
             (
                 ViewImage::Pixel {
                     distance,
-                    distance_tex,
                     color,
                     settings,
                     level,
@@ -218,11 +217,8 @@ impl<'a, N: Notify> WorldView<'a, N> {
                     rect,
                     crate::painters::WgpuSdfPainter::new(
                         index,
-                        std::mem::take(distance),
-                        distance_tex.clone(),
-                        color.as_mut().map(|v| {
-                            (std::mem::take(&mut v.color), v.texture.clone())
-                        }),
+                        distance.take(),
+                        color.as_mut().map(TextureData::take),
                         settings.clone(),
                         *level,
                         size,
@@ -234,7 +230,6 @@ impl<'a, N: Notify> WorldView<'a, N> {
             (
                 ViewImage::Voxel {
                     color,
-                    texture,
                     settings,
                     level,
                 },
@@ -244,8 +239,7 @@ impl<'a, N: Notify> WorldView<'a, N> {
                     rect,
                     crate::painters::WgpuRgbaPainter::new(
                         index,
-                        std::mem::take(color),
-                        texture.clone(),
+                        color.take(),
                         settings.clone(),
                         *level,
                         size,

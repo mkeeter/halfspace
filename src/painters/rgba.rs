@@ -1,5 +1,7 @@
 use super::WgpuResources;
-use crate::{render::VoxelRenderSettings, world::BlockIndex};
+use crate::{
+    render::VoxelRenderSettings, view::TextureData, world::BlockIndex,
+};
 use eframe::{
     egui,
     egui_wgpu::{self, wgpu},
@@ -19,10 +21,7 @@ pub struct WgpuRgbaPainter {
     /// Image data to copy to the texture
     ///
     /// If this is empty, then the texture is presumed to already be populated
-    data: Vec<u32>,
-
-    /// Texture to draw to the screen
-    texture: wgpu::Texture,
+    data: TextureData<u32>,
 
     /// Settings with which the image was rendered
     settings: VoxelRenderSettings,
@@ -43,8 +42,7 @@ impl WgpuRgbaPainter {
     /// quad; the `image` contains its own size and view transforms.
     pub fn new(
         index: BlockIndex,
-        data: Vec<u32>,
-        texture: wgpu::Texture,
+        data: TextureData<u32>,
         settings: VoxelRenderSettings,
         level: usize,
         size: fidget::render::ImageSize,
@@ -53,7 +51,6 @@ impl WgpuRgbaPainter {
         Self {
             index,
             data,
-            texture,
             settings,
             level,
             size,
@@ -90,13 +87,7 @@ impl egui_wgpu::CallbackTrait for WgpuRgbaPainter {
         );
 
         // Write the image texture
-        let data = gr.rgba.get_data(
-            &self.data,
-            self.texture.clone(),
-            device,
-            queue,
-            texture_size,
-        );
+        let data = gr.rgba.get_data(&self.data, device, queue, texture_size);
 
         let uniforms = Uniforms {
             transform: transform.into(),
@@ -293,13 +284,12 @@ impl RgbaResources {
 
     fn get_data(
         &mut self,
-        data: &[u32],
-        rgba_texture: wgpu::Texture,
+        data: &TextureData<u32>,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         size: wgpu::Extent3d,
     ) -> RgbaData {
-        let rgba_texture_view = rgba_texture.create_view(&Default::default());
+        let rgba_texture_view = data.texture.create_view(&Default::default());
 
         // Create the uniform buffer for config data
         let uniform_buffer = self.config_buf_pool.pop().unwrap_or_else(|| {
@@ -334,15 +324,15 @@ impl RgbaResources {
                 },
             ],
         });
-        if !data.is_empty() {
+        if !data.data.is_empty() {
             queue.write_texture(
                 wgpu::TexelCopyTextureInfo {
-                    texture: &rgba_texture,
+                    texture: &data.texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d::ZERO,
                     aspect: wgpu::TextureAspect::All,
                 },
-                data.as_bytes(),
+                data.data.as_bytes(),
                 wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(4 * size.width),
@@ -353,7 +343,7 @@ impl RgbaResources {
         }
 
         RgbaData {
-            rgba_texture,
+            rgba_texture: data.texture.clone(),
             uniform_buffer,
             bind_group,
         }
