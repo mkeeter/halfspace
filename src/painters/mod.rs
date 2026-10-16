@@ -24,8 +24,8 @@ mod clear;
 mod rgba;
 mod sdf;
 
-pub use rgba::WgpuRgbaPainter;
-pub use sdf::WgpuSdfPainter;
+pub use rgba::{Uniforms as RgbaUniforms, WgpuRgbaPainter};
+pub use sdf::{Uniforms as SdfUniforms, WgpuSdfPainter};
 
 /// Universal basic GPU resources
 ///

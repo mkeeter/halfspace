@@ -213,6 +213,7 @@ impl<'a, N: Notify> WorldView<'a, N> {
                     distance,
                     color,
                     settings,
+                    uniform_buffer,
                     level,
                 },
                 ViewCanvas::Canvas2 { mode, canvas },
@@ -223,6 +224,7 @@ impl<'a, N: Notify> WorldView<'a, N> {
                         index,
                         distance.take(),
                         color.as_mut().map(TextureData::take),
+                        uniform_buffer.clone(),
                         settings.clone(),
                         *level,
                         size,
@@ -234,6 +236,7 @@ impl<'a, N: Notify> WorldView<'a, N> {
             (
                 ViewImage::Voxel {
                     color,
+                    uniform_buffer,
                     settings,
                     level,
                 },
@@ -244,6 +247,7 @@ impl<'a, N: Notify> WorldView<'a, N> {
                     crate::painters::WgpuRgbaPainter::new(
                         index,
                         color.take(),
+                        uniform_buffer.clone(),
                         settings.clone(),
                         *level,
                         size,

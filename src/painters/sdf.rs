@@ -17,7 +17,7 @@ use zerocopy::IntoBytes;
 /// Equivalent to the `struct Uniforms` in the WebGPU shader
 #[repr(C)]
 #[derive(Copy, Clone, zerocopy::IntoBytes, zerocopy::Immutable)]
-struct Uniforms {
+pub struct Uniforms {
     transform: [[f32; 4]; 4],
     has_color: u32,
     _pad: [u32; 3],
@@ -34,6 +34,7 @@ pub struct WgpuSdfPainter {
 
     distance: TextureData<Float16>,
     color: Option<TextureData<[u8; 4]>>,
+    uniform_buffer: wgpu::Buffer,
 
     /// Settings with which the image was rendered
     settings: ImageRenderSettings,
@@ -49,6 +50,7 @@ impl WgpuSdfPainter {
         index: BlockIndex,
         distance: TextureData<Float16>,
         color: Option<TextureData<[u8; 4]>>,
+        uniform_buffer: wgpu::Buffer,
         settings: ImageRenderSettings,
         level: usize,
         size: fidget::render::ImageSize,
@@ -58,6 +60,7 @@ impl WgpuSdfPainter {
             index,
             size,
             view,
+            uniform_buffer,
             distance,
             color,
             settings,
@@ -78,9 +81,6 @@ pub(crate) struct SdfResources {
 
     /// Empty texture used when we don't have a color channel
     dummy_color_texture: wgpu::Texture,
-
-    /// Pool of buffers which are sized to fit a [`Uniforms`] object
-    config_buf_pool: Vec<wgpu::Buffer>,
 }
 
 impl SdfResources {
@@ -288,26 +288,18 @@ impl SdfResources {
             bind_group_layout,
             bound_data: HashMap::new(),
             dummy_color_texture,
-            config_buf_pool: vec![],
         }
     }
 
     pub fn reset(&mut self) {
-        // Empty out items in the buffer cache that weren't used last frame
-        // (anything used last frame is in bound_data instead)
-        self.config_buf_pool.clear();
-
-        // Move bound data into the caches, for possible reuse.  If it's not
-        // used in the upcoming frame, then it's cleared next frame (above).
-        for (_index, data) in self.bound_data.drain() {
-            self.config_buf_pool.push(data.uniform_buffer);
-        }
+        self.bound_data.clear();
     }
 
     fn get_data(
         &mut self,
         distance: &TextureData<Float16>,
         color: Option<&TextureData<[u8; 4]>>,
+        uniform_buffer: &wgpu::Buffer,
         mode: ViewMode2,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -382,16 +374,6 @@ impl SdfResources {
             ..Default::default()
         });
 
-        let uniform_buffer = self.config_buf_pool.pop().unwrap_or_else(|| {
-            device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("uniform buffer"),
-                size: std::mem::size_of::<Uniforms>() as u64,
-                mapped_at_creation: false,
-                usage: wgpu::BufferUsages::UNIFORM
-                    | wgpu::BufferUsages::COPY_DST,
-            })
-        });
-
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("sdf bind group"),
             layout: &self.bind_group_layout,
@@ -423,11 +405,7 @@ impl SdfResources {
             ],
         });
 
-        SdfData {
-            mode,
-            bind_group,
-            uniform_buffer,
-        }
+        SdfData { mode, bind_group }
     }
 
     fn paint_sdf(&self, render_pass: &mut wgpu::RenderPass, sdf: &SdfData) {
@@ -451,9 +429,6 @@ impl SdfResources {
 struct SdfData {
     /// Render mode
     mode: ViewMode2,
-
-    /// Uniform buffer
-    uniform_buffer: wgpu::Buffer,
 
     /// Bind group for SDF rendering
     bind_group: wgpu::BindGroup,
@@ -488,6 +463,7 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
         let data = gr.sdf.get_data(
             &self.distance,
             self.color.as_ref(),
+            &self.uniform_buffer,
             self.settings.mode,
             device,
             queue,
@@ -502,7 +478,7 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
         {
             let mut writer = queue
                 .write_buffer_with(
-                    &data.uniform_buffer,
+                    &self.uniform_buffer,
                     0,
                     (std::mem::size_of_val(&uniforms) as u64)
                         .try_into()
