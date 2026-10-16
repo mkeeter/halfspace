@@ -201,7 +201,11 @@ impl<'a, N: Notify> WorldView<'a, N> {
         };
 
         // This is the magic that triggers the GPU callback.  We pick a render
-        // mode based on the selected image's settings
+        // mode based on the selected image's settings.  Note that if we're
+        // doing a discard pass (not sure why we would be!), then we don't build
+        // the WGPU painter objects, because they consume the CPU side of
+        // the texture data.
+        let will_discard = ui.ctx().will_discard();
         match (image, current_canvas) {
             // Both distance and bitfield images are drawn by the SDF painter
             (
@@ -212,7 +216,7 @@ impl<'a, N: Notify> WorldView<'a, N> {
                     level,
                 },
                 ViewCanvas::Canvas2 { mode, canvas },
-            ) if settings.mode == mode => {
+            ) if settings.mode == mode && !will_discard => {
                 ui.painter().add(egui_wgpu::Callback::new_paint_callback(
                     rect,
                     crate::painters::WgpuSdfPainter::new(
@@ -234,7 +238,7 @@ impl<'a, N: Notify> WorldView<'a, N> {
                     level,
                 },
                 ViewCanvas::Canvas3 { mode, canvas, .. },
-            ) if settings.mode == mode => {
+            ) if settings.mode == mode && !will_discard => {
                 ui.painter().add(egui_wgpu::Callback::new_paint_callback(
                     rect,
                     crate::painters::WgpuRgbaPainter::new(
