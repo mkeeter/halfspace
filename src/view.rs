@@ -10,7 +10,6 @@ use crate::{
     state::ViewState,
     world::Scene,
 };
-use std::sync::Arc;
 
 pub use state::{ViewMode2, ViewMode3};
 
@@ -259,6 +258,7 @@ impl ViewData {
         r: RenderViewReply,
         rx: &MessageReceiver<N>,
         render_pool: &RenderWorkerPool<N>,
+        device: &wgpu::Device,
     ) {
         const TARGET_RENDER_TIME: Duration = Duration::from_millis(33);
         const MAX_LEVEL: usize = 10;
@@ -285,35 +285,116 @@ impl ViewData {
                     render_pool,
                 );
             }
+            let prev_image = self.image.take();
             self.image = Some(match r.image {
                 RenderImage::Voxel {
                     image,
+                    size,
                     settings,
                     level,
-                } => ViewImage::Voxel {
-                    color: TextureData {
-                        data: image.color,
-                        texture: todo!(),
-                    },
-                    settings,
-                    level,
-                },
+                } => {
+                    let texture_size = wgpu::Extent3d {
+                        width: size.width(),
+                        height: size.height(),
+                        depth_or_array_layers: 1,
+                    };
+                    let texture = if let Some(ViewImage::Voxel {
+                        color, ..
+                    }) = prev_image
+                        && color.texture.size() == texture_size
+                    {
+                        color.texture
+                    } else {
+                        device.create_texture(&wgpu::TextureDescriptor {
+                            label: Some("rgba texture"),
+                            size: texture_size,
+                            mip_level_count: 1,
+                            sample_count: 1,
+                            dimension: wgpu::TextureDimension::D2,
+                            format: wgpu::TextureFormat::Rgba8Unorm,
+                            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                                | wgpu::TextureUsages::COPY_DST,
+                            view_formats: &[],
+                        })
+                    };
+                    ViewImage::Voxel {
+                        color: TextureData {
+                            data: image.color,
+                            texture,
+                        },
+                        settings,
+                        level,
+                    }
+                }
                 RenderImage::Pixel {
                     image,
+                    size,
                     settings,
                     level,
-                } => ViewImage::Pixel {
-                    distance: TextureData {
-                        data: image.distance,
-                        texture: todo!(),
-                    },
-                    color: image.color.map(|data| TextureData {
-                        data,
-                        texture: todo!(),
-                    }),
-                    settings,
-                    level,
-                },
+                } => {
+                    // Reuse textures if possible
+                    let texture_size = wgpu::Extent3d {
+                        width: size.width(),
+                        height: size.height(),
+                        depth_or_array_layers: 1,
+                    };
+                    let (distance_tex, mut color_tex) =
+                        if let Some(ViewImage::Pixel {
+                            distance, color, ..
+                        }) = prev_image
+                            && distance.texture.size() == texture_size
+                        {
+                            (distance.texture, color.map(|c| c.texture))
+                        } else {
+                            (
+                                device.create_texture(
+                                    &wgpu::TextureDescriptor {
+                                        label: Some("sdf distance texture"),
+                                        size: texture_size,
+                                        mip_level_count: 1,
+                                        sample_count: 1,
+                                        dimension: wgpu::TextureDimension::D2,
+                                        format: wgpu::TextureFormat::R16Float,
+                                        usage:
+                                            wgpu::TextureUsages::TEXTURE_BINDING
+                                                | wgpu::TextureUsages::COPY_DST,
+                                        view_formats: &[],
+                                    },
+                                ),
+                                None,
+                            )
+                        };
+                    if image.color.is_none() {
+                        color_tex = None;
+                    } else if color_tex.is_none() {
+                        color_tex = Some(device.create_texture(
+                            &wgpu::TextureDescriptor {
+                                label: Some("sdf color texture"),
+                                size: texture_size,
+                                mip_level_count: 1,
+                                sample_count: 1,
+                                dimension: wgpu::TextureDimension::D2,
+                                format: wgpu::TextureFormat::Rgba8Unorm,
+                                usage: wgpu::TextureUsages::TEXTURE_BINDING
+                                    | wgpu::TextureUsages::COPY_DST,
+                                view_formats: &[],
+                            },
+                        ));
+                    }
+
+                    ViewImage::Pixel {
+                        distance: TextureData {
+                            data: image.distance,
+                            texture: distance_tex,
+                        },
+                        color: image.color.map(|data| TextureData {
+                            data,
+                            texture: color_tex.unwrap(),
+                        }),
+                        settings,
+                        level,
+                    }
+                }
             });
         }
     }

@@ -343,7 +343,6 @@ impl RgbaResources {
         }
 
         RgbaData {
-            rgba_texture: data.texture.clone(),
             uniform_buffer,
             bind_group,
         }
@@ -359,12 +358,6 @@ impl RgbaResources {
 
 /// Resources used to render a single shaded image
 struct RgbaData {
-    /// RGBA texture to render
-    ///
-    /// This lives in [`ViewImage::distance_tex`] and is copied here for
-    /// integration into the `egui` rendering pipeline.
-    rgba_texture: wgpu::Texture,
-
     /// Uniform buffer
     uniform_buffer: wgpu::Buffer,
 
