@@ -61,7 +61,6 @@ use web_time::Instant;
 use zerocopy::{FromBytes, IntoBytes};
 
 /// Rendered image to be sent back to the main thread
-#[derive(Clone)]
 pub enum RenderImage {
     Pixel {
         image: PixelImage,
