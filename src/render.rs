@@ -65,20 +65,24 @@ pub enum RenderImage {
     Pixel {
         image: PixelImage,
         settings: ImageRenderSettings,
-        level: usize,
     },
     Voxel {
         image: RgbaImage,
         settings: VoxelRenderSettings,
-        level: usize,
     },
 }
 
 impl RenderImage {
     pub fn level(&self) -> usize {
         match self {
-            RenderImage::Pixel { level, .. }
-            | RenderImage::Voxel { level, .. } => *level,
+            RenderImage::Pixel {
+                settings: ImageRenderSettings { level, .. },
+                ..
+            }
+            | RenderImage::Voxel {
+                settings: VoxelRenderSettings { level, .. },
+                ..
+            } => *level,
         }
     }
 
@@ -123,7 +127,6 @@ pub struct RgbaImage {
 /// the worker pool.
 pub struct RenderTaskHandle {
     settings: RenderSettings,
-    level: usize,
     cancel: fidget::render::CancelToken,
 }
 
@@ -149,7 +152,6 @@ impl<N: Notify> RenderWorkerPool<N> {
         block: BlockIndex,
         generation: u64,
         settings: RenderSettings,
-        level: usize,
         tx: MessageGenSender<N>,
     ) -> RenderTaskHandle {
         let cancel = fidget::render::CancelToken::new();
@@ -158,7 +160,6 @@ impl<N: Notify> RenderWorkerPool<N> {
             kind: TaskKind::Display {
                 block,
                 generation,
-                level,
                 start_time,
                 reply: tx,
             },
@@ -166,11 +167,7 @@ impl<N: Notify> RenderWorkerPool<N> {
             cancel: cancel.clone(),
         };
         self.tx.send(task).expect("all render threads stopped");
-        RenderTaskHandle {
-            settings,
-            cancel,
-            level,
-        }
+        RenderTaskHandle { settings, cancel }
     }
 
     /// Begins a new export image rendering task in the worker pool
@@ -191,17 +188,61 @@ impl<N: Notify> RenderWorkerPool<N> {
 }
 
 impl RenderTaskHandle {
-    /// Checks whether the new settings are different from our settings
+    /// Checks whether a task should be cancelled, based on new settings
     ///
-    /// This only returns `true` if `self.level != max_level`; we want to avoid
-    /// interrupting max-level renders to preserve responsiveness.
-    pub fn should_cancel(
-        &self,
-        other: &RenderSettings,
-        max_level: usize,
-    ) -> bool {
-        let settings_changed = &self.settings != other;
-        settings_changed && self.level != max_level
+    /// The `next.level` field should be a max-level value, i.e. a value at
+    /// which we expect interactive rendering.  We don't cancel max-level render
+    /// tasks, because we want to preserve interactivity.
+    pub fn should_cancel(&self, next: &RenderSettings) -> bool {
+        let settings_changed = match (&self.settings, next) {
+            (
+                RenderSettings::Voxel(VoxelRenderSettings {
+                    scene: scene_a,
+                    mode: mode_a,
+                    perspective: perspective_a,
+                    view: view_a,
+                    size: size_a,
+                    level: _,
+                }),
+                RenderSettings::Voxel(VoxelRenderSettings {
+                    scene: scene_b,
+                    mode: mode_b,
+                    perspective: perspective_b,
+                    view: view_b,
+                    size: size_b,
+                    level: _,
+                }),
+            ) => {
+                scene_a != scene_b
+                    || mode_a != mode_b
+                    || perspective_a != perspective_b
+                    || view_a != view_b
+                    || size_a != size_b
+            }
+            (
+                RenderSettings::Image(ImageRenderSettings {
+                    scene: scene_a,
+                    mode: mode_a,
+                    view: view_a,
+                    size: size_a,
+                    level: _,
+                }),
+                RenderSettings::Image(ImageRenderSettings {
+                    scene: scene_b,
+                    mode: mode_b,
+                    view: view_b,
+                    size: size_b,
+                    level: _,
+                }),
+            ) => {
+                scene_a != scene_b
+                    || mode_a != mode_b
+                    || view_a != view_b
+                    || size_a != size_b
+            }
+            _ => true,
+        };
+        settings_changed && self.settings.level() != next.level()
     }
 }
 
@@ -218,7 +259,6 @@ pub enum TaskKind<N: Notify> {
         generation: u64,
         reply: MessageGenSender<N>,
         start_time: Instant,
-        level: usize,
     },
     Export {
         reply: MessageSender<N>,
@@ -226,31 +266,37 @@ pub enum TaskKind<N: Notify> {
 }
 
 /// Settings for rendering an image
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 pub enum RenderSettings {
     Image(ImageRenderSettings),
     Voxel(VoxelRenderSettings),
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 pub struct ImageRenderSettings {
     pub scene: Scene,
     pub mode: ViewMode2,
     pub view: fidget::gui::View2,
     pub size: fidget::render::ImageSize,
+    pub level: usize,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 pub struct VoxelRenderSettings {
     pub scene: Scene,
     pub mode: ViewMode3,
     pub perspective: bool,
     pub view: fidget::gui::View3,
     pub size: fidget::render::VoxelSize,
+    pub level: usize,
 }
 
 impl RenderSettings {
-    pub fn from_canvas(canvas: &ViewCanvas, scene: Scene) -> Self {
+    pub fn from_canvas(
+        canvas: &ViewCanvas,
+        scene: Scene,
+        level: usize,
+    ) -> Self {
         match canvas {
             ViewCanvas::Canvas2 { canvas, mode } => {
                 RenderSettings::Image(ImageRenderSettings {
@@ -258,6 +304,7 @@ impl RenderSettings {
                     view: canvas.view(),
                     size: canvas.image_size(),
                     mode: *mode,
+                    level,
                 })
             }
             ViewCanvas::Canvas3 {
@@ -277,9 +324,30 @@ impl RenderSettings {
                         size.width().max(size.height()),
                     ),
                     mode: *mode,
+                    level,
                 })
             }
         }
+    }
+
+    pub fn level(&self) -> usize {
+        match self {
+            RenderSettings::Image(ImageRenderSettings { level, .. })
+            | RenderSettings::Voxel(VoxelRenderSettings { level, .. }) => {
+                *level
+            }
+        }
+    }
+
+    pub fn with_level(&self, next_level: usize) -> Self {
+        let mut out = self.clone();
+        match &mut out {
+            RenderSettings::Image(ImageRenderSettings { level, .. })
+            | RenderSettings::Voxel(VoxelRenderSettings { level, .. }) => {
+                *level = next_level;
+            }
+        }
+        out
     }
 }
 
@@ -298,7 +366,6 @@ pub(crate) async fn render_worker<N: Notify>(
                 block,
                 generation,
                 start_time,
-                level,
                 reply,
             } => {
                 if task.cancel.is_cancelled() {
@@ -306,21 +373,12 @@ pub(crate) async fn render_worker<N: Notify>(
                 }
                 let image = match task.settings {
                     RenderSettings::Voxel(settings) => {
-                        let image = gpu.render_voxel(&settings, level).await;
-                        RenderImage::Voxel {
-                            image,
-                            settings,
-                            level,
-                        }
+                        let image = gpu.render_voxel(&settings).await;
+                        RenderImage::Voxel { image, settings }
                     }
                     RenderSettings::Image(settings) => {
-                        let image =
-                            gpu.render_pixel_f16(&settings, level).await;
-                        RenderImage::Pixel {
-                            image,
-                            settings,
-                            level,
-                        }
+                        let image = gpu.render_pixel_f16(&settings).await;
+                        RenderImage::Pixel { image, settings }
                     }
                 };
                 reply.send(Message::RenderView(RenderViewReply {
@@ -352,13 +410,12 @@ pub(crate) async fn render_worker<N: Notify>(
                 }
                 let (data, image_size) = match &task.settings {
                     RenderSettings::Voxel(vs) => {
-                        let image = gpu.render_voxel(vs, 0).await;
+                        let image = gpu.render_voxel(vs).await;
                         let size = image.size.into();
                         (ExportImage::Rgba(image), size)
                     }
                     RenderSettings::Image(rs) => {
-                        let (distance, color) =
-                            gpu.render_pixel_f32(rs, 0).await;
+                        let (distance, color) = gpu.render_pixel_f32(rs).await;
                         (ExportImage::Distance { distance, color }, rs.size)
                     }
                 };
@@ -573,22 +630,19 @@ impl GpuWorker {
         }
     }
 
-    async fn render_voxel(
-        &mut self,
-        vs: &VoxelRenderSettings,
-        level: usize,
-    ) -> RgbaImage {
+    async fn render_voxel(&mut self, vs: &VoxelRenderSettings) -> RgbaImage {
         let VoxelRenderSettings {
             scene,
             mode,
             view,
             size,
             perspective,
+            level,
         } = vs;
         // If this is our final rendering level, then do oversampling in
         // the Z direction for better rendering of edges.
         let scale = 1 << level;
-        let bonus_z = if level == 0 { 2 } else { 1 };
+        let bonus_z = if *level == 0 { 2 } else { 1 };
         let image_size = fidget::render::VoxelSize::new(
             (size.width() / scale).max(1),
             (size.height() / scale).max(1),
@@ -678,9 +732,8 @@ impl GpuWorker {
     async fn render_pixel_f16(
         &mut self,
         vs: &ImageRenderSettings,
-        level: usize,
     ) -> PixelImage {
-        let image_size = self.submit_pixel(vs, level);
+        let image_size = self.submit_pixel(vs);
 
         let color = if let Some(c) = self.pixel_merge_workspace.output_color() {
             self.gpu.copy(c, &mut self.pixel_read_color_buffer);
@@ -759,9 +812,8 @@ impl GpuWorker {
     async fn render_pixel_f32(
         &mut self,
         vs: &ImageRenderSettings,
-        level: usize,
     ) -> (Vec<RawDistancePixel>, Option<Vec<[u8; 4]>>) {
-        self.submit_pixel(vs, level);
+        self.submit_pixel(vs);
 
         let color = if let Some(c) = self.pixel_merge_workspace.output_color() {
             self.gpu.copy(c, &mut self.pixel_read_color_buffer);
@@ -788,16 +840,13 @@ impl GpuWorker {
         (distance, color)
     }
 
-    fn submit_pixel(
-        &mut self,
-        vs: &ImageRenderSettings,
-        level: usize,
-    ) -> ImageSize {
+    fn submit_pixel(&mut self, vs: &ImageRenderSettings) -> ImageSize {
         let ImageRenderSettings {
             scene,
             mode,
             view,
             size,
+            level,
         } = vs;
         let scale = 1 << level;
         let image_size = fidget::render::ImageSize::new(

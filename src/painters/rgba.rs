@@ -26,7 +26,6 @@ pub struct WgpuRgbaPainter {
 
     /// Settings with which the image was rendered
     settings: VoxelRenderSettings,
-    level: usize,
 }
 
 /// Equivalent to the `struct Uniforms` in the WebGPU shader
@@ -46,7 +45,6 @@ impl WgpuRgbaPainter {
         data: TextureData<u32>,
         uniforms: wgpu::Buffer,
         settings: VoxelRenderSettings,
-        level: usize,
         size: fidget::render::ImageSize,
         view: fidget::gui::View3,
     ) -> Self {
@@ -55,7 +53,6 @@ impl WgpuRgbaPainter {
             data,
             uniforms,
             settings,
-            level,
             size,
             view,
         }
@@ -74,8 +71,8 @@ impl egui_wgpu::CallbackTrait for WgpuRgbaPainter {
         let gr: &mut WgpuResources = resources.get_mut().unwrap();
 
         let image_size = self.settings.size;
-        let width = (image_size.width() / (1 << self.level)).max(1);
-        let height = (image_size.height() / (1 << self.level)).max(1);
+        let width = (image_size.width() / (1 << self.settings.level)).max(1);
+        let height = (image_size.height() / (1 << self.settings.level)).max(1);
         let texture_size = wgpu::Extent3d {
             width,
             height,

@@ -214,7 +214,6 @@ impl<'a, N: Notify> WorldView<'a, N> {
                     color,
                     settings,
                     uniform_buffer,
-                    level,
                 },
                 ViewCanvas::Canvas2 { mode, canvas },
             ) if settings.mode == mode && !will_discard => {
@@ -226,7 +225,6 @@ impl<'a, N: Notify> WorldView<'a, N> {
                         color.as_mut().map(TextureData::take),
                         uniform_buffer.clone(),
                         settings.clone(),
-                        *level,
                         size,
                         canvas.view(),
                     ),
@@ -238,7 +236,6 @@ impl<'a, N: Notify> WorldView<'a, N> {
                     color,
                     uniform_buffer,
                     settings,
-                    level,
                 },
                 ViewCanvas::Canvas3 { mode, canvas, .. },
             ) if settings.mode == mode && !will_discard => {
@@ -249,7 +246,6 @@ impl<'a, N: Notify> WorldView<'a, N> {
                         color.take(),
                         uniform_buffer.clone(),
                         settings.clone(),
-                        *level,
                         size,
                         canvas.view(),
                     ),

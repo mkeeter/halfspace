@@ -38,7 +38,6 @@ pub struct WgpuSdfPainter {
 
     /// Settings with which the image was rendered
     settings: ImageRenderSettings,
-    level: usize,
 }
 
 impl WgpuSdfPainter {
@@ -52,7 +51,6 @@ impl WgpuSdfPainter {
         color: Option<TextureData<[u8; 4]>>,
         uniform_buffer: wgpu::Buffer,
         settings: ImageRenderSettings,
-        level: usize,
         size: fidget::render::ImageSize,
         view: fidget::gui::View2,
     ) -> Self {
@@ -64,7 +62,6 @@ impl WgpuSdfPainter {
             distance,
             color,
             settings,
-            level,
         }
     }
 }
@@ -446,8 +443,8 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
         let gr: &mut WgpuResources = resources.get_mut().unwrap();
 
         let image_size = self.settings.size;
-        let width = (image_size.width() / (1 << self.level)).max(1);
-        let height = (image_size.height() / (1 << self.level)).max(1);
+        let width = (image_size.width() / (1 << self.settings.level)).max(1);
+        let height = (image_size.height() / (1 << self.settings.level)).max(1);
         let texture_size = wgpu::Extent3d {
             width,
             height,

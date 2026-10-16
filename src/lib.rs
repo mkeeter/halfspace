@@ -1690,6 +1690,7 @@ impl<P: Platform> App<P> {
                                         mode: view::ViewMode2::Bitfield,
                                         view,
                                         size,
+                                        level: 0,
                                     },
                                 ),
                                 tx,
