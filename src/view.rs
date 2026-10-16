@@ -289,13 +289,12 @@ impl ViewData {
             self.image = Some(match r.image {
                 RenderImage::Voxel {
                     image,
-                    size,
                     settings,
                     level,
                 } => {
                     let texture_size = wgpu::Extent3d {
-                        width: size.width(),
-                        height: size.height(),
+                        width: image.size.width(),
+                        height: image.size.height(),
                         depth_or_array_layers: 1,
                     };
                     let texture = if let Some(ViewImage::Voxel {
@@ -328,14 +327,13 @@ impl ViewData {
                 }
                 RenderImage::Pixel {
                     image,
-                    size,
                     settings,
                     level,
                 } => {
                     // Reuse textures if possible
                     let texture_size = wgpu::Extent3d {
-                        width: size.width(),
-                        height: size.height(),
+                        width: image.size.width(),
+                        height: image.size.height(),
                         depth_or_array_layers: 1,
                     };
                     let (distance_tex, mut color_tex) =

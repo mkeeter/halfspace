@@ -65,14 +65,11 @@ use zerocopy::{FromBytes, IntoBytes};
 pub enum RenderImage {
     Pixel {
         image: PixelImage,
-        /// Actual size (derived from `settings` and `level`)
-        size: ImageSize,
         settings: ImageRenderSettings,
         level: usize,
     },
     Voxel {
         image: RgbaImage,
-        size: VoxelSize,
         settings: VoxelRenderSettings,
         level: usize,
     },
@@ -112,11 +109,13 @@ pub struct Float16(pub u16);
 pub struct PixelImage {
     pub distance: Vec<Float16>,
     pub color: Option<Vec<[u8; 4]>>,
+    pub size: ImageSize,
 }
 
 #[derive(Clone)]
 pub struct RgbaImage {
     pub color: Vec<u32>,
+    pub size: VoxelSize,
 }
 
 /// State representing an in-progress render
@@ -308,21 +307,18 @@ pub(crate) async fn render_worker<N: Notify>(
                 }
                 let image = match task.settings {
                     RenderSettings::Voxel(settings) => {
-                        let (image, size) =
-                            gpu.render_voxel(&settings, level).await;
+                        let image = gpu.render_voxel(&settings, level).await;
                         RenderImage::Voxel {
                             image,
-                            size,
                             settings,
                             level,
                         }
                     }
                     RenderSettings::Image(settings) => {
-                        let (image, size) =
+                        let image =
                             gpu.render_pixel_f16(&settings, level).await;
                         RenderImage::Pixel {
                             image,
-                            size,
                             settings,
                             level,
                         }
@@ -357,8 +353,9 @@ pub(crate) async fn render_worker<N: Notify>(
                 }
                 let (data, image_size) = match &task.settings {
                     RenderSettings::Voxel(vs) => {
-                        let (image, size) = gpu.render_voxel(vs, 0).await;
-                        (ExportImage::Rgba(image), size.into())
+                        let image = gpu.render_voxel(vs, 0).await;
+                        let size = image.size.into();
+                        (ExportImage::Rgba(image), size)
                     }
                     RenderSettings::Image(rs) => {
                         let (distance, color) =
@@ -581,7 +578,7 @@ impl GpuWorker {
         &mut self,
         vs: &VoxelRenderSettings,
         level: usize,
-    ) -> (RgbaImage, VoxelSize) {
+    ) -> RgbaImage {
         let VoxelRenderSettings {
             scene,
             mode,
@@ -673,14 +670,17 @@ impl GpuWorker {
         let image = mapped_image.image();
         let color = image.take().0;
 
-        (RgbaImage { color }, image_size)
+        RgbaImage {
+            color,
+            size: image_size,
+        }
     }
 
     async fn render_pixel_f16(
         &mut self,
         vs: &ImageRenderSettings,
         level: usize,
-    ) -> (PixelImage, ImageSize) {
+    ) -> PixelImage {
         let image_size = self.submit_pixel(vs, level);
 
         let color = if let Some(c) = self.pixel_merge_workspace.output_color() {
@@ -750,7 +750,11 @@ impl GpuWorker {
         let distance_img = mapped_distance_image.image();
         let distance = distance_img.take().0;
 
-        (PixelImage { distance, color }, image_size)
+        PixelImage {
+            distance,
+            color,
+            size: image_size,
+        }
     }
 
     async fn render_pixel_f32(
