@@ -293,7 +293,7 @@ impl SdfResources {
     }
 
     pub fn reset(&mut self) {
-        // Empty out the texture / buffer cache that weren't used last frame
+        // Empty out items in the buffer cache that weren't used last frame
         // (anything used last frame is in bound_data instead)
         self.config_buf_pool.clear();
 

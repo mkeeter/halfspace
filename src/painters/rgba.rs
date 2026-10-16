@@ -18,9 +18,7 @@ pub struct WgpuRgbaPainter {
     /// Index of the block being rendered
     index: BlockIndex,
 
-    /// Image data to copy to the texture
-    ///
-    /// If this is empty, then the texture is presumed to already be populated
+    /// Texture to render
     data: TextureData<u32>,
 
     /// Settings with which the image was rendered
@@ -271,7 +269,7 @@ impl RgbaResources {
     }
 
     pub fn reset(&mut self) {
-        // Empty out the buffer cache that weren't used last frame
+        // Empty out items in the buffer cache that weren't used last frame
         // (anything used last frame is in bound_data instead)
         self.config_buf_pool.clear();
 
