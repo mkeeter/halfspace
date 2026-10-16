@@ -3,16 +3,17 @@ use crate::{
     gui::{CAMERA, WARN},
     platform::Notify,
     render::{
-        ImageRenderSettings, RenderImage, RenderSettings, RenderTaskHandle,
-        RenderWorkerPool, VoxelRenderSettings,
+        Float16, ImageRenderSettings, RenderImage, RenderSettings,
+        RenderTaskHandle, RenderWorkerPool, VoxelRenderSettings,
     },
     state,
     state::ViewState,
     world::Scene,
 };
-use std::sync::Arc;
 
 pub use state::{ViewMode2, ViewMode3};
+
+use egui_wgpu::wgpu;
 use web_time::Duration;
 
 /// State associated with a given view in the GUI
@@ -34,6 +35,24 @@ pub struct ViewData {
 
     /// Monotonic counter to identify the most recent task
     generation: u64,
+}
+
+/// Tuple of data to be loaded and its corresponding WGPU texture
+pub struct TextureData<T> {
+    /// Image data to copy to the texture
+    ///
+    /// If this is empty, then the texture is presumed to already be populated
+    pub data: Vec<T>,
+    pub texture: wgpu::Texture,
+}
+
+impl<T> TextureData<T> {
+    pub fn take(&mut self) -> Self {
+        TextureData {
+            data: std::mem::take(&mut self.data),
+            texture: self.texture.clone(),
+        }
+    }
 }
 
 impl ViewData {
@@ -170,40 +189,24 @@ impl From<ViewState> for ViewCanvas {
     }
 }
 
-#[derive(
-    Copy,
-    Clone,
-    Debug,
-    zerocopy::IntoBytes,
-    zerocopy::FromBytes,
-    zerocopy::Immutable,
-)]
-pub struct Float16(pub u16);
-
-#[derive(Clone)]
-pub struct PixelImage {
-    pub distance: Arc<[Float16]>,
-    pub color: Option<Arc<[[u8; 4]]>>,
-}
-
-#[derive(Clone)]
-pub struct RgbaImage {
-    /// Pre-baked color
-    ///
-    /// This is greyscale for a heightmap rendering, or RGB for shaded
-    pub color: Arc<[u32]>,
-}
-
 /// Rendered image(s) to be drawn, along with the settings that generated it
-#[derive(Clone)]
+///
+/// The `Vec<T>` fields contain image data which should be copied to the
+/// `wgpu::Texture` field when rendered.  As part of copying, the `Vec` is
+/// emptied out; an empty `Vec` indicates that the texture is valid and can be
+/// used for rendering immediately.
 pub enum ViewImage {
     Pixel {
-        image: PixelImage,
+        distance: TextureData<Float16>,
+        color: Option<TextureData<[u8; 4]>>,
         settings: ImageRenderSettings,
         level: usize,
     },
     Voxel {
-        image: RgbaImage,
+        /// Pre-baked color
+        ///
+        /// This is greyscale for a heightmap rendering, or RGB for shaded
+        color: TextureData<u32>,
         settings: VoxelRenderSettings,
         level: usize,
     },
@@ -255,6 +258,7 @@ impl ViewData {
         r: RenderViewReply,
         rx: &MessageReceiver<N>,
         render_pool: &RenderWorkerPool<N>,
+        device: &wgpu::Device,
     ) {
         const TARGET_RENDER_TIME: Duration = Duration::from_millis(33);
         const MAX_LEVEL: usize = 10;
@@ -281,25 +285,114 @@ impl ViewData {
                     render_pool,
                 );
             }
+            let prev_image = self.image.take();
             self.image = Some(match r.image {
                 RenderImage::Voxel {
                     image,
                     settings,
                     level,
-                } => ViewImage::Voxel {
-                    image,
-                    settings,
-                    level,
-                },
+                } => {
+                    let texture_size = wgpu::Extent3d {
+                        width: image.size.width(),
+                        height: image.size.height(),
+                        depth_or_array_layers: 1,
+                    };
+                    let texture = if let Some(ViewImage::Voxel {
+                        color, ..
+                    }) = prev_image
+                        && color.texture.size() == texture_size
+                    {
+                        color.texture
+                    } else {
+                        device.create_texture(&wgpu::TextureDescriptor {
+                            label: Some("rgba texture"),
+                            size: texture_size,
+                            mip_level_count: 1,
+                            sample_count: 1,
+                            dimension: wgpu::TextureDimension::D2,
+                            format: wgpu::TextureFormat::Rgba8Unorm,
+                            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                                | wgpu::TextureUsages::COPY_DST,
+                            view_formats: &[],
+                        })
+                    };
+                    ViewImage::Voxel {
+                        color: TextureData {
+                            data: image.color,
+                            texture,
+                        },
+                        settings,
+                        level,
+                    }
+                }
                 RenderImage::Pixel {
                     image,
                     settings,
                     level,
-                } => ViewImage::Pixel {
-                    image,
-                    settings,
-                    level,
-                },
+                } => {
+                    // Reuse textures if possible
+                    let texture_size = wgpu::Extent3d {
+                        width: image.size.width(),
+                        height: image.size.height(),
+                        depth_or_array_layers: 1,
+                    };
+                    let (distance_tex, mut color_tex) =
+                        if let Some(ViewImage::Pixel {
+                            distance, color, ..
+                        }) = prev_image
+                            && distance.texture.size() == texture_size
+                        {
+                            (distance.texture, color.map(|c| c.texture))
+                        } else {
+                            (
+                                device.create_texture(
+                                    &wgpu::TextureDescriptor {
+                                        label: Some("sdf distance texture"),
+                                        size: texture_size,
+                                        mip_level_count: 1,
+                                        sample_count: 1,
+                                        dimension: wgpu::TextureDimension::D2,
+                                        format: wgpu::TextureFormat::R16Float,
+                                        usage:
+                                            wgpu::TextureUsages::TEXTURE_BINDING
+                                                | wgpu::TextureUsages::COPY_DST,
+                                        view_formats: &[],
+                                    },
+                                ),
+                                None,
+                            )
+                        };
+                    if image.color.is_none() {
+                        color_tex = None;
+                    } else if color_tex.is_none() {
+                        color_tex = Some(device.create_texture(
+                            &wgpu::TextureDescriptor {
+                                label: Some("sdf color texture"),
+                                size: texture_size,
+                                mip_level_count: 1,
+                                sample_count: 1,
+                                dimension: wgpu::TextureDimension::D2,
+                                format: wgpu::TextureFormat::Rgba8Unorm,
+                                usage: wgpu::TextureUsages::TEXTURE_BINDING
+                                    | wgpu::TextureUsages::COPY_DST,
+                                view_formats: &[],
+                            },
+                        ));
+                    }
+
+                    ViewImage::Pixel {
+                        distance: TextureData {
+                            data: image.distance,
+                            texture: distance_tex,
+                        },
+                        color: image.color.map(|data| TextureData {
+                            data,
+                            texture: color_tex.unwrap(),
+                        }),
+                        settings,
+                        level,
+                    }
+                }
             });
         }
     }
@@ -333,7 +426,7 @@ impl ViewData {
         scene: Scene,
         rx: &MessageReceiver<N>,
         render_pool: &RenderWorkerPool<N>,
-    ) -> Option<&ViewImage> {
+    ) -> Option<&mut ViewImage> {
         let settings = RenderSettings::from_canvas(&self.canvas, scene);
 
         // If the image settings have changed, then start a new render, unless
@@ -363,11 +456,11 @@ impl ViewData {
                 render_pool,
             );
         }
-        self.image.as_ref()
+        self.image.as_mut()
     }
 
-    pub fn prev_image(&self) -> Option<&ViewImage> {
-        self.image.as_ref()
+    pub fn prev_image(&mut self) -> Option<&mut ViewImage> {
+        self.image.as_mut()
     }
 }
 

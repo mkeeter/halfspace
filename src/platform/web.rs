@@ -16,6 +16,10 @@ use eframe::wasm_bindgen::JsCast;
 // YOLO zone
 unsafe impl Sync for crate::painters::WgpuResources {}
 unsafe impl Send for crate::painters::WgpuResources {}
+unsafe impl Sync for crate::painters::WgpuSdfPainter {}
+unsafe impl Send for crate::painters::WgpuSdfPainter {}
+unsafe impl Sync for crate::painters::WgpuRgbaPainter {}
+unsafe impl Send for crate::painters::WgpuRgbaPainter {}
 unsafe impl Send for crate::WgpuError {}
 unsafe impl Sync for crate::WgpuError {}
 

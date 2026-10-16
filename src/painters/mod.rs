@@ -20,7 +20,6 @@
 
 use eframe::egui_wgpu::wgpu;
 
-mod cache;
 mod clear;
 mod rgba;
 mod sdf;

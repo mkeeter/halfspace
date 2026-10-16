@@ -6,7 +6,7 @@ use crate::{
     BlockResponse, MessageReceiver, ViewResponse, export,
     platform::Notify,
     render,
-    view::{self, ViewCanvas, ViewData, ViewImage},
+    view::{self, TextureData, ViewCanvas, ViewData, ViewImage},
     world::{
         Block, BlockError, BlockIndex, IoValue, ScriptBlock, ValueBlock, World,
     },
@@ -201,22 +201,28 @@ impl<'a, N: Notify> WorldView<'a, N> {
         };
 
         // This is the magic that triggers the GPU callback.  We pick a render
-        // mode based on the selected image's settings
-        match (&image, current_canvas) {
+        // mode based on the selected image's settings.  Note that if we're
+        // doing a discard pass (not sure why we would be!), then we don't build
+        // the WGPU painter objects, because they consume the CPU side of
+        // the texture data.
+        let will_discard = ui.ctx().will_discard();
+        match (image, current_canvas) {
             // Both distance and bitfield images are drawn by the SDF painter
             (
                 ViewImage::Pixel {
-                    image,
+                    distance,
+                    color,
                     settings,
                     level,
                 },
                 ViewCanvas::Canvas2 { mode, canvas },
-            ) if settings.mode == mode => {
+            ) if settings.mode == mode && !will_discard => {
                 ui.painter().add(egui_wgpu::Callback::new_paint_callback(
                     rect,
                     crate::painters::WgpuSdfPainter::new(
                         index,
-                        image.clone(),
+                        distance.take(),
+                        color.as_mut().map(TextureData::take),
                         settings.clone(),
                         *level,
                         size,
@@ -227,17 +233,17 @@ impl<'a, N: Notify> WorldView<'a, N> {
             // Both heightmap and shaded images are drawn by the RGBA painter
             (
                 ViewImage::Voxel {
-                    image,
+                    color,
                     settings,
                     level,
                 },
                 ViewCanvas::Canvas3 { mode, canvas, .. },
-            ) if settings.mode == mode => {
+            ) if settings.mode == mode && !will_discard => {
                 ui.painter().add(egui_wgpu::Callback::new_paint_callback(
                     rect,
                     crate::painters::WgpuRgbaPainter::new(
                         index,
-                        image.clone(),
+                        color.take(),
                         settings.clone(),
                         *level,
                         size,

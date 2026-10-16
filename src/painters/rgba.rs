@@ -1,15 +1,12 @@
 use super::WgpuResources;
 use crate::{
-    painters::cache::{CacheHit, WgpuTextureCache},
-    render::VoxelRenderSettings,
-    view::RgbaImage,
-    world::BlockIndex,
+    render::VoxelRenderSettings, view::TextureData, world::BlockIndex,
 };
 use eframe::{
     egui,
     egui_wgpu::{self, wgpu},
 };
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 use zerocopy::IntoBytes;
 
 /// GPU callback for painting shaded objects
@@ -21,8 +18,8 @@ pub struct WgpuRgbaPainter {
     /// Index of the block being rendered
     index: BlockIndex,
 
-    /// Image(s) to draw to the screen
-    image: RgbaImage,
+    /// Texture to render
+    data: TextureData<u32>,
 
     /// Settings with which the image was rendered
     settings: VoxelRenderSettings,
@@ -43,7 +40,7 @@ impl WgpuRgbaPainter {
     /// quad; the `image` contains its own size and view transforms.
     pub fn new(
         index: BlockIndex,
-        image: RgbaImage,
+        data: TextureData<u32>,
         settings: VoxelRenderSettings,
         level: usize,
         size: fidget::render::ImageSize,
@@ -51,7 +48,7 @@ impl WgpuRgbaPainter {
     ) -> Self {
         Self {
             index,
-            image,
+            data,
             settings,
             level,
             size,
@@ -88,9 +85,7 @@ impl egui_wgpu::CallbackTrait for WgpuRgbaPainter {
         );
 
         // Write the image texture
-        let data =
-            gr.rgba
-                .get_data(&self.image.color, device, queue, texture_size);
+        let data = gr.rgba.get_data(&self.data, device, queue, texture_size);
 
         let uniforms = Uniforms {
             transform: transform.into(),
@@ -133,7 +128,6 @@ impl egui_wgpu::CallbackTrait for WgpuRgbaPainter {
 pub(crate) struct RgbaResources {
     pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
-    cache: WgpuTextureCache<[u32]>,
 
     /// Per-frame bound data
     ///
@@ -269,53 +263,31 @@ impl RgbaResources {
             pipeline,
             bind_group_layout,
             bound_data: HashMap::new(),
-            cache: WgpuTextureCache::new(),
             config_buf_pool: vec![],
             rgba_sampler,
         }
     }
 
     pub fn reset(&mut self) {
-        // Empty out the texture / buffer cache that weren't used last frame
+        // Empty out items in the buffer cache that weren't used last frame
         // (anything used last frame is in bound_data instead)
-        self.cache.clear();
         self.config_buf_pool.clear();
 
         // Move bound data into the caches, for possible reuse.  If it's not
         // used in the upcoming frame, then it's cleared next frame (above).
         for (_index, data) in self.bound_data.drain() {
-            self.cache.insert(data.image, data.rgba_texture);
             self.config_buf_pool.push(data.uniform_buffer);
         }
     }
 
     fn get_data(
         &mut self,
-        data: &Arc<[u32]>,
+        data: &TextureData<u32>,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         size: wgpu::Extent3d,
     ) -> RgbaData {
-        let (rgba_texture, needs_write) = match self.cache.get(data, size) {
-            Some(CacheHit::DataMatch(tex)) => (tex, false),
-            Some(CacheHit::SizeMatch(tex)) => (tex, true),
-            None => (
-                device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("rgba texture"),
-                    size,
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Rgba8Unorm,
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING
-                        | wgpu::TextureUsages::COPY_DST,
-                    view_formats: &[],
-                }),
-                true,
-            ),
-        };
-
-        let rgba_texture_view = rgba_texture.create_view(&Default::default());
+        let rgba_texture_view = data.texture.create_view(&Default::default());
 
         // Create the uniform buffer for config data
         let uniform_buffer = self.config_buf_pool.pop().unwrap_or_else(|| {
@@ -350,15 +322,15 @@ impl RgbaResources {
                 },
             ],
         });
-        if needs_write {
+        if !data.data.is_empty() {
             queue.write_texture(
                 wgpu::TexelCopyTextureInfo {
-                    texture: &rgba_texture,
+                    texture: &data.texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d::ZERO,
                     aspect: wgpu::TextureAspect::All,
                 },
-                data.as_bytes(),
+                data.data.as_bytes(),
                 wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(4 * size.width),
@@ -369,8 +341,6 @@ impl RgbaResources {
         }
 
         RgbaData {
-            image: data.clone(),
-            rgba_texture,
             uniform_buffer,
             bind_group,
         }
@@ -386,12 +356,6 @@ impl RgbaResources {
 
 /// Resources used to render a single shaded image
 struct RgbaData {
-    /// Image data which is stored in the texture
-    image: Arc<[u32]>,
-
-    /// RGBA texture to render
-    rgba_texture: wgpu::Texture,
-
     /// Uniform buffer
     uniform_buffer: wgpu::Buffer,
 

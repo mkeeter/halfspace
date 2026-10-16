@@ -353,6 +353,14 @@ pub(crate) struct App<P: Platform> {
     /// Pool of CPU worker threads
     render_pool: render::RenderWorkerPool<P::Notify>,
 
+    /// Handle to the GPU device
+    ///
+    /// We deliberately only store the device (and not the queue) here; queue
+    /// submissions should happen as part of the `egui` rendering pipeline,
+    /// which passes a queue to objects implementing
+    /// [`egui_wgpu::CallbackTrait`].
+    device: wgpu::Device,
+
     /// Show debug options and menu items in native build
     debug: bool,
 
@@ -548,6 +556,7 @@ impl<P: Platform> App<P> {
             examples,
             tree: egui_dock::DockState::new(vec![]),
             script_state: ScriptState::Done,
+            device: wgpu_state.device.clone(),
             undo,
             syntax,
             views: HashMap::new(),
@@ -1759,7 +1768,7 @@ impl<P: Platform> App<P> {
             }
             Message::RenderView(reply) => {
                 if let Some(e) = self.views.get_mut(&reply.block) {
-                    e.update(reply, &self.rx, &self.render_pool)
+                    e.update(reply, &self.rx, &self.render_pool, &self.device)
                 }
             }
             Message::Loaded { state } => match self.modal {
