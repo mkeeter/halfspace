@@ -21,6 +21,9 @@ pub struct WgpuRgbaPainter {
     /// Texture to render
     data: TextureData<u32>,
 
+    /// Buffer sized for a [`Uniforms`] object
+    uniforms: wgpu::Buffer,
+
     /// Settings with which the image was rendered
     settings: VoxelRenderSettings,
     level: usize,
@@ -29,7 +32,7 @@ pub struct WgpuRgbaPainter {
 /// Equivalent to the `struct Uniforms` in the WebGPU shader
 #[repr(C)]
 #[derive(Copy, Clone, zerocopy::IntoBytes, zerocopy::Immutable)]
-struct Uniforms {
+pub struct Uniforms {
     transform: [[f32; 4]; 4],
 }
 
@@ -41,6 +44,7 @@ impl WgpuRgbaPainter {
     pub fn new(
         index: BlockIndex,
         data: TextureData<u32>,
+        uniforms: wgpu::Buffer,
         settings: VoxelRenderSettings,
         level: usize,
         size: fidget::render::ImageSize,
@@ -49,6 +53,7 @@ impl WgpuRgbaPainter {
         Self {
             index,
             data,
+            uniforms,
             settings,
             level,
             size,
@@ -85,7 +90,13 @@ impl egui_wgpu::CallbackTrait for WgpuRgbaPainter {
         );
 
         // Write the image texture
-        let data = gr.rgba.get_data(&self.data, device, queue, texture_size);
+        let data = gr.rgba.get_data(
+            &self.data,
+            &self.uniforms,
+            device,
+            queue,
+            texture_size,
+        );
 
         let uniforms = Uniforms {
             transform: transform.into(),
@@ -93,7 +104,7 @@ impl egui_wgpu::CallbackTrait for WgpuRgbaPainter {
         {
             let mut writer = queue
                 .write_buffer_with(
-                    &data.uniform_buffer,
+                    &self.uniforms,
                     0,
                     (std::mem::size_of_val(&uniforms) as u64)
                         .try_into()
@@ -135,8 +146,6 @@ pub(crate) struct RgbaResources {
     /// [`WgpuRgbaPainter::prepare`], and used in [`RgbaResources::paint`]
     bound_data: HashMap<BlockIndex, RgbaData>,
 
-    /// Pool of buffers which are sized to fit a [`Uniforms`] object
-    config_buf_pool: Vec<wgpu::Buffer>,
     rgba_sampler: wgpu::Sampler,
 }
 
@@ -263,42 +272,23 @@ impl RgbaResources {
             pipeline,
             bind_group_layout,
             bound_data: HashMap::new(),
-            config_buf_pool: vec![],
             rgba_sampler,
         }
     }
 
     pub fn reset(&mut self) {
-        // Empty out items in the buffer cache that weren't used last frame
-        // (anything used last frame is in bound_data instead)
-        self.config_buf_pool.clear();
-
-        // Move bound data into the caches, for possible reuse.  If it's not
-        // used in the upcoming frame, then it's cleared next frame (above).
-        for (_index, data) in self.bound_data.drain() {
-            self.config_buf_pool.push(data.uniform_buffer);
-        }
+        self.bound_data.clear();
     }
 
     fn get_data(
         &mut self,
         data: &TextureData<u32>,
+        uniform_buffer: &wgpu::Buffer,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         size: wgpu::Extent3d,
     ) -> RgbaData {
         let rgba_texture_view = data.texture.create_view(&Default::default());
-
-        // Create the uniform buffer for config data
-        let uniform_buffer = self.config_buf_pool.pop().unwrap_or_else(|| {
-            device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("bitfield uniform buffer"),
-                size: std::mem::size_of::<Uniforms>() as u64,
-                mapped_at_creation: false,
-                usage: wgpu::BufferUsages::UNIFORM
-                    | wgpu::BufferUsages::COPY_DST,
-            })
-        });
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("rgba bind group"),
@@ -340,10 +330,7 @@ impl RgbaResources {
             );
         }
 
-        RgbaData {
-            uniform_buffer,
-            bind_group,
-        }
+        RgbaData { bind_group }
     }
 
     pub fn paint(&self, render_pass: &mut wgpu::RenderPass, index: BlockIndex) {
@@ -356,9 +343,6 @@ impl RgbaResources {
 
 /// Resources used to render a single shaded image
 struct RgbaData {
-    /// Uniform buffer
-    uniform_buffer: wgpu::Buffer,
-
     /// Bind group for bitfield rendering
     bind_group: wgpu::BindGroup,
 }
