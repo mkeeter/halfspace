@@ -75,14 +75,8 @@ pub enum RenderImage {
 impl RenderImage {
     pub fn level(&self) -> usize {
         match self {
-            RenderImage::Pixel {
-                settings: ImageRenderSettings { level, .. },
-                ..
-            }
-            | RenderImage::Voxel {
-                settings: VoxelRenderSettings { level, .. },
-                ..
-            } => *level,
+            RenderImage::Pixel { settings, .. } => settings.level,
+            RenderImage::Voxel { settings, .. } => settings.level,
         }
     }
 
@@ -338,10 +332,8 @@ impl RenderSettings {
 
     pub fn level(&self) -> usize {
         match self {
-            RenderSettings::Image(ImageRenderSettings { level, .. })
-            | RenderSettings::Voxel(VoxelRenderSettings { level, .. }) => {
-                *level
-            }
+            RenderSettings::Image(s) => s.level,
+            RenderSettings::Voxel(s) => s.level,
         }
     }
 
