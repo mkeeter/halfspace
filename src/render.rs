@@ -194,55 +194,7 @@ impl RenderTaskHandle {
     /// which we expect interactive rendering.  We don't cancel max-level render
     /// tasks, because we want to preserve interactivity.
     pub fn should_cancel(&self, next: &RenderSettings) -> bool {
-        let settings_changed = match (&self.settings, next) {
-            (
-                RenderSettings::Voxel(VoxelRenderSettings {
-                    scene: scene_a,
-                    mode: mode_a,
-                    perspective: perspective_a,
-                    view: view_a,
-                    base_size: base_size_a,
-                    level: _,
-                }),
-                RenderSettings::Voxel(VoxelRenderSettings {
-                    scene: scene_b,
-                    mode: mode_b,
-                    perspective: perspective_b,
-                    view: view_b,
-                    base_size: base_size_b,
-                    level: _,
-                }),
-            ) => {
-                scene_a != scene_b
-                    || mode_a != mode_b
-                    || perspective_a != perspective_b
-                    || view_a != view_b
-                    || base_size_a != base_size_b
-            }
-            (
-                RenderSettings::Image(ImageRenderSettings {
-                    scene: scene_a,
-                    mode: mode_a,
-                    view: view_a,
-                    base_size: base_size_a,
-                    level: _,
-                }),
-                RenderSettings::Image(ImageRenderSettings {
-                    scene: scene_b,
-                    mode: mode_b,
-                    view: view_b,
-                    base_size: base_size_b,
-                    level: _,
-                }),
-            ) => {
-                scene_a != scene_b
-                    || mode_a != mode_b
-                    || view_a != view_b
-                    || base_size_a != base_size_b
-            }
-            _ => true,
-        };
-        settings_changed && self.settings.level() != next.level()
+        !self.settings.matches(next) && self.settings.level() != next.level()
     }
 }
 
@@ -292,6 +244,14 @@ impl ImageRenderSettings {
             (self.base_size.height() / scale).max(1),
         )
     }
+
+    /// Returns `true` if the render settings are identical, other than `level`
+    pub fn matches(&self, other: &ImageRenderSettings) -> bool {
+        self.scene == other.scene
+            && self.mode == other.mode
+            && self.view == other.view
+            && self.base_size == other.base_size
+    }
 }
 
 #[derive(Clone)]
@@ -325,6 +285,15 @@ impl VoxelRenderSettings {
         let bonus_z = if self.level == 0 { 2 } else { 1 };
         let z_scale = 2.0 / bonus_z as f32;
         nalgebra::Scale3::new(1.0, 1.0, z_scale)
+    }
+
+    /// Returns `true` if the render settings are identical, other than `level`
+    pub fn matches(&self, other: &VoxelRenderSettings) -> bool {
+        self.scene == other.scene
+            && self.mode == other.mode
+            && self.perspective == other.perspective
+            && self.view == other.view
+            && self.base_size == other.base_size
     }
 }
 
@@ -385,6 +354,19 @@ impl RenderSettings {
             }
         }
         out
+    }
+
+    /// Returns `true` if the render settings are identical, other than `level`
+    pub fn matches(&self, other: &RenderSettings) -> bool {
+        match (self, other) {
+            (RenderSettings::Voxel(va), RenderSettings::Voxel(vb)) => {
+                va.matches(vb)
+            }
+            (RenderSettings::Image(ia), RenderSettings::Image(ib)) => {
+                ia.matches(ib)
+            }
+            _ => false,
+        }
     }
 }
 

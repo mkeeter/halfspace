@@ -215,58 +215,11 @@ pub enum ViewImage {
 impl ViewImage {
     fn matches(&self, settings: &RenderSettings) -> bool {
         match (self, settings) {
-            (
-                ViewImage::Voxel {
-                    settings:
-                        VoxelRenderSettings {
-                            scene: scene_a,
-                            mode: mode_a,
-                            perspective: perspective_a,
-                            view: view_a,
-                            base_size: base_size_a,
-                            level: _,
-                        },
-                    ..
-                },
-                RenderSettings::Voxel(VoxelRenderSettings {
-                    scene: scene_b,
-                    mode: mode_b,
-                    perspective: perspective_b,
-                    view: view_b,
-                    base_size: base_size_b,
-                    level: _,
-                }),
-            ) => {
-                scene_a != scene_b
-                    || mode_a != mode_b
-                    || perspective_a != perspective_b
-                    || view_a != view_b
-                    || base_size_a != base_size_b
+            (ViewImage::Voxel { settings, .. }, RenderSettings::Voxel(vs)) => {
+                settings.matches(vs)
             }
-            (
-                ViewImage::Pixel {
-                    settings:
-                        ImageRenderSettings {
-                            scene: scene_a,
-                            mode: mode_a,
-                            view: view_a,
-                            base_size: base_size_a,
-                            level: _,
-                        },
-                    ..
-                },
-                RenderSettings::Image(ImageRenderSettings {
-                    scene: scene_b,
-                    mode: mode_b,
-                    view: view_b,
-                    base_size: base_size_b,
-                    level: _,
-                }),
-            ) => {
-                scene_a != scene_b
-                    || mode_a != mode_b
-                    || view_a != view_b
-                    || base_size_a != base_size_b
+            (ViewImage::Pixel { settings, .. }, RenderSettings::Image(vs)) => {
+                settings.matches(vs)
             }
             _ => false,
         }
