@@ -482,7 +482,8 @@ impl ViewData {
         }
 
         // If we don't have a task (either because it's done or it was cancelled
-        // above), then start a new task.
+        // above), then start a new task if our settings don't match the
+        // existing image settings.
         if self.task.is_none()
             && self
                 .image
