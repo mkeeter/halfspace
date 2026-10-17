@@ -201,7 +201,7 @@ impl RenderTaskHandle {
                     mode: mode_a,
                     perspective: perspective_a,
                     view: view_a,
-                    size: size_a,
+                    base_size: base_size_a,
                     level: _,
                 }),
                 RenderSettings::Voxel(VoxelRenderSettings {
@@ -209,7 +209,7 @@ impl RenderTaskHandle {
                     mode: mode_b,
                     perspective: perspective_b,
                     view: view_b,
-                    size: size_b,
+                    base_size: base_size_b,
                     level: _,
                 }),
             ) => {
@@ -217,28 +217,28 @@ impl RenderTaskHandle {
                     || mode_a != mode_b
                     || perspective_a != perspective_b
                     || view_a != view_b
-                    || size_a != size_b
+                    || base_size_a != base_size_b
             }
             (
                 RenderSettings::Image(ImageRenderSettings {
                     scene: scene_a,
                     mode: mode_a,
                     view: view_a,
-                    size: size_a,
+                    base_size: base_size_a,
                     level: _,
                 }),
                 RenderSettings::Image(ImageRenderSettings {
                     scene: scene_b,
                     mode: mode_b,
                     view: view_b,
-                    size: size_b,
+                    base_size: base_size_b,
                     level: _,
                 }),
             ) => {
                 scene_a != scene_b
                     || mode_a != mode_b
                     || view_a != view_b
-                    || size_a != size_b
+                    || base_size_a != base_size_b
             }
             _ => true,
         };
@@ -277,8 +277,21 @@ pub struct ImageRenderSettings {
     pub scene: Scene,
     pub mode: ViewMode2,
     pub view: fidget::gui::View2,
-    pub size: fidget::render::ImageSize,
+    /// Size of the full-resolution image
+    pub base_size: fidget::render::ImageSize,
+    /// Downsampling level (0 is full-resolution, N is 2^N smaller)
     pub level: usize,
+}
+
+impl ImageRenderSettings {
+    /// Returns the size at which the image should be rendered
+    pub fn render_size(&self) -> fidget::render::ImageSize {
+        let scale = 1 << self.level;
+        fidget::render::ImageSize::new(
+            (self.base_size.width() / scale).max(1),
+            (self.base_size.height() / scale).max(1),
+        )
+    }
 }
 
 #[derive(Clone)]
@@ -287,8 +300,32 @@ pub struct VoxelRenderSettings {
     pub mode: ViewMode3,
     pub perspective: bool,
     pub view: fidget::gui::View3,
-    pub size: fidget::render::VoxelSize,
+    /// Size of the full-resolution image
+    pub base_size: fidget::render::VoxelSize,
+    /// Downsampling level (0 is full-resolution, N is 2^N smaller)
     pub level: usize,
+}
+
+impl VoxelRenderSettings {
+    /// Returns the size at which the image should be rendered
+    pub fn render_size(&self) -> fidget::render::VoxelSize {
+        // If this is our final rendering level, then do oversampling in
+        // the Z direction for better rendering of edges.
+        let scale = 1 << self.level;
+        let bonus_z = if self.level == 0 { 2 } else { 1 };
+        fidget::render::VoxelSize::new(
+            (self.base_size.width() / scale).max(1),
+            (self.base_size.height() / scale).max(1),
+            (self.base_size.depth() / scale).max(1) * bonus_z,
+        )
+    }
+
+    /// Returns a scale which compensates for bonus Z voxels at level == 0
+    pub fn scale(&self) -> nalgebra::Scale3<f32> {
+        let bonus_z = if self.level == 0 { 2 } else { 1 };
+        let z_scale = 2.0 / bonus_z as f32;
+        nalgebra::Scale3::new(1.0, 1.0, z_scale)
+    }
 }
 
 impl RenderSettings {
@@ -302,7 +339,7 @@ impl RenderSettings {
                 RenderSettings::Image(ImageRenderSettings {
                     scene,
                     view: canvas.view(),
-                    size: canvas.image_size(),
+                    base_size: canvas.image_size(),
                     mode: *mode,
                     level,
                 })
@@ -317,7 +354,7 @@ impl RenderSettings {
                     scene,
                     view: canvas.view(),
                     perspective: *perspective,
-                    size: fidget::render::VoxelSize::new(
+                    base_size: fidget::render::VoxelSize::new(
                         size.width(),
                         size.height(),
                         // XXX select depth?
@@ -416,7 +453,8 @@ pub(crate) async fn render_worker<N: Notify>(
                     }
                     RenderSettings::Image(rs) => {
                         let (distance, color) = gpu.render_pixel_f32(rs).await;
-                        (ExportImage::Distance { distance, color }, rs.size)
+                        let size = rs.render_size();
+                        (ExportImage::Distance { distance, color }, size)
                     }
                 };
 
@@ -635,24 +673,14 @@ impl GpuWorker {
             scene,
             mode,
             view,
-            size,
             perspective,
-            level,
+            ..
         } = vs;
-        // If this is our final rendering level, then do oversampling in
-        // the Z direction for better rendering of edges.
-        let scale = 1 << level;
-        let bonus_z = if *level == 0 { 2 } else { 1 };
-        let image_size = fidget::render::VoxelSize::new(
-            (size.width() / scale).max(1),
-            (size.height() / scale).max(1),
-            (size.depth() / scale).max(1) * bonus_z,
-        );
-        let z_scale = 2.0 / bonus_z as f32;
-        let scale = nalgebra::Scale3::new(1.0, 1.0, z_scale);
+        let image_size = vs.render_size();
+        let scale = vs.scale();
         let mut world_to_model = view.world_to_model() * scale.to_homogeneous();
         if *perspective {
-            *world_to_model.get_mut((3, 2)).unwrap() = 0.3 / bonus_z as f32;
+            *world_to_model.get_mut((3, 2)).unwrap() = 0.15 * scale.z;
         }
         let render_cfg = fidget::raster::voxel::RenderConfig {
             image_size,
@@ -663,7 +691,7 @@ impl GpuWorker {
         self.voxel_merge_workspace.reset();
         let merge_settings = fidget::wgpu::voxel::effects::MergeSettings {
             denoise: true,
-            z_scale,
+            z_scale: scale.z,
         };
         for s in scene.render_shapes.iter() {
             self.voxel_ctx
@@ -755,10 +783,11 @@ impl GpuWorker {
         );
         {
             // compute_pass scope
+            let render_size = vs.render_size();
             let mut compute_pass = encoder
                 .begin_compute_pass(&wgpu::ComputePassDescriptor::default());
             self.pixel_distance_buffer_f16
-                .grow_to_fit(&self.gpu.device, vs.size)
+                .grow_to_fit(&self.gpu.device, render_size)
                 .unwrap();
             // TODO this creates a bind group on each evaluation
             let bg =
@@ -785,9 +814,10 @@ impl GpuWorker {
                     });
             compute_pass.set_bind_group(0, Some(&bg), &[]);
             compute_pass.set_pipeline(&self.pixel_downfloat_pipeline);
-            let nx = (u64::from(vs.size.width()) * u64::from(vs.size.height()))
-                .div_ceil(2)
-                .div_ceil(64);
+            let nx = (u64::from(render_size.width())
+                * u64::from(render_size.height()))
+            .div_ceil(2)
+            .div_ceil(64);
             compute_pass.dispatch_workgroups(nx.try_into().unwrap(), 1, 1);
         }
         self.gpu.queue.submit(std::iter::once(encoder.finish()));
@@ -842,17 +872,9 @@ impl GpuWorker {
 
     fn submit_pixel(&mut self, vs: &ImageRenderSettings) -> ImageSize {
         let ImageRenderSettings {
-            scene,
-            mode,
-            view,
-            size,
-            level,
+            scene, mode, view, ..
         } = vs;
-        let scale = 1 << level;
-        let image_size = fidget::render::ImageSize::new(
-            (size.width() / scale).max(1),
-            (size.height() / scale).max(1),
-        );
+        let image_size = vs.render_size();
         let world_to_model = view.world_to_model();
         let render_cfg = fidget::raster::pixel::RenderConfig {
             image_size,

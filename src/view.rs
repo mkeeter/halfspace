@@ -223,7 +223,7 @@ impl ViewImage {
                             mode: mode_a,
                             perspective: perspective_a,
                             view: view_a,
-                            size: size_a,
+                            base_size: base_size_a,
                             level: _,
                         },
                     ..
@@ -233,7 +233,7 @@ impl ViewImage {
                     mode: mode_b,
                     perspective: perspective_b,
                     view: view_b,
-                    size: size_b,
+                    base_size: base_size_b,
                     level: _,
                 }),
             ) => {
@@ -241,7 +241,7 @@ impl ViewImage {
                     || mode_a != mode_b
                     || perspective_a != perspective_b
                     || view_a != view_b
-                    || size_a != size_b
+                    || base_size_a != base_size_b
             }
             (
                 ViewImage::Pixel {
@@ -250,7 +250,7 @@ impl ViewImage {
                             scene: scene_a,
                             mode: mode_a,
                             view: view_a,
-                            size: size_a,
+                            base_size: base_size_a,
                             level: _,
                         },
                     ..
@@ -259,14 +259,14 @@ impl ViewImage {
                     scene: scene_b,
                     mode: mode_b,
                     view: view_b,
-                    size: size_b,
+                    base_size: base_size_b,
                     level: _,
                 }),
             ) => {
                 scene_a != scene_b
                     || mode_a != mode_b
                     || view_a != view_b
-                    || size_a != size_b
+                    || base_size_a != base_size_b
             }
             _ => false,
         }
