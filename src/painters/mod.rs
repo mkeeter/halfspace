@@ -43,17 +43,14 @@ pub struct WgpuResources {
 /// Handle to WGPU pipelines
 pub struct WgpuPipelines {
     pub rgba: rgba::RgbaResources,
+    pub sdf: sdf::SdfResources,
 }
 
 impl WgpuResources {
-    pub fn reset(&mut self) {
-        // clear doesn't store persistent data
-        self.sdf.reset();
-    }
-
     pub fn pipelines(&self) -> WgpuPipelines {
         WgpuPipelines {
             rgba: self.rgba.clone(),
+            sdf: self.sdf.clone(),
         }
     }
 

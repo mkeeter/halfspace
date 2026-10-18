@@ -1509,8 +1509,7 @@ impl<P: Platform> App<P> {
 }
 
 impl<P: Platform> eframe::App for App<P> {
-    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
-        Self::reset_wgpu_state(frame);
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.update_undo_redo(ui);
         self.handle_messages();
         self.check_shortcuts(ui);
@@ -1731,19 +1730,6 @@ impl<P: Platform> App<P> {
         self.views.retain(|i, _| self.data.blocks.contains_key(i));
         self.start_world_rebuild();
         self.request_repaint = true;
-    }
-
-    /// Resets [`WgpuResources`](painters::WgpuResources) attached to a frame
-    fn reset_wgpu_state(frame: &eframe::Frame) {
-        let wgpu_state = frame.wgpu_render_state().unwrap();
-        if let Some(r) = wgpu_state
-            .renderer
-            .write()
-            .callback_resources
-            .get_mut::<painters::WgpuResources>()
-        {
-            r.reset();
-        }
     }
 
     /// Updates the undo tracking system
