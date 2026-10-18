@@ -1,6 +1,7 @@
 use crate::{
     BlockIndex, MessageReceiver, RenderViewReply, ViewResponse,
     gui::{CAMERA, WARN},
+    painters::WgpuPipelines,
     platform::Notify,
     render::{
         Float16, ImageRenderSettings, RenderImage, RenderSettings,
@@ -207,6 +208,7 @@ pub enum ViewImage {
         ///
         /// This is greyscale for a heightmap rendering, or RGB for shaded
         color: TextureData<u32>,
+        bind_group: wgpu::BindGroup,
         uniform_buffer: wgpu::Buffer,
         settings: VoxelRenderSettings,
     },
@@ -260,6 +262,7 @@ impl ViewData {
         rx: &MessageReceiver<N>,
         render_pool: &RenderWorkerPool<N>,
         device: &wgpu::Device,
+        resources: &WgpuPipelines,
     ) {
         const TARGET_RENDER_TIME: Duration = Duration::from_millis(33);
         const MAX_LEVEL: usize = 10;
@@ -300,6 +303,7 @@ impl ViewData {
                         if let Some(ViewImage::Voxel {
                             color,
                             uniform_buffer,
+                            bind_group,
                             ..
                         }) = prev_image
                         {
@@ -309,7 +313,7 @@ impl ViewData {
                                 } else {
                                     None
                                 };
-                            (texture, uniform_buffer)
+                            (texture.map(|t| (t, bind_group)), uniform_buffer)
                         } else {
                             let uniform_buffer =
                                 device.create_buffer(&wgpu::BufferDescriptor {
@@ -326,24 +330,56 @@ impl ViewData {
                             (None, uniform_buffer)
                         };
 
-                    let texture = texture.unwrap_or_else(|| {
-                        device.create_texture(&wgpu::TextureDescriptor {
-                            label: Some("rgba texture"),
-                            size: texture_size,
-                            mip_level_count: 1,
-                            sample_count: 1,
-                            dimension: wgpu::TextureDimension::D2,
-                            format: wgpu::TextureFormat::Rgba8Unorm,
-                            usage: wgpu::TextureUsages::TEXTURE_BINDING
-                                | wgpu::TextureUsages::COPY_DST,
-                            view_formats: &[],
-                        })
+                    let (texture, bind_group) = texture.unwrap_or_else(|| {
+                        let tex =
+                            device.create_texture(&wgpu::TextureDescriptor {
+                                label: Some("rgba texture"),
+                                size: texture_size,
+                                mip_level_count: 1,
+                                sample_count: 1,
+                                dimension: wgpu::TextureDimension::D2,
+                                format: wgpu::TextureFormat::Rgba8Unorm,
+                                usage: wgpu::TextureUsages::TEXTURE_BINDING
+                                    | wgpu::TextureUsages::COPY_DST,
+                                view_formats: &[],
+                            });
+                        let rgba_texture_view =
+                            tex.create_view(&Default::default());
+                        let bind_group =
+                            device
+                                .create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("rgba bind group"),
+                                layout: &resources.rgba.bind_group_layout,
+                                entries: &[
+                                    wgpu::BindGroupEntry {
+                                        binding: 0,
+                                        resource:
+                                            wgpu::BindingResource::TextureView(
+                                                &rgba_texture_view,
+                                            ),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 1,
+                                        resource:
+                                            wgpu::BindingResource::Sampler(
+                                                &resources.rgba.rgba_sampler,
+                                            ),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 2,
+                                        resource: uniform_buffer
+                                            .as_entire_binding(),
+                                    },
+                                ],
+                            });
+                        (tex, bind_group)
                     });
                     ViewImage::Voxel {
                         color: TextureData {
                             data: image.color,
                             texture,
                         },
+                        bind_group,
                         uniform_buffer,
                         settings,
                     }

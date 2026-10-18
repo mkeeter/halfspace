@@ -235,6 +235,7 @@ impl<'a, N: Notify> WorldView<'a, N> {
                 ViewImage::Voxel {
                     color,
                     uniform_buffer,
+                    bind_group,
                     settings,
                 },
                 ViewCanvas::Canvas3 { mode, canvas, .. },
@@ -242,9 +243,9 @@ impl<'a, N: Notify> WorldView<'a, N> {
                 ui.painter().add(egui_wgpu::Callback::new_paint_callback(
                     rect,
                     crate::painters::WgpuRgbaPainter::new(
-                        index,
                         color.take(),
                         uniform_buffer.clone(),
+                        bind_group.clone(),
                         settings.clone(),
                         size,
                         canvas.view(),

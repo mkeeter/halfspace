@@ -40,24 +40,27 @@ pub struct WgpuResources {
     sdf: sdf::SdfResources,
 }
 
+/// Handle to WGPU pipelines
+pub struct WgpuPipelines {
+    pub rgba: rgba::RgbaResources,
+}
+
 impl WgpuResources {
     pub fn reset(&mut self) {
         // clear doesn't store persistent data
-        self.rgba.reset();
         self.sdf.reset();
     }
 
-    /// Installs an instance of `WgpuResources` into the callback resources
-    pub fn install(wgpu_state: &eframe::egui_wgpu::RenderState) {
-        let resources = Self::new(&wgpu_state.device, wgpu_state.target_format);
-        wgpu_state
-            .renderer
-            .write()
-            .callback_resources
-            .insert(resources);
+    pub fn pipelines(&self) -> WgpuPipelines {
+        WgpuPipelines {
+            rgba: self.rgba.clone(),
+        }
     }
 
-    fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        target_format: wgpu::TextureFormat,
+    ) -> Self {
         let clear = clear::ClearResources::new(device, target_format);
 
         let rgba = rgba::RgbaResources::new(device, target_format);

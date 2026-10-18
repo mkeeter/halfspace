@@ -1,12 +1,9 @@
 use super::WgpuResources;
-use crate::{
-    render::VoxelRenderSettings, view::TextureData, world::BlockIndex,
-};
+use crate::{render::VoxelRenderSettings, view::TextureData};
 use eframe::{
     egui,
     egui_wgpu::{self, wgpu},
 };
-use std::collections::HashMap;
 use zerocopy::IntoBytes;
 
 /// GPU callback for painting shaded objects
@@ -15,14 +12,20 @@ pub struct WgpuRgbaPainter {
     view: fidget::gui::View3,
     size: fidget::render::ImageSize,
 
-    /// Index of the block being rendered
-    index: BlockIndex,
-
     /// Texture to render
     data: TextureData<u32>,
 
     /// Buffer sized for a [`Uniforms`] object
     uniforms: wgpu::Buffer,
+
+    /// Bind group to use when rendering
+    ///
+    /// This will include the texture from `data` (which we still need because
+    /// we may be responsible for queueing the CPU -> GPU copy) and the buffer
+    /// from `uniforms` (likewise)..  It also includes a texture view, which
+    /// doesn't need to be explicitly stored here (because we have nothing to do
+    /// with it).
+    bind_group: wgpu::BindGroup,
 
     /// Settings with which the image was rendered
     settings: VoxelRenderSettings,
@@ -39,19 +42,19 @@ impl WgpuRgbaPainter {
     /// Builds a new shaded painter
     ///
     /// Note that `size` and `view` are associated with the current rendering
-    /// quad; the `image` contains its own size and view transforms.
+    /// quad; the `settings` contains the image's render settings
     pub fn new(
-        index: BlockIndex,
         data: TextureData<u32>,
         uniforms: wgpu::Buffer,
+        bind_group: wgpu::BindGroup,
         settings: VoxelRenderSettings,
         size: fidget::render::ImageSize,
         view: fidget::gui::View3,
     ) -> Self {
         Self {
-            index,
             data,
             uniforms,
+            bind_group,
             settings,
             size,
             view,
@@ -62,14 +65,12 @@ impl WgpuRgbaPainter {
 impl egui_wgpu::CallbackTrait for WgpuRgbaPainter {
     fn prepare(
         &self,
-        device: &wgpu::Device,
+        _device: &wgpu::Device,
         queue: &wgpu::Queue,
         _screen_descriptor: &egui_wgpu::ScreenDescriptor,
         _egui_encoder: &mut wgpu::CommandEncoder,
-        resources: &mut egui_wgpu::CallbackResources,
+        _resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
-        let gr: &mut WgpuResources = resources.get_mut().unwrap();
-
         let render_size = self.settings.render_size();
         let texture_size = wgpu::Extent3d {
             width: render_size.width(),
@@ -84,33 +85,39 @@ impl egui_wgpu::CallbackTrait for WgpuRgbaPainter {
             self.size,
         );
 
-        // Write the image texture
-        let data = gr.rgba.get_data(
-            &self.data,
-            &self.uniforms,
-            device,
-            queue,
-            texture_size,
-        );
+        // Write the image texture (if not already done)
+        if !self.data.data.is_empty() {
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.data.texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                self.data.data.as_bytes(),
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(4 * texture_size.width),
+                    rows_per_image: Some(texture_size.height),
+                },
+                texture_size,
+            );
+        }
 
+        // Write the uniforms
         let uniforms = Uniforms {
             transform: transform.into(),
         };
-        {
-            let mut writer = queue
-                .write_buffer_with(
-                    &self.uniforms,
-                    0,
-                    (std::mem::size_of_val(&uniforms) as u64)
-                        .try_into()
-                        .unwrap(),
-                )
-                .unwrap();
-            writer.copy_from_slice(uniforms.as_bytes());
-        }
-
-        let prev = gr.rgba.bound_data.insert(self.index, data);
-        assert!(prev.is_none());
+        let mut writer = queue
+            .write_buffer_with(
+                &self.uniforms,
+                0,
+                (std::mem::size_of_val(&uniforms) as u64)
+                    .try_into()
+                    .unwrap(),
+            )
+            .unwrap();
+        writer.copy_from_slice(uniforms.as_bytes());
 
         Vec::new()
     }
@@ -123,7 +130,10 @@ impl egui_wgpu::CallbackTrait for WgpuRgbaPainter {
     ) {
         let rs: &WgpuResources = resources.get().unwrap();
         rs.clear.paint(render_pass);
-        rs.rgba.paint(render_pass, self.index);
+
+        render_pass.set_pipeline(&rs.rgba.pipeline);
+        render_pass.set_bind_group(0, Some(&self.bind_group), &[]);
+        render_pass.draw(0..6, 0..1);
     }
 }
 
@@ -131,17 +141,11 @@ impl egui_wgpu::CallbackTrait for WgpuRgbaPainter {
 ///
 /// There is a single copy of this resources object, and it's available during
 /// both preparation and painting passes.
+#[derive(Clone)]
 pub(crate) struct RgbaResources {
     pipeline: wgpu::RenderPipeline,
-    bind_group_layout: wgpu::BindGroupLayout,
-
-    /// Per-frame bound data
-    ///
-    /// This is cleared at the start of the frame, populated in
-    /// [`WgpuRgbaPainter::prepare`], and used in [`RgbaResources::paint`]
-    bound_data: HashMap<BlockIndex, RgbaData>,
-
-    rgba_sampler: wgpu::Sampler,
+    pub bind_group_layout: wgpu::BindGroupLayout,
+    pub rgba_sampler: wgpu::Sampler,
 }
 
 impl RgbaResources {
@@ -266,78 +270,7 @@ impl RgbaResources {
         Self {
             pipeline,
             bind_group_layout,
-            bound_data: HashMap::new(),
             rgba_sampler,
         }
     }
-
-    pub fn reset(&mut self) {
-        self.bound_data.clear();
-    }
-
-    fn get_data(
-        &mut self,
-        data: &TextureData<u32>,
-        uniform_buffer: &wgpu::Buffer,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        size: wgpu::Extent3d,
-    ) -> RgbaData {
-        let rgba_texture_view = data.texture.create_view(&Default::default());
-
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("rgba bind group"),
-            layout: &self.bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(
-                        &rgba_texture_view,
-                    ),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(
-                        &self.rgba_sampler,
-                    ),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: uniform_buffer.as_entire_binding(),
-                },
-            ],
-        });
-        if !data.data.is_empty() {
-            queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &data.texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                data.data.as_bytes(),
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(4 * size.width),
-                    rows_per_image: Some(size.height),
-                },
-                size,
-            );
-        }
-
-        RgbaData { bind_group }
-    }
-
-    pub fn paint(&self, render_pass: &mut wgpu::RenderPass, index: BlockIndex) {
-        render_pass.set_pipeline(&self.pipeline);
-        let b = &self.bound_data[&index];
-        render_pass.set_bind_group(0, &b.bind_group, &[]);
-        render_pass.draw(0..6, 0..1);
-    }
-}
-
-/// Resources used to render a single shaded image
-struct RgbaData {
-    /// Bind group for bitfield rendering
-    bind_group: wgpu::BindGroup,
 }
