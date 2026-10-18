@@ -201,7 +201,6 @@ pub enum ViewImage {
         color: Option<TextureData<[u8; 4]>>,
         uniform_buffer: wgpu::Buffer,
         settings: ImageRenderSettings,
-        level: usize,
     },
     Voxel {
         /// Pre-baked color
@@ -210,19 +209,19 @@ pub enum ViewImage {
         color: TextureData<u32>,
         uniform_buffer: wgpu::Buffer,
         settings: VoxelRenderSettings,
-        level: usize,
     },
 }
 
 impl ViewImage {
-    fn settings(&self) -> RenderSettings {
-        match self {
-            ViewImage::Pixel { settings, .. } => {
-                RenderSettings::Image(settings.clone())
+    fn matches(&self, settings: &RenderSettings) -> bool {
+        match (self, settings) {
+            (ViewImage::Voxel { settings, .. }, RenderSettings::Voxel(vs)) => {
+                settings.matches(vs)
             }
-            ViewImage::Voxel { settings, .. } => {
-                RenderSettings::Voxel(settings.clone())
+            (ViewImage::Pixel { settings, .. }, RenderSettings::Image(vs)) => {
+                settings.matches(vs)
             }
+            _ => false,
         }
     }
 }
@@ -281,19 +280,14 @@ impl ViewData {
             if let Some(next) = level.checked_sub(1) {
                 self.spawn_render_task(
                     r.block,
-                    r.image.settings(),
-                    next,
+                    r.image.settings().with_level(next),
                     rx,
                     render_pool,
                 );
             }
             let prev_image = self.image.take();
             self.image = Some(match r.image {
-                RenderImage::Voxel {
-                    image,
-                    settings,
-                    level,
-                } => {
+                RenderImage::Voxel { image, settings } => {
                     let texture_size = wgpu::Extent3d {
                         width: image.size.width(),
                         height: image.size.height(),
@@ -352,14 +346,9 @@ impl ViewData {
                         },
                         uniform_buffer,
                         settings,
-                        level,
                     }
                 }
-                RenderImage::Pixel {
-                    image,
-                    settings,
-                    level,
-                } => {
+                RenderImage::Pixel { image, settings } => {
                     // Reuse textures if possible
                     let texture_size = wgpu::Extent3d {
                         width: image.size.width(),
@@ -443,7 +432,6 @@ impl ViewData {
                         }),
                         settings,
                         uniform_buffer,
-                        level,
                     }
                 }
             });
@@ -455,7 +443,6 @@ impl ViewData {
         &mut self,
         block: BlockIndex,
         settings: RenderSettings,
-        level: usize,
         rx: &MessageReceiver<N>,
         render_pool: &RenderWorkerPool<N>,
     ) {
@@ -464,7 +451,6 @@ impl ViewData {
             block,
             self.generation,
             settings,
-            level,
             rx.sender_with_gen(),
         ));
     }
@@ -480,7 +466,9 @@ impl ViewData {
         rx: &MessageReceiver<N>,
         render_pool: &RenderWorkerPool<N>,
     ) -> Option<&mut ViewImage> {
-        let settings = RenderSettings::from_canvas(&self.canvas, scene);
+        // Build settings assuming that we're starting from a max-level render
+        let settings =
+            RenderSettings::from_canvas(&self.canvas, scene, self.start_level);
 
         // If the image settings have changed, then start a new render, unless
         // the task is a max-level  (i.e. lowest-resolution) render, to preserve
@@ -488,26 +476,21 @@ impl ViewData {
         if self
             .task
             .as_ref()
-            .is_some_and(|prev| prev.should_cancel(&settings, self.start_level))
+            .is_some_and(|prev| prev.should_cancel(&settings))
         {
             self.task = None; // dropping the task cancels it
         }
 
-        // If we don't have a task and our image was rendered with different
-        // settings, then start a new task
+        // If we don't have a task (either because it's done or it was cancelled
+        // above), then start a new task if our settings don't match the
+        // existing image settings.
         if self.task.is_none()
             && self
                 .image
                 .as_ref()
-                .is_none_or(|image| settings != image.settings())
+                .is_none_or(|image| !image.matches(&settings))
         {
-            self.spawn_render_task(
-                block,
-                settings,
-                self.start_level,
-                rx,
-                render_pool,
-            );
+            self.spawn_render_task(block, settings, rx, render_pool);
         }
         self.image.as_mut()
     }

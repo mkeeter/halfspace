@@ -1681,7 +1681,7 @@ impl<P: Platform> App<P> {
                 {
                     let tx = self.rx.sender();
                     match export::image_view(min, max, resolution) {
-                        Ok((view, size)) => {
+                        Ok((view, base_size)) => {
                             // Sends the export task to the render pool
                             let cancel = self.render_pool.export(
                                 render::RenderSettings::Image(
@@ -1689,7 +1689,8 @@ impl<P: Platform> App<P> {
                                         scene,
                                         mode: view::ViewMode2::Bitfield,
                                         view,
-                                        size,
+                                        base_size,
+                                        level: 0,
                                     },
                                 ),
                                 tx,
