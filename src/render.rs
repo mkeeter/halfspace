@@ -241,10 +241,18 @@ impl ImageRenderSettings {
 
     /// Returns `true` if the render settings are identical, other than `level`
     pub fn matches(&self, other: &ImageRenderSettings) -> bool {
-        self.scene == other.scene
-            && self.mode == other.mode
-            && self.view == other.view
-            && self.base_size == other.base_size
+        // Manual destructuring to fail loudly if things change
+        let Self {
+            scene,
+            mode,
+            view,
+            base_size,
+            level: _,
+        } = self;
+        scene == &other.scene
+            && mode == &other.mode
+            && view == &other.view
+            && base_size == &other.base_size
     }
 }
 
@@ -283,11 +291,20 @@ impl VoxelRenderSettings {
 
     /// Returns `true` if the render settings are identical, other than `level`
     pub fn matches(&self, other: &VoxelRenderSettings) -> bool {
-        self.scene == other.scene
-            && self.mode == other.mode
-            && self.perspective == other.perspective
-            && self.view == other.view
-            && self.base_size == other.base_size
+        // Manual destructuring to fail loudly if things change
+        let Self {
+            scene,
+            mode,
+            perspective,
+            view,
+            base_size,
+            level: _,
+        } = self;
+        scene == &other.scene
+            && mode == &other.mode
+            && perspective == &other.perspective
+            && view == &other.view
+            && base_size == &other.base_size
     }
 }
 

@@ -488,7 +488,7 @@ impl ViewData {
             && self
                 .image
                 .as_ref()
-                .is_none_or(|image| image.matches(&settings))
+                .is_none_or(|image| !image.matches(&settings))
         {
             self.spawn_render_task(block, settings, rx, render_pool);
         }
