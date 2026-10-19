@@ -399,8 +399,8 @@ impl ViewData {
                     let (
                         distance_tex,
                         mut color_tex,
-                        uniform_buffer,
                         mut bind_group,
+                        uniform_buffer,
                     ) = if let Some(ViewImage::Pixel {
                         distance,
                         color,
@@ -416,8 +416,8 @@ impl ViewData {
                         (
                             valid.then_some(distance.texture),
                             valid.then_some(color.map(|c| c.texture)).flatten(),
+                            valid.then_some(bind_group),
                             uniform_buffer,
-                            Some(bind_group),
                         )
                     } else {
                         let uniform_buffer =
@@ -431,7 +431,7 @@ impl ViewData {
                                 usage: wgpu::BufferUsages::UNIFORM
                                     | wgpu::BufferUsages::COPY_DST,
                             });
-                        (None, None, uniform_buffer, None)
+                        (None, None, None, uniform_buffer)
                     };
 
                     // We'll now go through and make sure that all of the
@@ -453,7 +453,9 @@ impl ViewData {
                         })
                     });
                     if image.color.is_none() {
-                        bind_group = None;
+                        if color_tex.is_some() {
+                            bind_group = None;
+                        }
                         color_tex = None;
                     } else if color_tex.is_none() {
                         bind_group = None;
@@ -476,11 +478,11 @@ impl ViewData {
                     let color_tex = color_tex.unwrap_or_else(|| {
                         sdf_resources.dummy_color_texture.clone()
                     });
-                    let distance_texture_view =
-                        distance_tex.create_view(&Default::default());
-                    let color_texture_view =
-                        color_tex.create_view(&Default::default());
                     let bind_group = bind_group.unwrap_or_else(|| {
+                        let distance_texture_view =
+                            distance_tex.create_view(&Default::default());
+                        let color_texture_view =
+                            color_tex.create_view(&Default::default());
                         device.create_bind_group(&wgpu::BindGroupDescriptor {
                             label: Some("sdf bind group"),
                             layout: &sdf_resources.bind_group_layout,
