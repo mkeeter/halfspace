@@ -1,7 +1,7 @@
 use crate::{
     BlockIndex, MessageReceiver, RenderViewReply, ViewResponse,
     gui::{CAMERA, WARN},
-    painters::WgpuPipelines,
+    painters::WgpuResources,
     platform::Notify,
     render::{
         Float16, ImageRenderSettings, RenderImage, RenderSettings,
@@ -263,7 +263,7 @@ impl ViewData {
         rx: &MessageReceiver<N>,
         render_pool: &RenderWorkerPool<N>,
         device: &wgpu::Device,
-        resources: &WgpuPipelines,
+        resources: &WgpuResources,
     ) {
         const TARGET_RENDER_TIME: Duration = Duration::from_millis(33);
         const MAX_LEVEL: usize = 10;
@@ -349,11 +349,12 @@ impl ViewData {
                         // alive by the bind group below.
                         let rgba_texture_view =
                             tex.create_view(&Default::default());
+                        let rgba_resources = resources.rgba();
                         let bind_group =
                             device
                                 .create_bind_group(&wgpu::BindGroupDescriptor {
                                 label: Some("rgba bind group"),
-                                layout: &resources.rgba.bind_group_layout,
+                                layout: &rgba_resources.bind_group_layout,
                                 entries: &[
                                     wgpu::BindGroupEntry {
                                         binding: 0,
@@ -366,7 +367,7 @@ impl ViewData {
                                         binding: 1,
                                         resource:
                                             wgpu::BindingResource::Sampler(
-                                                &resources.rgba.rgba_sampler,
+                                                &rgba_resources.rgba_sampler,
                                             ),
                                     },
                                     wgpu::BindGroupEntry {
@@ -471,8 +472,9 @@ impl ViewData {
                         ));
                     }
 
+                    let sdf_resources = resources.sdf();
                     let color_tex = color_tex.unwrap_or_else(|| {
-                        resources.sdf.dummy_color_texture.clone()
+                        sdf_resources.dummy_color_texture.clone()
                     });
                     let distance_texture_view =
                         distance_tex.create_view(&Default::default());
@@ -481,7 +483,7 @@ impl ViewData {
                     let bind_group = bind_group.unwrap_or_else(|| {
                         device.create_bind_group(&wgpu::BindGroupDescriptor {
                             label: Some("sdf bind group"),
-                            layout: &resources.sdf.bind_group_layout,
+                            layout: &sdf_resources.bind_group_layout,
                             entries: &[
                                 wgpu::BindGroupEntry {
                                     binding: 0,
@@ -493,7 +495,7 @@ impl ViewData {
                                 wgpu::BindGroupEntry {
                                     binding: 1,
                                     resource: wgpu::BindingResource::Sampler(
-                                        &resources.sdf.distance_sampler,
+                                        &sdf_resources.distance_sampler,
                                     ),
                                 },
                                 wgpu::BindGroupEntry {
@@ -506,7 +508,7 @@ impl ViewData {
                                 wgpu::BindGroupEntry {
                                     binding: 3,
                                     resource: wgpu::BindingResource::Sampler(
-                                        &resources.sdf.color_sampler,
+                                        &sdf_resources.color_sampler,
                                     ),
                                 },
                                 wgpu::BindGroupEntry {

@@ -31,7 +31,10 @@ pub use sdf::{Uniforms as SdfUniforms, WgpuSdfPainter};
 ///
 /// This is constructed *once* and used for every GPU rendering task in the
 /// GUI.  It is stored in [`CallbackResources`](egui_wgpu::CallbackResources),
-/// which is available to all WGPU painters.
+/// which is available to all WGPU painters; additionally, a copy of the object
+/// is stored in the main [`App`](crate::App) object.  All members are
+/// reference-counted WGPU handles, so cloning should be cheap.
+#[derive(Clone)]
 pub struct WgpuResources {
     /// Render pipeline which clears the screen, drawing a grey checkerboard
     clear: clear::ClearResources,
@@ -40,20 +43,7 @@ pub struct WgpuResources {
     sdf: sdf::SdfResources,
 }
 
-/// Handle to WGPU pipelines
-pub struct WgpuPipelines {
-    pub rgba: rgba::RgbaResources,
-    pub sdf: sdf::SdfResources,
-}
-
 impl WgpuResources {
-    pub fn pipelines(&self) -> WgpuPipelines {
-        WgpuPipelines {
-            rgba: self.rgba.clone(),
-            sdf: self.sdf.clone(),
-        }
-    }
-
     pub fn new(
         device: &wgpu::Device,
         target_format: wgpu::TextureFormat,
@@ -64,6 +54,14 @@ impl WgpuResources {
         let sdf = sdf::SdfResources::new(device, target_format);
 
         WgpuResources { clear, rgba, sdf }
+    }
+
+    pub fn rgba(&self) -> &rgba::RgbaResources {
+        &self.rgba
+    }
+
+    pub fn sdf(&self) -> &sdf::SdfResources {
+        &self.sdf
     }
 }
 

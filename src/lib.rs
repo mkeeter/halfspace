@@ -361,8 +361,8 @@ pub(crate) struct App<P: Platform> {
     /// [`egui_wgpu::CallbackTrait`].
     device: wgpu::Device,
 
-    /// Pipelines, used for bind group layouts
-    pipelines: painters::WgpuPipelines,
+    /// Pipelines, used to access bind group layouts
+    pipelines: painters::WgpuResources,
 
     /// Show debug options and menu items in native build
     debug: bool,
@@ -490,7 +490,7 @@ impl<P: Platform> App<P> {
             &wgpu_state.device,
             wgpu_state.target_format,
         );
-        let pipelines = wgpu_resources.pipelines();
+        let pipelines = wgpu_resources.clone();
         wgpu_state
             .renderer
             .write()
