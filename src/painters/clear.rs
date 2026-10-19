@@ -1,5 +1,6 @@
 use eframe::egui_wgpu::wgpu;
 
+#[derive(Clone)]
 pub struct ClearResources {
     pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,

@@ -361,6 +361,9 @@ pub(crate) struct App<P: Platform> {
     /// [`egui_wgpu::CallbackTrait`].
     device: wgpu::Device,
 
+    /// Pipelines, used to access bind group layouts
+    pipelines: painters::WgpuResources,
+
     /// Show debug options and menu items in native build
     debug: bool,
 
@@ -480,9 +483,19 @@ impl<P: Platform> App<P> {
         mut platform: P,
         debug: bool,
     ) -> Self {
-        // Install custom render pipelines
+        // Install custom render resources into the WGPU state (which is
+        // available in painter trait methods)
         let wgpu_state = cc.wgpu_render_state.as_ref().unwrap();
-        painters::WgpuResources::install(wgpu_state);
+        let wgpu_resources = painters::WgpuResources::new(
+            &wgpu_state.device,
+            wgpu_state.target_format,
+        );
+        let pipelines = wgpu_resources.clone();
+        wgpu_state
+            .renderer
+            .write()
+            .callback_resources
+            .insert(wgpu_resources);
 
         let mut fonts = egui::FontDefinitions::default();
         fonts.font_data.insert(
@@ -557,6 +570,7 @@ impl<P: Platform> App<P> {
             tree: egui_dock::DockState::new(vec![]),
             script_state: ScriptState::Done,
             device: wgpu_state.device.clone(),
+            pipelines,
             undo,
             syntax,
             views: HashMap::new(),
@@ -1495,8 +1509,7 @@ impl<P: Platform> App<P> {
 }
 
 impl<P: Platform> eframe::App for App<P> {
-    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
-        Self::reset_wgpu_state(frame);
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.update_undo_redo(ui);
         self.handle_messages();
         self.check_shortcuts(ui);
@@ -1719,19 +1732,6 @@ impl<P: Platform> App<P> {
         self.request_repaint = true;
     }
 
-    /// Resets [`WgpuResources`](painters::WgpuResources) attached to a frame
-    fn reset_wgpu_state(frame: &eframe::Frame) {
-        let wgpu_state = frame.wgpu_render_state().unwrap();
-        if let Some(r) = wgpu_state
-            .renderer
-            .write()
-            .callback_resources
-            .get_mut::<painters::WgpuResources>()
-        {
-            r.reset();
-        }
-    }
-
     /// Updates the undo tracking system
     fn update_undo_redo(&mut self, ctx: &egui::Context) {
         let (is_dragging, drag_released) =
@@ -1769,7 +1769,13 @@ impl<P: Platform> App<P> {
             }
             Message::RenderView(reply) => {
                 if let Some(e) = self.views.get_mut(&reply.block) {
-                    e.update(reply, &self.rx, &self.render_pool, &self.device)
+                    e.update(
+                        reply,
+                        &self.rx,
+                        &self.render_pool,
+                        &self.device,
+                        &self.pipelines,
+                    )
                 }
             }
             Message::Loaded { state } => match self.modal {

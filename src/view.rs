@@ -1,6 +1,7 @@
 use crate::{
     BlockIndex, MessageReceiver, RenderViewReply, ViewResponse,
     gui::{CAMERA, WARN},
+    painters::WgpuResources,
     platform::Notify,
     render::{
         Float16, ImageRenderSettings, RenderImage, RenderSettings,
@@ -200,6 +201,7 @@ pub enum ViewImage {
         distance: TextureData<Float16>,
         color: Option<TextureData<[u8; 4]>>,
         uniform_buffer: wgpu::Buffer,
+        bind_group: wgpu::BindGroup,
         settings: ImageRenderSettings,
     },
     Voxel {
@@ -207,6 +209,7 @@ pub enum ViewImage {
         ///
         /// This is greyscale for a heightmap rendering, or RGB for shaded
         color: TextureData<u32>,
+        bind_group: wgpu::BindGroup,
         uniform_buffer: wgpu::Buffer,
         settings: VoxelRenderSettings,
     },
@@ -260,6 +263,7 @@ impl ViewData {
         rx: &MessageReceiver<N>,
         render_pool: &RenderWorkerPool<N>,
         device: &wgpu::Device,
+        resources: &WgpuResources,
     ) {
         const TARGET_RENDER_TIME: Duration = Duration::from_millis(33);
         const MAX_LEVEL: usize = 10;
@@ -294,12 +298,14 @@ impl ViewData {
                         depth_or_array_layers: 1,
                     };
 
-                    // If we have a previous image, then reuse its buffers (if
-                    // the sizes matches)
+                    // If we have a previous image, then reuse its texture (if
+                    // the size matches).  If not, then recreate the texture,
+                    // view, and bind group.
                     let (texture, uniform_buffer) =
                         if let Some(ViewImage::Voxel {
                             color,
                             uniform_buffer,
+                            bind_group,
                             ..
                         }) = prev_image
                         {
@@ -309,7 +315,7 @@ impl ViewData {
                                 } else {
                                     None
                                 };
-                            (texture, uniform_buffer)
+                            (texture.map(|t| (t, bind_group)), uniform_buffer)
                         } else {
                             let uniform_buffer =
                                 device.create_buffer(&wgpu::BufferDescriptor {
@@ -326,24 +332,59 @@ impl ViewData {
                             (None, uniform_buffer)
                         };
 
-                    let texture = texture.unwrap_or_else(|| {
-                        device.create_texture(&wgpu::TextureDescriptor {
-                            label: Some("rgba texture"),
-                            size: texture_size,
-                            mip_level_count: 1,
-                            sample_count: 1,
-                            dimension: wgpu::TextureDimension::D2,
-                            format: wgpu::TextureFormat::Rgba8Unorm,
-                            usage: wgpu::TextureUsages::TEXTURE_BINDING
-                                | wgpu::TextureUsages::COPY_DST,
-                            view_formats: &[],
-                        })
+                    let (texture, bind_group) = texture.unwrap_or_else(|| {
+                        let tex =
+                            device.create_texture(&wgpu::TextureDescriptor {
+                                label: Some("rgba texture"),
+                                size: texture_size,
+                                mip_level_count: 1,
+                                sample_count: 1,
+                                dimension: wgpu::TextureDimension::D2,
+                                format: wgpu::TextureFormat::Rgba8Unorm,
+                                usage: wgpu::TextureUsages::TEXTURE_BINDING
+                                    | wgpu::TextureUsages::COPY_DST,
+                                view_formats: &[],
+                            });
+                        // The texture view is reference-counted, so it's kept
+                        // alive by the bind group below.
+                        let rgba_texture_view =
+                            tex.create_view(&Default::default());
+                        let rgba_resources = resources.rgba();
+                        let bind_group =
+                            device
+                                .create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("rgba bind group"),
+                                layout: &rgba_resources.bind_group_layout,
+                                entries: &[
+                                    wgpu::BindGroupEntry {
+                                        binding: 0,
+                                        resource:
+                                            wgpu::BindingResource::TextureView(
+                                                &rgba_texture_view,
+                                            ),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 1,
+                                        resource:
+                                            wgpu::BindingResource::Sampler(
+                                                &rgba_resources.rgba_sampler,
+                                            ),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 2,
+                                        resource: uniform_buffer
+                                            .as_entire_binding(),
+                                    },
+                                ],
+                            });
+                        (tex, bind_group)
                     });
                     ViewImage::Voxel {
                         color: TextureData {
                             data: image.color,
                             texture,
                         },
+                        bind_group,
                         uniform_buffer,
                         settings,
                     }
@@ -355,40 +396,48 @@ impl ViewData {
                         height: image.size.height(),
                         depth_or_array_layers: 1,
                     };
-                    let (distance_tex, mut color_tex, uniform_buffer) =
-                        if let Some(ViewImage::Pixel {
-                            distance,
-                            color,
+                    let (
+                        distance_tex,
+                        mut color_tex,
+                        mut bind_group,
+                        uniform_buffer,
+                    ) = if let Some(ViewImage::Pixel {
+                        distance,
+                        color,
+                        uniform_buffer,
+                        bind_group,
+                        ..
+                    }) = prev_image
+                    {
+                        // Distance and color textures are always the same
+                        // dimensions, but the color texture is not always
+                        // present, so we'll check the distance tex size.
+                        let valid = distance.texture.size() == texture_size;
+                        (
+                            valid.then_some(distance.texture),
+                            valid.then_some(color.map(|c| c.texture)).flatten(),
+                            valid.then_some(bind_group),
                             uniform_buffer,
-                            ..
-                        }) = prev_image
-                        {
-                            // Distance and color textures are always the same
-                            // dimensions, but the color texture is not always
-                            // present, so we'll check the distance tex size.
-                            let valid = distance.texture.size() == texture_size;
-                            (
-                                valid.then_some(distance.texture),
-                                valid
-                                    .then_some(color.map(|c| c.texture))
-                                    .flatten(),
-                                uniform_buffer,
-                            )
-                        } else {
-                            let uniform_buffer =
-                                device.create_buffer(&wgpu::BufferDescriptor {
-                                    label: Some("pixel uniform buffer"),
-                                    size: std::mem::size_of::<
-                                        crate::painters::SdfUniforms,
-                                    >(
-                                    )
-                                        as u64,
-                                    mapped_at_creation: false,
-                                    usage: wgpu::BufferUsages::UNIFORM
-                                        | wgpu::BufferUsages::COPY_DST,
-                                });
-                            (None, None, uniform_buffer)
-                        };
+                        )
+                    } else {
+                        let uniform_buffer =
+                            device.create_buffer(&wgpu::BufferDescriptor {
+                                label: Some("pixel uniform buffer"),
+                                size: std::mem::size_of::<
+                                    crate::painters::SdfUniforms,
+                                >()
+                                    as u64,
+                                mapped_at_creation: false,
+                                usage: wgpu::BufferUsages::UNIFORM
+                                    | wgpu::BufferUsages::COPY_DST,
+                            });
+                        (None, None, None, uniform_buffer)
+                    };
+
+                    // We'll now go through and make sure that all of the
+                    // relevant textures are present.  If any of them change,
+                    // then we'll clear `bind_group` to `None`, so that we can
+                    // regenerate it with new bindings further below.
 
                     let distance_tex = distance_tex.unwrap_or_else(|| {
                         device.create_texture(&wgpu::TextureDescriptor {
@@ -404,8 +453,12 @@ impl ViewData {
                         })
                     });
                     if image.color.is_none() {
+                        if color_tex.is_some() {
+                            bind_group = None;
+                        }
                         color_tex = None;
                     } else if color_tex.is_none() {
+                        bind_group = None;
                         color_tex = Some(device.create_texture(
                             &wgpu::TextureDescriptor {
                                 label: Some("sdf color texture"),
@@ -421,6 +474,54 @@ impl ViewData {
                         ));
                     }
 
+                    let sdf_resources = resources.sdf();
+                    let color_tex = color_tex.unwrap_or_else(|| {
+                        sdf_resources.dummy_color_texture.clone()
+                    });
+                    let bind_group = bind_group.unwrap_or_else(|| {
+                        let distance_texture_view =
+                            distance_tex.create_view(&Default::default());
+                        let color_texture_view =
+                            color_tex.create_view(&Default::default());
+                        device.create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("sdf bind group"),
+                            layout: &sdf_resources.bind_group_layout,
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource:
+                                        wgpu::BindingResource::TextureView(
+                                            &distance_texture_view,
+                                        ),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: wgpu::BindingResource::Sampler(
+                                        &sdf_resources.distance_sampler,
+                                    ),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 2,
+                                    resource:
+                                        wgpu::BindingResource::TextureView(
+                                            &color_texture_view,
+                                        ),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 3,
+                                    resource: wgpu::BindingResource::Sampler(
+                                        &sdf_resources.color_sampler,
+                                    ),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 4,
+                                    resource: uniform_buffer
+                                        .as_entire_binding(),
+                                },
+                            ],
+                        })
+                    });
+
                     ViewImage::Pixel {
                         distance: TextureData {
                             data: image.distance,
@@ -428,10 +529,11 @@ impl ViewData {
                         },
                         color: image.color.map(|data| TextureData {
                             data,
-                            texture: color_tex.unwrap(),
+                            texture: color_tex,
                         }),
                         settings,
                         uniform_buffer,
+                        bind_group,
                     }
                 }
             });
