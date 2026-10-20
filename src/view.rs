@@ -272,6 +272,9 @@ impl ViewData {
         // Adjust self.start_level to hit a render time target, with some
         // hysteresis to avoid bouncing between levels
         let level = r.image.level();
+        if level == 0 {
+            println!("rendered {:?} in {:?}", r.block, render_time);
+        }
         if level == self.start_level {
             if render_time > TARGET_RENDER_TIME && level < MAX_LEVEL {
                 self.start_level += 1;
