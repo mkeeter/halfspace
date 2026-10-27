@@ -56,7 +56,9 @@ use egui_wgpu::wgpu;
 use fidget::{
     raster::pixel::RawDistancePixel,
     render::{ImageSize, VoxelSize},
+    wgpu::Context as _, // trait import
 };
+use std::collections::HashMap;
 use web_time::Instant;
 use zerocopy::{FromBytes, IntoBytes};
 
@@ -502,36 +504,122 @@ pub(crate) async fn render_worker<N: Notify>(
     }
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
+pub struct VoxelContext {
+    render: fidget::wgpu::voxel::render::Context,
+    merge: fidget::wgpu::voxel::merge::Context,
+    shade: fidget::wgpu::voxel::shade::Context,
+    ssao: fidget::wgpu::voxel::ssao::Context,
+    color: fidget::wgpu::voxel::color::Context,
+    heightmap: fidget::wgpu::voxel::heightmap::Context,
+}
+
+pub struct VoxelWorkspace {
+    render: fidget::wgpu::voxel::render::Workspace,
+    merge: fidget::wgpu::voxel::merge::Workspace,
+    shade: fidget::wgpu::voxel::shade::Workspace,
+    ssao: fidget::wgpu::voxel::ssao::Workspace,
+    color: fidget::wgpu::voxel::color::Workspace,
+    heightmap: fidget::wgpu::voxel::heightmap::Workspace,
+}
+
+pub struct VoxelBuffers {
+    render: fidget::wgpu::voxel::render::Buffers,
+    merge: fidget::wgpu::voxel::merge::Buffers,
+    shade: fidget::wgpu::voxel::shade::Buffers,
+    ssao: fidget::wgpu::voxel::ssao::Buffers,
+    read: fidget::wgpu::buf::ReadBuffer<
+        fidget::wgpu::voxel::shade::ShadedImageTag,
+    >,
+}
+
+pub struct PixelContext {
+    render: fidget::wgpu::pixel::render::Context,
+    merge: fidget::wgpu::pixel::merge::Context,
+    color: fidget::wgpu::pixel::color::Context,
+}
+
+pub struct PixelWorkspace {
+    render: fidget::wgpu::pixel::render::Workspace,
+    merge: fidget::wgpu::pixel::merge::Workspace,
+    color: fidget::wgpu::pixel::color::Workspace,
+}
+
+pub struct PixelBuffers {
+    render: fidget::wgpu::pixel::render::Buffers,
+    merge: fidget::wgpu::pixel::merge::Buffers,
+
+    distance_buffer_f16: fidget::wgpu::buf::FlexBuffer<Float16BufferTag>,
+    read_distance_buffer_f16: fidget::wgpu::buf::ReadBuffer<Float16BufferTag>,
+    read_distance_buffer_f32: fidget::wgpu::buf::ReadBuffer<
+        fidget::wgpu::pixel::merge::PixelDistanceBufferTag,
+    >,
+    read_color_buffer: fidget::wgpu::buf::ReadBuffer<
+        fidget::wgpu::pixel::merge::PixelColorBufferTag,
+    >,
+}
+
+struct RenderShapes {
+    shapes: Vec<fidget::wgpu::RenderShape>,
+    color: Option<fidget::wgpu::color::RenderColor>,
+}
+
+impl RenderShapes {
+    fn new(scene: &Scene, gpu: &fidget::wgpu::Gpu) -> Self {
+        let shapes = scene
+            .shapes
+            .iter()
+            .map(|s| {
+                let rs = s.tree.clone().into();
+                gpu.build_render_shape(&rs)
+                    .expect("failed to get render shape")
+            })
+            .collect::<Vec<_>>();
+        let color = if scene.shapes.iter().any(|c| c.color.is_some()) {
+            let colors = scene
+                .shapes
+                .iter()
+                .map(|t| {
+                    t.color
+                        .as_ref()
+                        .map(fidget::wgpu::color::ShapeColor::from)
+                        .unwrap_or_else(|| {
+                            let c = fidget::context::Tree::constant(1.0);
+                            fidget::wgpu::color::ShapeColor::Rgb {
+                                r: c.clone().into(),
+                                g: c.clone().into(),
+                                b: c.clone().into(),
+                            }
+                        })
+                })
+                .collect::<Vec<_>>();
+            Some(gpu.build_render_color(&colors).unwrap())
+        } else {
+            None
+        };
+        RenderShapes { shapes, color }
+    }
+}
+
 pub(crate) struct GpuWorker {
     pub gpu: fidget::wgpu::Gpu,
 
-    voxel_ctx: fidget::wgpu::voxel::Context,
-    voxel_effects: fidget::wgpu::voxel::effects::Context,
-    voxel_workspace: fidget::wgpu::voxel::Workspace,
-    voxel_merge_workspace: fidget::wgpu::voxel::effects::MergeWorkspace,
-    voxel_ssao_workspace: fidget::wgpu::voxel::effects::SsaoWorkspace,
-    voxel_shade_workspace: fidget::wgpu::voxel::effects::ShadeWorkspace,
-    voxel_read_buffer: fidget::wgpu::buf::ReadBuffer<
-        fidget::wgpu::voxel::effects::ShadedImageTag,
-    >,
-    voxel_color_workspace: fidget::wgpu::voxel::effects::ColorWorkspace,
+    voxel_ctx: VoxelContext,
+    voxel_workspace: VoxelWorkspace,
+    voxel_buffers: HashMap<VoxelSize, VoxelBuffers>,
 
-    pixel_ctx: fidget::wgpu::pixel::Context,
-    pixel_effects: fidget::wgpu::pixel::effects::Context,
-    pixel_workspace: fidget::wgpu::pixel::Workspace,
-    pixel_merge_workspace: fidget::wgpu::pixel::effects::MergeWorkspace,
-    pixel_distance_buffer_f16: fidget::wgpu::buf::FlexBuffer<Float16BufferTag>,
-    pixel_read_distance_buffer_f16:
-        fidget::wgpu::buf::ReadBuffer<Float16BufferTag>,
-    pixel_read_distance_buffer_f32: fidget::wgpu::buf::ReadBuffer<
-        fidget::wgpu::pixel::effects::PixelDistanceBufferTag,
-    >,
-    pixel_read_color_buffer: fidget::wgpu::buf::ReadBuffer<
-        fidget::wgpu::pixel::effects::PixelColorBufferTag,
-    >,
-    pixel_color_workspace: fidget::wgpu::pixel::effects::ColorWorkspace,
+    pixel_ctx: PixelContext,
+    pixel_workspace: PixelWorkspace,
+    pixel_buffers: HashMap<ImageSize, PixelBuffers>,
+
     pixel_downfloat_pipeline: wgpu::ComputePipeline,
     pixel_downfloat_bind_group_layout: wgpu::BindGroupLayout,
+
+    shapes: HashMap<
+        by_address::ByAddress<std::sync::Arc<[crate::world::Drawable]>>,
+        RenderShapes,
+    >,
 }
 
 pub struct Float16BufferTag;
@@ -546,31 +634,33 @@ impl fidget::wgpu::buf::BufferTag for Float16BufferTag {
 impl GpuWorker {
     pub(crate) async fn new() -> Self {
         let gpu = fidget::wgpu::Gpu::init().await.unwrap();
-        let voxel_ctx = fidget::wgpu::voxel::Context::new(&gpu);
-        let voxel_effects = fidget::wgpu::voxel::effects::Context::new(&gpu);
-        let voxel_shade_workspace = voxel_effects.shade_workspace();
-        let voxel_workspace = voxel_ctx.workspace();
-        let voxel_merge_workspace = voxel_effects.merge_workspace();
-        let voxel_ssao_workspace = voxel_effects.ssao_workspace();
-        let voxel_read_buffer = gpu.read_buffer("voxel read");
-        let voxel_color_workspace = voxel_effects.color_workspace();
+        let voxel_ctx = VoxelContext {
+            render: fidget::wgpu::voxel::render::Context::new(&gpu),
+            merge: fidget::wgpu::voxel::merge::Context::new(&gpu),
+            ssao: fidget::wgpu::voxel::ssao::Context::new(&gpu),
+            color: fidget::wgpu::voxel::color::Context::new(&gpu),
+            shade: fidget::wgpu::voxel::shade::Context::new(&gpu),
+            heightmap: fidget::wgpu::voxel::heightmap::Context::new(&gpu),
+        };
+        let voxel_workspace = VoxelWorkspace {
+            render: voxel_ctx.render.workspace(),
+            merge: voxel_ctx.merge.workspace(),
+            ssao: voxel_ctx.ssao.workspace(),
+            color: voxel_ctx.color.workspace(),
+            shade: voxel_ctx.shade.workspace(),
+            heightmap: voxel_ctx.heightmap.workspace(),
+        };
 
-        let pixel_ctx = fidget::wgpu::pixel::Context::new(&gpu);
-        let pixel_effects = fidget::wgpu::pixel::effects::Context::new(&gpu);
-        let pixel_merge_workspace = pixel_effects.merge_workspace();
-        let pixel_workspace = pixel_ctx.workspace();
-        let pixel_read_color_buffer = gpu.read_buffer("pixel color read");
-        let pixel_distance_buffer_f16 = fidget::wgpu::buf::FlexBuffer::new(
-            &gpu.device,
-            "distance16",
-            64.into(),
-        )
-        .expect("could not build pixel distance read buffer");
-        let pixel_read_distance_buffer_f32 =
-            gpu.read_buffer("pixel distance read");
-        let pixel_read_distance_buffer_f16 =
-            gpu.read_buffer("pixel distance read");
-        let pixel_color_workspace = pixel_effects.color_workspace();
+        let pixel_ctx = PixelContext {
+            render: fidget::wgpu::pixel::render::Context::new(&gpu),
+            merge: fidget::wgpu::pixel::merge::Context::new(&gpu),
+            color: fidget::wgpu::pixel::color::Context::new(&gpu),
+        };
+        let pixel_workspace = PixelWorkspace {
+            render: pixel_ctx.render.workspace(),
+            merge: pixel_ctx.merge.workspace(),
+            color: pixel_ctx.color.workspace(),
+        };
 
         // We're going to build a simple pipeline for f32 -> f16 conversion
         let pixel_downfloat_bind_group_layout = gpu
@@ -636,26 +726,18 @@ impl GpuWorker {
 
         Self {
             gpu,
-            voxel_shade_workspace,
             voxel_ctx,
-            voxel_effects,
             voxel_workspace,
-            voxel_read_buffer,
-            voxel_merge_workspace,
-            voxel_ssao_workspace,
-            voxel_color_workspace,
+            voxel_buffers: HashMap::new(),
 
             pixel_ctx,
-            pixel_effects,
             pixel_workspace,
-            pixel_merge_workspace,
-            pixel_read_color_buffer,
-            pixel_read_distance_buffer_f16,
-            pixel_read_distance_buffer_f32,
-            pixel_distance_buffer_f16,
+            pixel_buffers: HashMap::new(),
+
             pixel_downfloat_pipeline,
             pixel_downfloat_bind_group_layout,
-            pixel_color_workspace,
+
+            shapes: HashMap::new(),
         }
     }
 
@@ -673,72 +755,110 @@ impl GpuWorker {
         if *perspective {
             *world_to_model.get_mut((3, 2)).unwrap() = 0.15 * scale.z;
         }
-        let render_cfg = fidget::raster::voxel::RenderConfig {
-            image_size,
+        let render_cfg = fidget::wgpu::voxel::render::Settings {
             world_to_model,
+            vars: &Default::default(),
         };
 
+        let voxel_buffers = self
+            .voxel_buffers
+            .entry(image_size)
+            .or_insert_with(|| VoxelBuffers {
+                render: self.voxel_ctx.render.buffers(image_size).unwrap(),
+                merge: self.voxel_ctx.merge.buffers(image_size).unwrap(),
+                shade: self.voxel_ctx.shade.buffers(image_size).unwrap(),
+                ssao: self.voxel_ctx.ssao.buffers(image_size.into()).unwrap(),
+                read: self.gpu.read_buffer("voxel read", image_size).unwrap(),
+            });
+
         // Render and accumulate every shape into merge buffers
-        self.voxel_merge_workspace.reset();
-        let merge_settings = fidget::wgpu::voxel::effects::MergeSettings {
+        voxel_buffers.merge.reset();
+        let merge_settings = fidget::wgpu::voxel::merge::Settings {
             denoise: true,
             z_scale: scale.z,
         };
-        for s in scene.render_shapes.iter() {
+
+        let shapes = self
+            .shapes
+            .entry(by_address::ByAddress(scene.shapes.clone()))
+            .or_insert_with(|| RenderShapes::new(scene, &self.gpu));
+
+        for s in shapes.shapes.iter() {
             self.voxel_ctx
-                .submit(s, &mut self.voxel_workspace, &render_cfg)
+                .render
+                .submit(
+                    s,
+                    render_cfg,
+                    &mut self.voxel_workspace.render,
+                    &mut voxel_buffers.render,
+                )
                 .expect("failed to submit voxel render");
-            self.voxel_effects
-                .submit_merge(
-                    self.voxel_workspace.output(),
+            self.voxel_ctx
+                .merge
+                .submit(
+                    &voxel_buffers.render,
                     merge_settings,
-                    &mut self.voxel_merge_workspace,
+                    &mut self.voxel_workspace.merge,
+                    &mut voxel_buffers.merge,
                 )
                 .expect("failed to submit voxel merge");
         }
-        if let Some(colors) = scene.render_color.as_ref() {
-            self.voxel_effects
-                .submit_color(
-                    &self.voxel_merge_workspace,
-                    &world_to_model,
-                    colors,
-                    &mut self.voxel_color_workspace,
-                    &mut self.voxel_shade_workspace,
+        if let Some(colors) = shapes.color.as_ref() {
+            self.voxel_ctx
+                .color
+                .submit(
+                    fidget::wgpu::voxel::color::Args {
+                        image: &voxel_buffers.merge,
+                        color: colors,
+                    },
+                    fidget::wgpu::voxel::color::Settings {
+                        world_to_model,
+                        vars: &Default::default(),
+                    },
+                    &mut self.voxel_workspace.color,
+                    &mut voxel_buffers.shade,
                 )
                 .expect("failed to submit color rendering");
         }
 
         match mode {
             ViewMode3::Heightmap => self
-                .voxel_effects
-                .submit_heightmap(
-                    &self.voxel_merge_workspace,
-                    &mut self.voxel_shade_workspace,
+                .voxel_ctx
+                .heightmap
+                .submit(
+                    &voxel_buffers.merge,
+                    (),
+                    &mut self.voxel_workspace.heightmap,
+                    &mut voxel_buffers.shade,
                 )
                 .expect("failed to submit shaded rendering"),
             ViewMode3::Shaded => {
-                self.voxel_effects
-                    .submit_ssao(
-                        &self.voxel_merge_workspace,
-                        &mut self.voxel_ssao_workspace,
+                self.voxel_ctx
+                    .ssao
+                    .submit(
+                        &voxel_buffers.merge,
+                        (),
+                        &mut self.voxel_workspace.ssao,
+                        &mut voxel_buffers.ssao,
                     )
                     .expect("failed to submit voxel SSAO");
-                self.voxel_effects
-                    .submit_shade(
-                        &self.voxel_merge_workspace,
-                        Some(&self.voxel_ssao_workspace),
-                        &mut self.voxel_shade_workspace,
+                self.voxel_ctx
+                    .shade
+                    .submit(
+                        &voxel_buffers.merge,
+                        Some(&voxel_buffers.ssao),
+                        &mut self.voxel_workspace.shade,
+                        &mut voxel_buffers.shade,
                     )
                     .expect("failed to submit shaded rendering");
             }
         };
 
-        self.gpu.copy(
-            self.voxel_shade_workspace.output(),
-            &mut self.voxel_read_buffer,
-        );
+        self.gpu
+            .copy(voxel_buffers.shade.output(), &mut voxel_buffers.read)
+            .expect("failed to read voxel buffer");
         let mapped_image =
-            self.gpu.map_image_async(&mut self.voxel_read_buffer).await;
+            self.gpu.map_image_async(&mut voxel_buffers.read).await;
         let image = mapped_image.image();
         let color = image.take().0;
 
@@ -753,12 +873,15 @@ impl GpuWorker {
         vs: &ImageRenderSettings,
     ) -> PixelImage {
         let image_size = self.submit_pixel(vs);
+        let pixel_buffers = self.pixel_buffers.get_mut(&image_size).unwrap();
 
-        let color = if let Some(c) = self.pixel_merge_workspace.output_color() {
-            self.gpu.copy(c, &mut self.pixel_read_color_buffer);
+        let color = if let Some(c) = pixel_buffers.merge.output_color() {
+            self.gpu
+                .copy(c, &mut pixel_buffers.read_color_buffer)
+                .expect("failed to read pixel color buffers");
             let mapped_color_image = self
                 .gpu
-                .map_image_async(&mut self.pixel_read_color_buffer)
+                .map_image_async(&mut pixel_buffers.read_color_buffer)
                 .await;
             let data = mapped_color_image.image().take().0;
             Some(<[[u8; 4]]>::ref_from_bytes(data.as_bytes()).unwrap().into())
@@ -777,9 +900,6 @@ impl GpuWorker {
             let render_size = vs.render_size();
             let mut compute_pass = encoder
                 .begin_compute_pass(&wgpu::ComputePassDescriptor::default());
-            self.pixel_distance_buffer_f16
-                .grow_to_fit(&self.gpu.device, render_size)
-                .unwrap();
             // TODO this creates a bind group on each evaluation
             let bg =
                 self.gpu
@@ -790,15 +910,15 @@ impl GpuWorker {
                         entries: &[
                             wgpu::BindGroupEntry {
                                 binding: 0,
-                                resource: self
-                                    .pixel_merge_workspace
+                                resource: pixel_buffers
+                                    .merge
                                     .output_distance()
                                     .bind_active(),
                             },
                             wgpu::BindGroupEntry {
                                 binding: 1,
-                                resource: self
-                                    .pixel_distance_buffer_f16
+                                resource: pixel_buffers
+                                    .distance_buffer_f16
                                     .bind_active(),
                             },
                         ],
@@ -812,13 +932,15 @@ impl GpuWorker {
             compute_pass.dispatch_workgroups(nx.try_into().unwrap(), 1, 1);
         }
         self.gpu.queue.submit(std::iter::once(encoder.finish()));
-        self.gpu.copy(
-            &self.pixel_distance_buffer_f16,
-            &mut self.pixel_read_distance_buffer_f16,
-        );
+        self.gpu
+            .copy(
+                &pixel_buffers.distance_buffer_f16,
+                &mut pixel_buffers.read_distance_buffer_f16,
+            )
+            .expect("failed to read f16 pixel distance buffers");
         let mapped_distance_image = self
             .gpu
-            .map_image_async(&mut self.pixel_read_distance_buffer_f16)
+            .map_image_async(&mut pixel_buffers.read_distance_buffer_f16)
             .await;
         let distance_img = mapped_distance_image.image();
         let distance = distance_img.take().0;
@@ -834,13 +956,16 @@ impl GpuWorker {
         &mut self,
         vs: &ImageRenderSettings,
     ) -> (Vec<RawDistancePixel>, Option<Vec<[u8; 4]>>) {
-        self.submit_pixel(vs);
+        let image_size = self.submit_pixel(vs);
+        let pixel_buffers = self.pixel_buffers.get_mut(&image_size).unwrap();
 
-        let color = if let Some(c) = self.pixel_merge_workspace.output_color() {
-            self.gpu.copy(c, &mut self.pixel_read_color_buffer);
+        let color = if let Some(c) = pixel_buffers.merge.output_color() {
+            self.gpu
+                .copy(c, &mut pixel_buffers.read_color_buffer)
+                .expect("failed to read pixel color buffer");
             let mapped_color_image = self
                 .gpu
-                .map_image_async(&mut self.pixel_read_color_buffer)
+                .map_image_async(&mut pixel_buffers.read_color_buffer)
                 .await;
             let data = mapped_color_image.image().take().0;
             Some(<[[u8; 4]]>::ref_from_bytes(data.as_bytes()).unwrap().into())
@@ -848,13 +973,15 @@ impl GpuWorker {
             None
         };
 
-        self.gpu.copy(
-            self.pixel_merge_workspace.output_distance(),
-            &mut self.pixel_read_distance_buffer_f32,
-        );
+        self.gpu
+            .copy(
+                pixel_buffers.merge.output_distance(),
+                &mut pixel_buffers.read_distance_buffer_f32,
+            )
+            .expect("failed to read f32 pixel distance buffer");
         let mapped_distance_image = self
             .gpu
-            .map_image_async(&mut self.pixel_read_distance_buffer_f32)
+            .map_image_async(&mut pixel_buffers.read_distance_buffer_f32)
             .await;
         let distance_img = mapped_distance_image.image();
         let distance = distance_img.take().0;
@@ -867,39 +994,78 @@ impl GpuWorker {
         } = vs;
         let image_size = vs.render_size();
         let world_to_model = view.world_to_model();
-        let render_cfg = fidget::raster::pixel::RenderConfig {
-            image_size,
-            world_to_model,
-            pixel_perfect: matches!(mode, ViewMode2::Sdf),
-            z: 0.0,
-        };
+        let pixel_buffers = self
+            .pixel_buffers
+            .entry(image_size)
+            .or_insert_with(|| PixelBuffers {
+                render: self.pixel_ctx.render.buffers(image_size).unwrap(),
+                merge: self.pixel_ctx.merge.buffers(image_size).unwrap(),
+                distance_buffer_f16: fidget::wgpu::buf::FlexBuffer::new(
+                    &self.gpu.device,
+                    "distance16",
+                    image_size,
+                )
+                .unwrap(),
+                read_color_buffer: self
+                    .gpu
+                    .read_buffer("pixel color", image_size)
+                    .unwrap(),
+                read_distance_buffer_f32: self
+                    .gpu
+                    .read_buffer("pixel f32 distance", image_size)
+                    .unwrap(),
+                read_distance_buffer_f16: self
+                    .gpu
+                    .read_buffer("pixel f16 distance", image_size)
+                    .unwrap(),
+            });
 
         // Render and accumulate every shape into merge buffers
-        self.pixel_merge_workspace.reset();
-        for s in scene.render_shapes.iter() {
+        pixel_buffers.merge.reset();
+
+        let shapes = self
+            .shapes
+            .entry(by_address::ByAddress(scene.shapes.clone()))
+            .or_insert_with(|| RenderShapes::new(scene, &self.gpu));
+        for s in shapes.shapes.iter() {
             self.pixel_ctx
-                .submit(s, &mut self.pixel_workspace, &render_cfg)
+                .render
+                .submit(
+                    s,
+                    fidget::wgpu::pixel::render::Settings {
+                        vars: &Default::default(),
+                        world_to_model,
+                        pixel_perfect: matches!(mode, ViewMode2::Sdf),
+                        z: 0.0,
+                    },
+                    &mut self.pixel_workspace.render,
+                    &mut pixel_buffers.render,
+                )
                 .expect("failed to submit pixel render");
-            self.pixel_effects
-                .submit_merge(
-                    self.pixel_workspace.output(),
-                    true,
-                    &mut self.pixel_merge_workspace,
+            self.pixel_ctx
+                .merge
+                .submit(
+                    &pixel_buffers.render,
+                    fidget::wgpu::pixel::merge::Settings { remove_nans: true },
+                    &mut self.pixel_workspace.merge,
+                    &mut pixel_buffers.merge,
                 )
                 .expect("failed to submit pixel merge");
         }
 
-        if let Some(color) = scene.render_color.as_ref() {
-            self.pixel_effects
-                .submit_color(
-                    &mut self.pixel_merge_workspace,
-                    fidget::wgpu::pixel::effects::ColorSettings {
+        if let Some(color) = shapes.color.as_ref() {
+            self.pixel_ctx
+                .color
+                .submit(
+                    color,
+                    fidget::wgpu::pixel::color::Settings {
                         z: 0.0,
                         world_to_model,
                         only_filled: true,
+                        vars: &Default::default(),
                     },
-                    color,
-                    &mut self.pixel_color_workspace,
+                    &mut self.pixel_workspace.color,
+                    &mut pixel_buffers.merge,
                 )
                 .expect("failed to submit color rendering");
         }

@@ -21,6 +21,7 @@ overflow-checks = true
 anyhow = "1.0.98"
 bincode = { version = "2", features = ["serde"] }
 bitflags = "2.9.1"
+by_address = "1.2.1"
 eframe = { version = "0.36.0", default-features = false, features = ["wgpu", "wayland", "web_screen_reader", "x11"] }
 egui = { version = "0.36.0" }
 egui-wgpu = { version = "0.36.0" }

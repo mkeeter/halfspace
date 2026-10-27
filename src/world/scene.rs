@@ -134,20 +134,10 @@ impl rhai::CustomType for Color {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Scene {
     pub shapes: Arc<[Drawable]>,
-    pub render_shapes: Arc<[fidget::wgpu::RenderShape]>,
-    pub render_color: Option<Arc<fidget::wgpu::color::ShapeColorBuffers>>,
 }
-
-// Only compare `shapes`, because other values are generated from it
-impl PartialEq for Scene {
-    fn eq(&self, other: &Self) -> bool {
-        self.shapes == other.shapes
-    }
-}
-impl Eq for Scene {}
 
 impl From<fidget::context::Tree> for Scene {
     fn from(tree: fidget::context::Tree) -> Self {
@@ -163,45 +153,8 @@ impl From<Drawable> for Scene {
 
 impl Scene {
     pub fn new(shapes: &[Drawable]) -> Self {
-        let render_shapes = shapes
-            .iter()
-            .map(|s| {
-                let rs = s.tree.clone().into();
-                fidget::wgpu::RenderShape::new(&rs)
-                    .expect("failed to get render shape")
-            })
-            .collect::<Vec<_>>();
-
-        let render_color = if shapes.iter().any(|c| c.color.is_some()) {
-            let colors = shapes
-                .iter()
-                .map(|t| {
-                    t.color
-                        .as_ref()
-                        .map(fidget::wgpu::color::ShapeColor::from)
-                        .unwrap_or_else(|| {
-                            let c = fidget::context::Tree::constant(1.0);
-                            fidget::wgpu::color::ShapeColor::Rgb {
-                                r: c.clone().into(),
-                                g: c.clone().into(),
-                                b: c.clone().into(),
-                            }
-                        })
-                })
-                .collect::<Vec<_>>();
-            Some(
-                fidget::wgpu::color::ShapeColorBuffers::new(&colors)
-                    .unwrap()
-                    .into(),
-            )
-        } else {
-            None
-        };
-
         Self {
             shapes: shapes.into(),
-            render_shapes: render_shapes.into(),
-            render_color,
         }
     }
 }
