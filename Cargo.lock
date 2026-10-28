@@ -1338,7 +1338,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1511,7 +1511,7 @@ checksum = "b97b65636e5b9ef369943878ac74335ba1c55c1cb6adbf1e2c293c624248d693"
 [[package]]
 name = "fidget"
 version = "0.5.1"
-source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#34d510cc74a02afa658000f0d9b2c6f4e1a5a822"
+source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#903eec192e3cf83b52ada96b887aa741c9e75b46"
 dependencies = [
  "document-features",
  "fidget-bytecode",
@@ -1530,7 +1530,7 @@ dependencies = [
 [[package]]
 name = "fidget-bytecode"
 version = "0.5.1"
-source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#34d510cc74a02afa658000f0d9b2c6f4e1a5a822"
+source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#903eec192e3cf83b52ada96b887aa741c9e75b46"
 dependencies = [
  "fidget-core",
  "serde",
@@ -1543,7 +1543,7 @@ dependencies = [
 [[package]]
 name = "fidget-core"
 version = "0.5.1"
-source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#34d510cc74a02afa658000f0d9b2c6f4e1a5a822"
+source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#903eec192e3cf83b52ada96b887aa741c9e75b46"
 dependencies = [
  "facet",
  "getrandom 0.2.17",
@@ -1562,7 +1562,7 @@ dependencies = [
 [[package]]
 name = "fidget-gui"
 version = "0.5.1"
-source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#34d510cc74a02afa658000f0d9b2c6f4e1a5a822"
+source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#903eec192e3cf83b52ada96b887aa741c9e75b46"
 dependencies = [
  "fidget-core",
  "nalgebra",
@@ -1573,7 +1573,7 @@ dependencies = [
 [[package]]
 name = "fidget-jit"
 version = "0.5.1"
-source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#34d510cc74a02afa658000f0d9b2c6f4e1a5a822"
+source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#903eec192e3cf83b52ada96b887aa741c9e75b46"
 dependencies = [
  "arrayvec",
  "dynasmrt",
@@ -1587,7 +1587,7 @@ dependencies = [
 [[package]]
 name = "fidget-mesh"
 version = "0.5.1"
-source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#34d510cc74a02afa658000f0d9b2c6f4e1a5a822"
+source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#903eec192e3cf83b52ada96b887aa741c9e75b46"
 dependencies = [
  "arrayvec",
  "fidget-core",
@@ -1601,7 +1601,7 @@ dependencies = [
 [[package]]
 name = "fidget-raster"
 version = "0.5.1"
-source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#34d510cc74a02afa658000f0d9b2c6f4e1a5a822"
+source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#903eec192e3cf83b52ada96b887aa741c9e75b46"
 dependencies = [
  "fidget-core",
  "nalgebra",
@@ -1616,7 +1616,7 @@ dependencies = [
 [[package]]
 name = "fidget-rhai"
 version = "0.5.1"
-source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#34d510cc74a02afa658000f0d9b2c6f4e1a5a822"
+source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#903eec192e3cf83b52ada96b887aa741c9e75b46"
 dependencies = [
  "enum-map 3.1.0",
  "facet",
@@ -1631,7 +1631,7 @@ dependencies = [
 [[package]]
 name = "fidget-shapes"
 version = "0.5.1"
-source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#34d510cc74a02afa658000f0d9b2c6f4e1a5a822"
+source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#903eec192e3cf83b52ada96b887aa741c9e75b46"
 dependencies = [
  "enum-map 3.1.0",
  "facet",
@@ -1645,7 +1645,7 @@ dependencies = [
 [[package]]
 name = "fidget-solver"
 version = "0.5.1"
-source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#34d510cc74a02afa658000f0d9b2c6f4e1a5a822"
+source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#903eec192e3cf83b52ada96b887aa741c9e75b46"
 dependencies = [
  "fidget-core",
  "nalgebra",
@@ -1657,7 +1657,7 @@ dependencies = [
 [[package]]
 name = "fidget-wgpu"
 version = "0.5.1"
-source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#34d510cc74a02afa658000f0d9b2c6f4e1a5a822"
+source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#903eec192e3cf83b52ada96b887aa741c9e75b46"
 dependencies = [
  "fidget-bytecode",
  "fidget-core",
@@ -3899,7 +3899,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4320,7 +4320,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.5",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5130,7 +5130,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5403,7 +5403,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 [[package]]
 name = "workspace-hack"
 version = "0.1.0"
-source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#34d510cc74a02afa658000f0d9b2c6f4e1a5a822"
+source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#903eec192e3cf83b52ada96b887aa741c9e75b46"
 dependencies = [
  "ahash",
  "anstream",

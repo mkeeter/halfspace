@@ -550,8 +550,10 @@ pub struct PixelBuffers {
     render: fidget::wgpu::pixel::render::Buffers,
     merge: fidget::wgpu::pixel::merge::Buffers,
 
-    distance_buffer_f16: fidget::wgpu::buf::FlexBuffer<Float16BufferTag>,
-    read_distance_buffer_f16: fidget::wgpu::buf::ReadBuffer<Float16BufferTag>,
+    // We use a raw buffer for the `f16` because we have to align it manually
+    distance_buffer_f16: wgpu::Buffer,
+    read_distance_buffer_f16: wgpu::Buffer,
+
     read_distance_buffer_f32: fidget::wgpu::buf::ReadBuffer<
         fidget::wgpu::pixel::merge::PixelDistanceBufferTag,
     >,
@@ -620,15 +622,6 @@ pub(crate) struct GpuWorker {
         by_address::ByAddress<std::sync::Arc<[crate::world::Drawable]>>,
         RenderShapes,
     >,
-}
-
-pub struct Float16BufferTag;
-impl fidget::wgpu::buf::BufferTag for Float16BufferTag {
-    type T = Float16;
-    type S = fidget::render::ImageSize;
-    fn usage() -> u32 {
-        wgpu::BufferUsages::STORAGE.bits() | wgpu::BufferUsages::COPY_SRC.bits()
-    }
 }
 
 impl GpuWorker {
@@ -897,7 +890,6 @@ impl GpuWorker {
         );
         {
             // compute_pass scope
-            let render_size = vs.render_size();
             let mut compute_pass = encoder
                 .begin_compute_pass(&wgpu::ComputePassDescriptor::default());
             // TODO this creates a bind group on each evaluation
@@ -905,7 +897,7 @@ impl GpuWorker {
                 self.gpu
                     .device
                     .create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("merge bind group"),
+                        label: Some("downfloat bind group"),
                         layout: &self.pixel_downfloat_bind_group_layout,
                         entries: &[
                             wgpu::BindGroupEntry {
@@ -919,31 +911,47 @@ impl GpuWorker {
                                 binding: 1,
                                 resource: pixel_buffers
                                     .distance_buffer_f16
-                                    .bind_active(),
+                                    .as_entire_binding(),
                             },
                         ],
                     });
             compute_pass.set_bind_group(0, Some(&bg), &[]);
             compute_pass.set_pipeline(&self.pixel_downfloat_pipeline);
-            let nx = (u64::from(render_size.width())
-                * u64::from(render_size.height()))
+            let nx = (u64::from(image_size.width())
+                * u64::from(image_size.height()))
             .div_ceil(2)
             .div_ceil(64);
             compute_pass.dispatch_workgroups(nx.try_into().unwrap(), 1, 1);
         }
+
+        encoder.copy_buffer_to_buffer(
+            &pixel_buffers.distance_buffer_f16,
+            0,
+            &pixel_buffers.read_distance_buffer_f16,
+            0,
+            pixel_buffers.distance_buffer_f16.size(),
+        );
         self.gpu.queue.submit(std::iter::once(encoder.finish()));
-        self.gpu
-            .copy(
-                &pixel_buffers.distance_buffer_f16,
-                &mut pixel_buffers.read_distance_buffer_f16,
-            )
-            .expect("failed to read f16 pixel distance buffers");
-        let mapped_distance_image = self
-            .gpu
-            .map_image_async(&mut pixel_buffers.read_distance_buffer_f16)
-            .await;
-        let distance_img = mapped_distance_image.image();
-        let distance = distance_img.take().0;
+
+        let distance = {
+            let slice = pixel_buffers.read_distance_buffer_f16.slice(..);
+
+            let (tx, rx) = flume::bounded(1);
+            slice.map_async(wgpu::MapMode::Read, move |_| tx.send(()).unwrap());
+            self.gpu
+                .device
+                .poll(wgpu::PollType::wait_indefinitely())
+                .unwrap();
+            rx.recv_async().await.unwrap();
+            let slice = slice.get_mapped_range().unwrap();
+
+            // Strip any padding bytes (since this is a `f16` buffer but
+            // requires 4-byte alignment for binding and mapping).
+            let n = usize::try_from(image_size.width()).unwrap()
+                * usize::try_from(image_size.height()).unwrap();
+            <[Float16]>::ref_from_bytes(&slice[..]).unwrap()[..n].to_owned()
+        };
+        pixel_buffers.read_distance_buffer_f16.unmap();
 
         PixelImage {
             distance,
@@ -994,30 +1002,42 @@ impl GpuWorker {
         } = vs;
         let image_size = vs.render_size();
         let world_to_model = view.world_to_model();
-        let pixel_buffers = self
-            .pixel_buffers
-            .entry(image_size)
-            .or_insert_with(|| PixelBuffers {
-                render: self.pixel_ctx.render.buffers(image_size).unwrap(),
-                merge: self.pixel_ctx.merge.buffers(image_size).unwrap(),
-                distance_buffer_f16: fidget::wgpu::buf::FlexBuffer::new(
-                    &self.gpu.device,
-                    "distance16",
-                    image_size,
-                )
-                .unwrap(),
-                read_color_buffer: self
-                    .gpu
-                    .read_buffer("pixel color", image_size)
-                    .unwrap(),
-                read_distance_buffer_f32: self
-                    .gpu
-                    .read_buffer("pixel f32 distance", image_size)
-                    .unwrap(),
-                read_distance_buffer_f16: self
-                    .gpu
-                    .read_buffer("pixel f16 distance", image_size)
-                    .unwrap(),
+        let pixel_buffers =
+            self.pixel_buffers.entry(image_size).or_insert_with(|| {
+                let f16_size = (u64::from(image_size.width())
+                    * u64::from(image_size.height())
+                    * std::mem::size_of::<Float16>() as u64)
+                    .next_multiple_of(4);
+                PixelBuffers {
+                    render: self.pixel_ctx.render.buffers(image_size).unwrap(),
+                    merge: self.pixel_ctx.merge.buffers(image_size).unwrap(),
+                    distance_buffer_f16: self.gpu.device.create_buffer(
+                        &wgpu::BufferDescriptor {
+                            label: Some("distance16"),
+                            usage: wgpu::BufferUsages::STORAGE
+                                | wgpu::BufferUsages::COPY_SRC,
+                            mapped_at_creation: false,
+                            size: f16_size,
+                        },
+                    ),
+                    read_distance_buffer_f16: self.gpu.device.create_buffer(
+                        &wgpu::BufferDescriptor {
+                            label: Some("read distance16"),
+                            usage: wgpu::BufferUsages::MAP_READ
+                                | wgpu::BufferUsages::COPY_DST,
+                            mapped_at_creation: false,
+                            size: f16_size,
+                        },
+                    ),
+                    read_color_buffer: self
+                        .gpu
+                        .read_buffer("pixel color", image_size)
+                        .unwrap(),
+                    read_distance_buffer_f32: self
+                        .gpu
+                        .read_buffer("pixel f32 distance", image_size)
+                        .unwrap(),
+                }
             });
 
         // Render and accumulate every shape into merge buffers
