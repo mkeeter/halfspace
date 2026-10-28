@@ -1511,7 +1511,7 @@ checksum = "b97b65636e5b9ef369943878ac74335ba1c55c1cb6adbf1e2c293c624248d693"
 [[package]]
 name = "fidget"
 version = "0.5.1"
-source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#903eec192e3cf83b52ada96b887aa741c9e75b46"
+source = "git+https://github.com/mkeeter/fidget#25528e0c2c5251f3b7538b2d43968a0fe5d718c8"
 dependencies = [
  "document-features",
  "fidget-bytecode",
@@ -1530,7 +1530,7 @@ dependencies = [
 [[package]]
 name = "fidget-bytecode"
 version = "0.5.1"
-source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#903eec192e3cf83b52ada96b887aa741c9e75b46"
+source = "git+https://github.com/mkeeter/fidget#25528e0c2c5251f3b7538b2d43968a0fe5d718c8"
 dependencies = [
  "fidget-core",
  "serde",
@@ -1543,7 +1543,7 @@ dependencies = [
 [[package]]
 name = "fidget-core"
 version = "0.5.1"
-source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#903eec192e3cf83b52ada96b887aa741c9e75b46"
+source = "git+https://github.com/mkeeter/fidget#25528e0c2c5251f3b7538b2d43968a0fe5d718c8"
 dependencies = [
  "facet",
  "getrandom 0.2.17",
@@ -1562,7 +1562,7 @@ dependencies = [
 [[package]]
 name = "fidget-gui"
 version = "0.5.1"
-source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#903eec192e3cf83b52ada96b887aa741c9e75b46"
+source = "git+https://github.com/mkeeter/fidget#25528e0c2c5251f3b7538b2d43968a0fe5d718c8"
 dependencies = [
  "fidget-core",
  "nalgebra",
@@ -1573,7 +1573,7 @@ dependencies = [
 [[package]]
 name = "fidget-jit"
 version = "0.5.1"
-source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#903eec192e3cf83b52ada96b887aa741c9e75b46"
+source = "git+https://github.com/mkeeter/fidget#25528e0c2c5251f3b7538b2d43968a0fe5d718c8"
 dependencies = [
  "arrayvec",
  "dynasmrt",
@@ -1587,7 +1587,7 @@ dependencies = [
 [[package]]
 name = "fidget-mesh"
 version = "0.5.1"
-source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#903eec192e3cf83b52ada96b887aa741c9e75b46"
+source = "git+https://github.com/mkeeter/fidget#25528e0c2c5251f3b7538b2d43968a0fe5d718c8"
 dependencies = [
  "arrayvec",
  "fidget-core",
@@ -1601,7 +1601,7 @@ dependencies = [
 [[package]]
 name = "fidget-raster"
 version = "0.5.1"
-source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#903eec192e3cf83b52ada96b887aa741c9e75b46"
+source = "git+https://github.com/mkeeter/fidget#25528e0c2c5251f3b7538b2d43968a0fe5d718c8"
 dependencies = [
  "fidget-core",
  "nalgebra",
@@ -1616,7 +1616,7 @@ dependencies = [
 [[package]]
 name = "fidget-rhai"
 version = "0.5.1"
-source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#903eec192e3cf83b52ada96b887aa741c9e75b46"
+source = "git+https://github.com/mkeeter/fidget#25528e0c2c5251f3b7538b2d43968a0fe5d718c8"
 dependencies = [
  "enum-map 3.1.0",
  "facet",
@@ -1631,7 +1631,7 @@ dependencies = [
 [[package]]
 name = "fidget-shapes"
 version = "0.5.1"
-source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#903eec192e3cf83b52ada96b887aa741c9e75b46"
+source = "git+https://github.com/mkeeter/fidget#25528e0c2c5251f3b7538b2d43968a0fe5d718c8"
 dependencies = [
  "enum-map 3.1.0",
  "facet",
@@ -1645,7 +1645,7 @@ dependencies = [
 [[package]]
 name = "fidget-solver"
 version = "0.5.1"
-source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#903eec192e3cf83b52ada96b887aa741c9e75b46"
+source = "git+https://github.com/mkeeter/fidget#25528e0c2c5251f3b7538b2d43968a0fe5d718c8"
 dependencies = [
  "fidget-core",
  "nalgebra",
@@ -1657,7 +1657,7 @@ dependencies = [
 [[package]]
 name = "fidget-wgpu"
 version = "0.5.1"
-source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#903eec192e3cf83b52ada96b887aa741c9e75b46"
+source = "git+https://github.com/mkeeter/fidget#25528e0c2c5251f3b7538b2d43968a0fe5d718c8"
 dependencies = [
  "fidget-bytecode",
  "fidget-core",
@@ -5403,7 +5403,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 [[package]]
 name = "workspace-hack"
 version = "0.1.0"
-source = "git+https://github.com/mkeeter/fidget?branch=new-wgpu-architecture#903eec192e3cf83b52ada96b887aa741c9e75b46"
+source = "git+https://github.com/mkeeter/fidget#25528e0c2c5251f3b7538b2d43968a0fe5d718c8"
 dependencies = [
  "ahash",
  "anstream",
