@@ -1007,7 +1007,7 @@ impl GpuWorker {
                 let f16_size = (u64::from(image_size.width())
                     * u64::from(image_size.height())
                     * std::mem::size_of::<Float16>() as u64)
-                    .next_multiple_of(4);
+                    .next_multiple_of(4); // Round up for alignment here!
                 PixelBuffers {
                     render: self.pixel_ctx.render.buffers(image_size).unwrap(),
                     merge: self.pixel_ctx.merge.buffers(image_size).unwrap(),
@@ -1053,10 +1053,10 @@ impl GpuWorker {
                 .submit(
                     s,
                     fidget::wgpu::pixel::render::Settings {
-                        vars: &Default::default(),
                         world_to_model,
                         pixel_perfect: matches!(mode, ViewMode2::Sdf),
                         z: 0.0,
+                        vars: &Default::default(),
                     },
                     &mut self.pixel_workspace.render,
                     &mut pixel_buffers.render,
