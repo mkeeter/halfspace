@@ -18,7 +18,7 @@
       "0": {
         "Script": {
           "name": "cross_section",
-          "script": "fn recurse(x, y, z, depth) {\n    let r = ((x + 1) % 2 - 1).abs();\n    let base = intersection(r, r.remap(y, x, z)) - 1/3.;\n    let out = base;\n    for i in 0..depth {\n        out = union(base, out.remap(x * 3, y * 3, z))\n    }\n    out\n}\n\nlet d = input(\"depth\");\nlet square = intersection(x.abs() - 1, y.abs() - 1);\nlet xy = difference(square, recurse(x, y, z, d));\n\noutput(\"xy\", xy);",
+          "script": "fn recurse(x, y, z, depth) {\n    let r = ((x + 1) % 2 - 1).abs();\n    let base = intersection(r, r.remap(y, x, z)) - 1/3.;\n    let out = base;\n    for i in 0..depth {\n        out = union(base, out.remap(x * 3, y * 3, z) / 3)\n    }\n    out\n}\n\nlet d = input(\"depth\");\nlet square = intersection(x.abs() - 1, y.abs() - 1);\nlet xy = difference(square, recurse(x, y, z, d));\n\noutput(\"xy\", xy);",
           "inputs": {
             "depth": "3"
           }
