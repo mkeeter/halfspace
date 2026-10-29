@@ -5,7 +5,7 @@ use crate::{
     platform::Notify,
     render::{
         Float16, ImageRenderSettings, RenderImage, RenderSettings,
-        RenderTaskHandle, RenderWorkerPool, VoxelRenderSettings,
+        RenderTaskHandle, RenderWorker, VoxelRenderSettings,
     },
     state,
     state::ViewState,
@@ -22,7 +22,7 @@ use web_time::Duration;
 /// Each block may have 0 or 1 views.  Views are persistent even when closed;
 /// they're deleted when their block is deleted.
 pub struct ViewData {
-    /// Handle to a render task, running in a thread pool
+    /// Handle to a render task, running in a worker thread
     pub task: Option<RenderTaskHandle>,
 
     /// Interaction canvas
@@ -261,7 +261,7 @@ impl ViewData {
         &mut self,
         r: RenderViewReply,
         rx: &MessageReceiver<N>,
-        render_pool: &RenderWorkerPool<N>,
+        render_worker: &RenderWorker<N>,
         device: &wgpu::Device,
         resources: &WgpuResources,
     ) {
@@ -286,7 +286,7 @@ impl ViewData {
                     r.block,
                     r.image.settings().with_level(next),
                     rx,
-                    render_pool,
+                    render_worker,
                 );
             }
             let prev_image = self.image.take();
@@ -546,10 +546,10 @@ impl ViewData {
         block: BlockIndex,
         settings: RenderSettings,
         rx: &MessageReceiver<N>,
-        render_pool: &RenderWorkerPool<N>,
+        render_worker: &RenderWorker<N>,
     ) {
         self.generation += 1;
-        self.task = Some(render_pool.spawn(
+        self.task = Some(render_worker.spawn(
             block,
             self.generation,
             settings,
@@ -566,7 +566,7 @@ impl ViewData {
         block: BlockIndex,
         scene: Scene,
         rx: &MessageReceiver<N>,
-        render_pool: &RenderWorkerPool<N>,
+        render_worker: &RenderWorker<N>,
     ) -> Option<&mut ViewImage> {
         // Build settings assuming that we're starting from a max-level render
         let settings =
@@ -592,7 +592,7 @@ impl ViewData {
                 .as_ref()
                 .is_none_or(|image| !image.matches(&settings))
         {
-            self.spawn_render_task(block, settings, rx, render_pool);
+            self.spawn_render_task(block, settings, rx, render_worker);
         }
         self.image.as_mut()
     }

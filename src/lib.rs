@@ -350,8 +350,8 @@ pub(crate) struct App<P: Platform> {
 
     platform: P,
 
-    /// Pool of CPU worker threads
-    render_pool: render::RenderWorkerPool<P::Notify>,
+    /// Render worker task
+    render_worker: render::RenderWorker<P::Notify>,
 
     /// Handle to the GPU device
     ///
@@ -562,7 +562,7 @@ impl<P: Platform> App<P> {
         let rx = platform.take_rx_channel();
         let data = World::new();
         let undo = state::Undo::new(&data);
-        let render_pool = platform.spawn_render_workers();
+        let render_worker = platform.spawn_render_workers();
         Self {
             data,
             library: world::ShapeLibrary::build(),
@@ -578,7 +578,7 @@ impl<P: Platform> App<P> {
             generation: std::sync::Arc::new(0.into()),
             platform,
             rx,
-            render_pool,
+            render_worker,
             debug,
             show_inspection_ui: false,
             modal: None,
@@ -617,6 +617,7 @@ impl<P: Platform> App<P> {
             .store(0, std::sync::atomic::Ordering::Relaxed);
         self.undo = state::Undo::new(&self.data);
         self.rx.increment_gen(); // orphan previous tasks
+        self.render_worker.end_frame(HashSet::new()); // destroy render objects
     }
 
     pub fn start_world_rebuild(&mut self) {
@@ -1221,22 +1222,27 @@ impl<P: Platform> App<P> {
         painter.rect_filled(rect, 0.0, style.visuals.panel_fill);
         painter.galley(text_corner, layout, egui::Color32::BLACK);
 
-        let mut io_out = vec![];
+        // Draw the dock view!
         let mut bw = gui::WorldView {
             world: &mut self.data,
             syntax: &self.syntax,
             views: &mut self.views,
             rx: &self.rx,
-            out: &mut io_out,
-            render_pool: &self.render_pool,
+            render_worker: &self.render_worker,
+            out: vec![],
+            active: HashSet::new(),
         };
         egui_dock::DockArea::new(&mut self.tree)
             .style(egui_dock::Style::from_egui(ui.global_style().as_ref()))
             .show_leaf_collapse_buttons(false)
             .show_leaf_close_all_buttons(false)
             .show_inside(ui, &mut bw);
+
+        // Once we finish drawing the dock view, we can prune render objects
+        self.render_worker.end_frame(bw.active);
+
         let mut changed = false;
-        for (block, flags) in io_out {
+        for (block, flags) in bw.out {
             for f in flags.iter() {
                 match f {
                     ViewResponse::FOCUS_ERR => {
@@ -1696,7 +1702,7 @@ impl<P: Platform> App<P> {
                     match export::image_view(min, max, resolution) {
                         Ok((view, base_size)) => {
                             // Sends the export task to the render pool
-                            let cancel = self.render_pool.export(
+                            let cancel = self.render_worker.export(
                                 render::RenderSettings::Image(
                                     render::ImageRenderSettings {
                                         scene,
@@ -1772,7 +1778,7 @@ impl<P: Platform> App<P> {
                     e.update(
                         reply,
                         &self.rx,
-                        &self.render_pool,
+                        &self.render_worker,
                         &self.device,
                         &self.pipelines,
                     )

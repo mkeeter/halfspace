@@ -21,6 +21,7 @@ overflow-checks = true
 anyhow = "1.0.98"
 bincode = { version = "2", features = ["serde"] }
 bitflags = "2.9.1"
+by_address = "1.2.1"
 eframe = { version = "0.36.0", default-features = false, features = ["wgpu", "wayland", "web_screen_reader", "x11"] }
 egui = { version = "0.36.0" }
 egui-wgpu = { version = "0.36.0" }
@@ -56,7 +57,7 @@ env_logger = "0.11.8"
 flume = { version = "0.12", features = ["async"] }
 pollster = "0.4.0"
 rhai = { version = "1.21", features = ["sync", "internals"] }
-fidget = { git = "https://github.com/mkeeter/fidget", features = ["jit"]} # { version = "0.5.1" }
+fidget = { git = "https://github.com/mkeeter/fidget", features = ["jit"] } # { version = "0.5.1" }
 
 # Web-only dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]

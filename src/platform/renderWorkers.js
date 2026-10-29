@@ -26,40 +26,36 @@ function waitForMsgType(target, type) {
 // We need to wait for a specific message because this file is used both
 // as a Worker and as a regular script, so it might receive unrelated
 // messages on the page.
-if (name === "render_pool_worker") {
-  waitForMsgType(self, 'render_pool_worker_init').then(async data => {
+if (name === "render_worker") {
+  waitForMsgType(self, 'render_worker_init').then(async data => {
     const pkg = await import(data.mainJS);
     await pkg.initSync(data.init);
-    postMessage({ type: 'render_pool_worker_ready' });
+    postMessage({ type: 'render_worker_ready' });
     await pkg.wbg_render_start_worker(data.receiver);
   });
 }
 
-export async function startWorkers(module, memory, builder) {
+export async function startWorker(module, memory, builder) {
   const workerInit = {
-    type: 'render_pool_worker_init',
+    type: 'render_worker_init',
     init: { module, memory },
     receiver: builder.receiver(),
     mainJS: builder.mainJS()
   };
 
-  await Promise.all(
-    Array.from({ length: builder.numThreads() }, async () => {
-      // Self-spawn into a new Worker.
-      // The script is fetched as a blob so it works even if this script is
-      // hosted remotely (e.g. on a CDN). This avoids a cross-origin
-      // security error.
-      let scriptBlob = await fetch(import.meta.url).then(r => r.blob());
-      let url = URL.createObjectURL(scriptBlob);
-      const worker = new Worker(url, {
-        type: 'module',
-        name: 'render_pool_worker'
-      });
-      worker.postMessage(workerInit);
-      await waitForMsgType(worker, 'render_pool_worker_ready');
-      URL.revokeObjectURL(url);
-      return worker;
-    })
-  );
+  // Self-spawn into a new Worker.
+  // The script is fetched as a blob so it works even if this script is
+  // hosted remotely (e.g. on a CDN). This avoids a cross-origin
+  // security error.
+  let scriptBlob = await fetch(import.meta.url).then(r => r.blob());
+  let url = URL.createObjectURL(scriptBlob);
+  const worker = new Worker(url, {
+    type: 'module',
+    name: 'render_worker'
+  });
+  worker.postMessage(workerInit);
+  await waitForMsgType(worker, 'render_worker_ready');
+  URL.revokeObjectURL(url);
+
   await builder.build();
 }

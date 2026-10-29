@@ -1,4 +1,4 @@
-use crate::{AppState, MessageReceiver, Modal, render::RenderWorkerPool};
+use crate::{AppState, MessageReceiver, Modal, render::RenderWorker};
 
 #[cfg_attr(target_arch = "wasm32", path = "web.rs")]
 #[cfg_attr(not(target_arch = "wasm32"), path = "native.rs")]
@@ -28,11 +28,12 @@ where
     /// If this is called more than once
     fn take_rx_channel(&mut self) -> MessageReceiver<Self::Notify>;
 
-    /// Initialize the render worker pool
+    /// Initialize the render worker thread
     ///
     /// Rendering can't be deferred to the Rayon pool because it is synchronous
-    /// in the native app and async in the web app.
-    fn spawn_render_workers(&mut self) -> RenderWorkerPool<Self::Notify>;
+    /// in the native app and async in the web app; instead, we have a single
+    /// async worker / thread on both native and web platforms.
+    fn spawn_render_workers(&mut self) -> RenderWorker<Self::Notify>;
 
     /// List all file names in local storage
     fn list_local_storage(&self) -> Vec<String>;
