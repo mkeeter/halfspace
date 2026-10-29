@@ -1,7 +1,7 @@
 use crate::{
     App, AppState, Message, MessageReceiver, MessageSender, Modal,
     platform::{self, Platform},
-    render::{RenderTask, RenderWorkerPool},
+    render::{RenderTask, RenderWorker},
     state, wgpu_setup,
 };
 use log::{info, warn};
@@ -177,7 +177,7 @@ impl Platform for NativePlatform {
             .send_viewport_cmd(egui::ViewportCommand::Title(title.to_owned()));
     }
 
-    fn spawn_render_workers(&mut self) -> RenderWorkerPool<Self::Notify> {
+    fn spawn_render_workers(&mut self) -> RenderWorker<Self::Notify> {
         let (tx, rx) = flume::unbounded::<RenderTask<Notify>>();
         std::thread::spawn(move || {
             let (wake_tx, _) = flume::bounded(4);
@@ -186,7 +186,7 @@ impl Platform for NativePlatform {
                 crate::render::render_worker(gpu, rx, wake_tx).await;
             });
         });
-        RenderWorkerPool::new(tx)
+        RenderWorker::new(tx)
     }
 }
 

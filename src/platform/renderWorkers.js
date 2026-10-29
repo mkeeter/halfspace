@@ -26,18 +26,18 @@ function waitForMsgType(target, type) {
 // We need to wait for a specific message because this file is used both
 // as a Worker and as a regular script, so it might receive unrelated
 // messages on the page.
-if (name === "render_pool_worker") {
-  waitForMsgType(self, 'render_pool_worker_init').then(async data => {
+if (name === "render_worker") {
+  waitForMsgType(self, 'render_worker_init').then(async data => {
     const pkg = await import(data.mainJS);
     await pkg.initSync(data.init);
-    postMessage({ type: 'render_pool_worker_ready' });
+    postMessage({ type: 'render_worker_ready' });
     await pkg.wbg_render_start_worker(data.receiver);
   });
 }
 
 export async function startWorker(module, memory, builder) {
   const workerInit = {
-    type: 'render_pool_worker_init',
+    type: 'render_worker_init',
     init: { module, memory },
     receiver: builder.receiver(),
     mainJS: builder.mainJS()
@@ -51,10 +51,10 @@ export async function startWorker(module, memory, builder) {
   let url = URL.createObjectURL(scriptBlob);
   const worker = new Worker(url, {
     type: 'module',
-    name: 'render_pool_worker'
+    name: 'render_worker'
   });
   worker.postMessage(workerInit);
-  await waitForMsgType(worker, 'render_pool_worker_ready');
+  await waitForMsgType(worker, 'render_worker_ready');
   URL.revokeObjectURL(url);
 
   await builder.build();

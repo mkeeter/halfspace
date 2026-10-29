@@ -1,7 +1,7 @@
 use crate::{
     App, AppState, Message, MessageReceiver, MessageSender, Modal,
     platform::{self, Platform},
-    render::{RenderTask, RenderWorkerPool},
+    render::{RenderTask, RenderWorker},
     state, wgpu_setup,
 };
 use log::{error, info, warn};
@@ -94,7 +94,7 @@ pub fn run() {
         start_worker(
             wasm_bindgen::module(),
             wasm_bindgen::memory(),
-            wbg_RenderPoolBuilder::new(),
+            wbg_RenderWorkerBuilder::new(),
         )
         .await
         .expect("failed to start workers");
@@ -290,9 +290,9 @@ impl platform::Platform for WebPlatform {
         // nothing to do here
     }
 
-    fn spawn_render_workers(&mut self) -> RenderWorkerPool<Notify> {
+    fn spawn_render_workers(&mut self) -> RenderWorker<Notify> {
         let tx = TX_CHANNEL.get().unwrap().clone();
-        RenderWorkerPool::new(tx)
+        RenderWorker::new(tx)
     }
 }
 
@@ -416,14 +416,14 @@ extern "C" {
     fn start_worker(
         module: JsValue,
         memory: JsValue,
-        builder: wbg_RenderPoolBuilder,
+        builder: wbg_RenderWorkerBuilder,
     ) -> js_sys::Promise;
 }
 
 #[allow(non_camel_case_types)]
 #[wasm_bindgen]
 #[doc(hidden)]
-struct wbg_RenderPoolBuilder {
+struct wbg_RenderWorkerBuilder {
     rx: flume::Receiver<RenderTask<Notify>>,
     sender: flume::Sender<StartTask>,
     receiver: flume::Receiver<StartTask>,
@@ -439,7 +439,7 @@ static TX_CHANNEL: std::sync::OnceLock<flume::Sender<RenderTask<Notify>>> =
     std::sync::OnceLock::new();
 
 #[wasm_bindgen]
-impl wbg_RenderPoolBuilder {
+impl wbg_RenderWorkerBuilder {
     fn new() -> Self {
         let (sender, receiver) = flume::bounded(1);
         let (tx, rx) = flume::unbounded();

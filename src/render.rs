@@ -18,7 +18,7 @@
 //! [`ViewData::image`](crate::view::ViewData::image) checks to see whether our
 //! current settings match those of an in-progress render.  If not, then it
 //! cancels the in-progress render and starts a new render, spawning it into the
-//! render worker pool.  If available, it returns a cached image, which is a
+//! render worker task.  If available, it returns a cached image, which is a
 //! [`ViewImage`].
 //!
 //! A render task is represented by a [`RenderTask`] object, which performs the
@@ -124,7 +124,7 @@ pub struct RgbaImage {
 /// State representing an in-progress render
 ///
 /// This lives in the main thread; the work itself lives in [`RenderTask`] in
-/// the worker pool.
+/// the worker task.
 pub struct RenderTaskHandle {
     settings: RenderSettings,
     cancel: fidget::render::CancelToken,
@@ -136,17 +136,17 @@ impl Drop for RenderTaskHandle {
     }
 }
 
-/// Render worker pool, backed by dedicated threads or web workers
-pub(crate) struct RenderWorkerPool<N: Notify> {
+/// Render worker, backed by a dedicated thread or a web worker
+pub(crate) struct RenderWorker<N: Notify> {
     tx: flume::Sender<RenderTask<N>>,
 }
 
-impl<N: Notify> RenderWorkerPool<N> {
+impl<N: Notify> RenderWorker<N> {
     pub(crate) fn new(tx: flume::Sender<RenderTask<N>>) -> Self {
         Self { tx }
     }
 
-    /// Begins a new image rendering task in the worker pool
+    /// Begins a new image rendering task in the worker task
     pub(crate) fn spawn(
         &self,
         block: BlockIndex,
@@ -176,7 +176,7 @@ impl<N: Notify> RenderWorkerPool<N> {
             .expect("render thread stopped");
     }
 
-    /// Begins a new export image rendering task in the worker pool
+    /// Begins a new export image rendering task in the worker task
     pub(crate) fn export(
         &self,
         settings: RenderSettings,

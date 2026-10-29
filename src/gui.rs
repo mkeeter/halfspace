@@ -18,7 +18,7 @@ pub struct WorldView<'a, N: Notify> {
     pub syntax: &'a egui_extras::syntax_highlighting::SyntectSettings,
     pub views: &'a mut HashMap<BlockIndex, ViewData>,
     pub rx: &'a MessageReceiver<N>,
-    pub render_pool: &'a render::RenderWorkerPool<N>,
+    pub render_worker: &'a render::RenderWorker<N>,
 
     pub out: Vec<(BlockIndex, ViewResponse)>,
     /// List of blocks with active views (used to prune the render pool)
@@ -180,7 +180,7 @@ impl<'a, N: Notify> WorldView<'a, N> {
                 index,
                 block_view.scene.clone(),
                 self.rx,
-                self.render_pool,
+                self.render_worker,
             ) else {
                 return view::fallback_ui(
                     ui,
