@@ -49,16 +49,20 @@ use crate::{
     export::ExportError,
     platform::Notify,
     view::{ViewCanvas, ViewMode2, ViewMode3},
-    world::Scene,
+    world::{Drawable, Scene},
 };
 
+use by_address::ByAddress;
 use egui_wgpu::wgpu;
 use fidget::{
     raster::pixel::RawDistancePixel,
     render::{ImageSize, VoxelSize},
     wgpu::Context as _, // trait import
 };
-use std::collections::HashMap;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 use web_time::Instant;
 use zerocopy::{FromBytes, IntoBytes};
 
@@ -152,7 +156,7 @@ impl<N: Notify> RenderWorkerPool<N> {
     ) -> RenderTaskHandle {
         let cancel = fidget::render::CancelToken::new();
         let start_time = Instant::now();
-        let task = RenderTask {
+        let task = RenderTask::Render {
             kind: TaskKind::Display {
                 block,
                 generation,
@@ -166,6 +170,12 @@ impl<N: Notify> RenderWorkerPool<N> {
         RenderTaskHandle { settings, cancel }
     }
 
+    pub(crate) fn end_frame(&self, active: HashSet<BlockIndex>) {
+        self.tx
+            .send(RenderTask::EndFrame { active })
+            .expect("render thread stopped");
+    }
+
     /// Begins a new export image rendering task in the worker pool
     pub(crate) fn export(
         &self,
@@ -173,7 +183,7 @@ impl<N: Notify> RenderWorkerPool<N> {
         tx: MessageSender<N>,
     ) -> fidget::render::CancelToken {
         let cancel = fidget::render::CancelToken::new();
-        let task = RenderTask {
+        let task = RenderTask::Render {
             kind: TaskKind::Export { reply: tx },
             settings,
             cancel: cancel.clone(),
@@ -195,10 +205,15 @@ impl RenderTaskHandle {
 }
 
 /// Object representing a render task
-pub struct RenderTask<N: Notify> {
-    settings: RenderSettings,
-    cancel: fidget::render::CancelToken,
-    kind: TaskKind<N>,
+pub enum RenderTask<N: Notify> {
+    Render {
+        settings: RenderSettings,
+        cancel: fidget::render::CancelToken,
+        kind: TaskKind<N>,
+    },
+    EndFrame {
+        active: HashSet<BlockIndex>,
+    },
 }
 
 pub enum TaskKind<N: Notify> {
@@ -218,6 +233,15 @@ pub enum TaskKind<N: Notify> {
 pub enum RenderSettings {
     Image(ImageRenderSettings),
     Voxel(VoxelRenderSettings),
+}
+
+impl RenderSettings {
+    fn scene(&self) -> &Scene {
+        match self {
+            RenderSettings::Voxel(settings) => &settings.scene,
+            RenderSettings::Image(settings) => &settings.scene,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -391,114 +415,165 @@ pub(crate) async fn render_worker<N: Notify>(
 ) {
     while let Ok(task) = rx.recv_async().await {
         let _ = waker.try_send(true);
-        match task.kind {
-            TaskKind::Display {
-                block,
-                generation,
-                start_time,
-                reply,
-            } => {
-                if task.cancel.is_cancelled() {
-                    continue;
-                }
-                let image = match task.settings {
-                    RenderSettings::Voxel(settings) => {
-                        let image = gpu.render_voxel(&settings).await;
-                        RenderImage::Voxel { image, settings }
-                    }
-                    RenderSettings::Image(settings) => {
-                        let image = gpu.render_pixel_f16(&settings).await;
-                        RenderImage::Pixel { image, settings }
-                    }
-                };
-                reply.send(Message::RenderView(RenderViewReply {
+        match task {
+            RenderTask::Render {
+                settings,
+                cancel,
+                kind,
+            } => match kind {
+                TaskKind::Display {
                     block,
                     generation,
                     start_time,
-                    image,
-                }))
-            }
-            TaskKind::Export { reply } => {
-                // Initial check for cancellation, in case there's a long queue
-                // of things to render and we just now got to this one.
-                if task.cancel.is_cancelled() {
-                    reply.send(Message::ExportComplete(Err(
-                        ExportError::Cancelled,
-                    )));
-                    continue;
-                }
-
-                // We can't pass cancellation through to the GPU, unfortunately,
-                // so we'll kick off a rendering then check cancellation again
-                // after we're done.
-                enum ExportImage {
-                    Rgba(RgbaImage),
-                    Distance {
-                        distance: Vec<RawDistancePixel>,
-                        color: Option<Vec<[u8; 4]>>,
-                    },
-                }
-                let (data, image_size) = match &task.settings {
-                    RenderSettings::Voxel(vs) => {
-                        let image = gpu.render_voxel(vs).await;
-                        let size = image.size.into();
-                        (ExportImage::Rgba(image), size)
+                    reply,
+                } => {
+                    if cancel.is_cancelled() {
+                        continue;
                     }
-                    RenderSettings::Image(rs) => {
-                        let (distance, color) = gpu.render_pixel_f32(rs).await;
-                        let size = rs.render_size();
-                        (ExportImage::Distance { distance, color }, size)
-                    }
-                };
+                    // Grab the shape from the global shape cache; we'll put it
+                    // back at the end of rendering.
+                    let scene = settings.scene().clone();
+                    let mut shape = gpu
+                        .shapes
+                        .remove(&(block, ByAddress(scene.shapes.clone())))
+                        .unwrap_or_else(|| RenderShapes::new(&scene, &gpu.gpu));
 
-                // Re-check cancellation.  This is a *little* silly, because I
-                // expect image rendering to happen in ~milliseconds, but maybe
-                // the user wants a gigantic export and will have time to hit
-                // Cancel?
-                if task.cancel.is_cancelled() {
-                    reply.send(Message::ExportComplete(Err(
-                        ExportError::Cancelled,
-                    )));
-                    continue;
+                    // Dispatch to either voxel or pixel rendering
+                    let image = match settings {
+                        RenderSettings::Voxel(settings) => {
+                            let image_size = settings.render_size();
+                            let mut buf =
+                                gpu.get_voxel_buffers(block, image_size);
+                            let image = gpu
+                                .render_voxel(&settings, &mut buf, &mut shape)
+                                .await;
+                            gpu.store_voxel_buffers(block, image_size, buf);
+                            RenderImage::Voxel { image, settings }
+                        }
+                        RenderSettings::Image(settings) => {
+                            let image_size = settings.render_size();
+                            let mut buf =
+                                gpu.get_pixel_buffers(block, image_size);
+                            let image = gpu
+                                .render_pixel_f16(
+                                    &settings, &mut buf, &mut shape,
+                                )
+                                .await;
+                            gpu.store_pixel_buffers(block, image_size, buf);
+                            RenderImage::Pixel { image, settings }
+                        }
+                    };
+                    // Restore the shape in the cache
+                    gpu.shapes.insert((block, ByAddress(scene.shapes)), shape);
+                    reply.send(Message::RenderView(RenderViewReply {
+                        block,
+                        generation,
+                        start_time,
+                        image,
+                    }))
                 }
+                TaskKind::Export { reply } => {
+                    // Initial check for cancellation, in case there's a long
+                    // queue of things to render and we just now got to this
+                    // one.
+                    if cancel.is_cancelled() {
+                        reply.send(Message::ExportComplete(Err(
+                            ExportError::Cancelled,
+                        )));
+                        continue;
+                    }
 
-                let out = match &data {
-                    ExportImage::Distance { distance, color } => {
-                        if let Some(c) = color {
-                            std::borrow::Cow::Borrowed(c.as_bytes())
-                        } else {
-                            distance
-                                .iter()
-                                .flat_map(|p| {
-                                    if p.inside() {
-                                        [0xFF; 4]
-                                    } else {
-                                        [0x00; 4]
-                                    }
-                                })
-                                .collect()
+                    // We can't pass cancellation through to the GPU,
+                    // unfortunately, so we'll kick off a rendering then check
+                    // cancellation again after we're done.
+                    enum ExportImage {
+                        Rgba(RgbaImage),
+                        Distance {
+                            distance: Vec<RawDistancePixel>,
+                            color: Option<Vec<[u8; 4]>>,
+                        },
+                    }
+                    // We will build bespoke shape and voxel/pixel buffers for
+                    // export, instead of trying to borrow one from a scene.
+                    // Exports should be a rare (human-time-scale) event, so
+                    // we're not optimizing for peak efficiency.
+                    let scene = settings.scene();
+                    let mut shapes = RenderShapes::new(scene, &gpu.gpu);
+                    let (data, image_size) = match &settings {
+                        RenderSettings::Voxel(vs) => {
+                            let mut buf =
+                                gpu.build_voxel_buffers(vs.render_size());
+                            let image = gpu
+                                .render_voxel(vs, &mut buf, &mut shapes)
+                                .await;
+                            let size = image.size.into();
+                            (ExportImage::Rgba(image), size)
+                        }
+                        RenderSettings::Image(rs) => {
+                            // Build temporary pixel buffers, which aren't stored in
+                            // the GPU object
+                            let mut buf =
+                                gpu.build_pixel_buffers(rs.render_size());
+                            let (distance, color) = gpu
+                                .render_pixel_f32(rs, &mut buf, &mut shapes)
+                                .await;
+                            let size = rs.render_size();
+                            (ExportImage::Distance { distance, color }, size)
+                        }
+                    };
+
+                    // Re-check cancellation.  This is a *little* silly, because
+                    // I expect image rendering to happen in ~milliseconds, but
+                    // maybe the user wants a gigantic export and will have time
+                    // to hit Cancel?
+                    if cancel.is_cancelled() {
+                        reply.send(Message::ExportComplete(Err(
+                            ExportError::Cancelled,
+                        )));
+                        continue;
+                    }
+
+                    let out = match &data {
+                        ExportImage::Distance { distance, color } => {
+                            if let Some(c) = color {
+                                std::borrow::Cow::Borrowed(c.as_bytes())
+                            } else {
+                                distance
+                                    .iter()
+                                    .flat_map(|p| {
+                                        if p.inside() {
+                                            [0xFF; 4]
+                                        } else {
+                                            [0x00; 4]
+                                        }
+                                    })
+                                    .collect()
+                            }
+                        }
+                        ExportImage::Rgba(im) => {
+                            std::borrow::Cow::Borrowed(im.color.as_bytes())
+                        }
+                    };
+
+                    let mut bytes = vec![];
+                    match image::write_buffer_with_format(
+                        &mut std::io::Cursor::new(&mut bytes),
+                        &out,
+                        image_size.width(),
+                        image_size.height(),
+                        image::ColorType::Rgba8,
+                        image::ImageFormat::Png,
+                    ) {
+                        Ok(()) => {
+                            reply.send(Message::ExportComplete(Ok(bytes)))
+                        }
+                        Err(e) => {
+                            reply.send(Message::ExportComplete(Err(e.into())))
                         }
                     }
-                    ExportImage::Rgba(im) => {
-                        std::borrow::Cow::Borrowed(im.color.as_bytes())
-                    }
-                };
-
-                let mut bytes = vec![];
-                match image::write_buffer_with_format(
-                    &mut std::io::Cursor::new(&mut bytes),
-                    &out,
-                    image_size.width(),
-                    image_size.height(),
-                    image::ColorType::Rgba8,
-                    image::ImageFormat::Png,
-                ) {
-                    Ok(()) => reply.send(Message::ExportComplete(Ok(bytes))),
-                    Err(e) => {
-                        reply.send(Message::ExportComplete(Err(e.into())))
-                    }
                 }
-            }
+            },
+            RenderTask::EndFrame { active } => gpu.end_frame(active),
         }
         let _ = waker.try_send(false);
     }
@@ -609,20 +684,19 @@ pub(crate) struct GpuWorker {
 
     voxel_ctx: VoxelContext,
     voxel_workspace: VoxelWorkspace,
-    voxel_buffers: HashMap<VoxelSize, VoxelBuffers>,
+    voxel_buffers: HashMap<(BlockIndex, VoxelSize), VoxelBuffers>,
 
     pixel_ctx: PixelContext,
     pixel_workspace: PixelWorkspace,
-    pixel_buffers: HashMap<ImageSize, PixelBuffers>,
+    pixel_buffers: HashMap<(BlockIndex, ImageSize), PixelBuffers>,
 
     pixel_downfloat_pipeline: wgpu::ComputePipeline,
     pixel_downfloat_bind_group_layout: wgpu::BindGroupLayout,
 
-    shapes: HashMap<
-        by_address::ByAddress<std::sync::Arc<[crate::world::Drawable]>>,
-        RenderShapes,
-    >,
+    shapes: HashMap<ShapeKey, RenderShapes>,
 }
+
+type ShapeKey = (BlockIndex, ByAddress<Arc<[Drawable]>>);
 
 impl GpuWorker {
     pub(crate) async fn new() -> Self {
@@ -734,9 +808,13 @@ impl GpuWorker {
         }
     }
 
-    async fn render_voxel(&mut self, vs: &VoxelRenderSettings) -> RgbaImage {
+    async fn render_voxel(
+        &mut self,
+        vs: &VoxelRenderSettings,
+        voxel_buffers: &mut VoxelBuffers,
+        shapes: &mut RenderShapes,
+    ) -> RgbaImage {
         let VoxelRenderSettings {
-            scene,
             mode,
             view,
             perspective,
@@ -753,28 +831,12 @@ impl GpuWorker {
             vars: &Default::default(),
         };
 
-        let voxel_buffers = self
-            .voxel_buffers
-            .entry(image_size)
-            .or_insert_with(|| VoxelBuffers {
-                render: self.voxel_ctx.render.buffers(image_size).unwrap(),
-                merge: self.voxel_ctx.merge.buffers(image_size).unwrap(),
-                shade: self.voxel_ctx.shade.buffers(image_size).unwrap(),
-                ssao: self.voxel_ctx.ssao.buffers(image_size.into()).unwrap(),
-                read: self.gpu.read_buffer("voxel read", image_size).unwrap(),
-            });
-
         // Render and accumulate every shape into merge buffers
         voxel_buffers.merge.reset();
         let merge_settings = fidget::wgpu::voxel::merge::Settings {
             denoise: true,
             z_scale: scale.z,
         };
-
-        let shapes = self
-            .shapes
-            .entry(by_address::ByAddress(scene.shapes.clone()))
-            .or_insert_with(|| RenderShapes::new(scene, &self.gpu));
 
         for s in shapes.shapes.iter() {
             self.voxel_ctx
@@ -861,12 +923,42 @@ impl GpuWorker {
         }
     }
 
+    fn get_voxel_buffers(
+        &mut self,
+        block: BlockIndex,
+        image_size: VoxelSize,
+    ) -> VoxelBuffers {
+        self.voxel_buffers
+            .remove(&(block, image_size))
+            .unwrap_or_else(|| self.build_voxel_buffers(image_size))
+    }
+
+    fn build_voxel_buffers(&self, image_size: VoxelSize) -> VoxelBuffers {
+        VoxelBuffers {
+            render: self.voxel_ctx.render.buffers(image_size).unwrap(),
+            merge: self.voxel_ctx.merge.buffers(image_size).unwrap(),
+            shade: self.voxel_ctx.shade.buffers(image_size).unwrap(),
+            ssao: self.voxel_ctx.ssao.buffers(image_size.into()).unwrap(),
+            read: self.gpu.read_buffer("voxel read", image_size).unwrap(),
+        }
+    }
+
+    fn store_voxel_buffers(
+        &mut self,
+        block: BlockIndex,
+        image_size: VoxelSize,
+        buf: VoxelBuffers,
+    ) {
+        self.voxel_buffers.insert((block, image_size), buf);
+    }
+
     async fn render_pixel_f16(
         &mut self,
         vs: &ImageRenderSettings,
+        pixel_buffers: &mut PixelBuffers,
+        shapes: &mut RenderShapes,
     ) -> PixelImage {
-        let image_size = self.submit_pixel(vs);
-        let pixel_buffers = self.pixel_buffers.get_mut(&image_size).unwrap();
+        let image_size = self.submit_pixel(vs, pixel_buffers, shapes);
 
         let color = if let Some(c) = pixel_buffers.merge.output_color() {
             self.gpu
@@ -960,13 +1052,70 @@ impl GpuWorker {
         }
     }
 
+    fn get_pixel_buffers(
+        &mut self,
+        block: BlockIndex,
+        image_size: ImageSize,
+    ) -> PixelBuffers {
+        self.pixel_buffers
+            .remove(&(block, image_size))
+            .unwrap_or_else(|| self.build_pixel_buffers(image_size))
+    }
+
+    fn build_pixel_buffers(&self, image_size: ImageSize) -> PixelBuffers {
+        // TODO should we split this into f16 and f32 flavors?
+        let f16_size = (u64::from(image_size.width())
+            * u64::from(image_size.height())
+            * std::mem::size_of::<Float16>() as u64)
+            .next_multiple_of(4); // Round up for alignment here!
+        PixelBuffers {
+            render: self.pixel_ctx.render.buffers(image_size).unwrap(),
+            merge: self.pixel_ctx.merge.buffers(image_size).unwrap(),
+            distance_buffer_f16: self.gpu.device.create_buffer(
+                &wgpu::BufferDescriptor {
+                    label: Some("distance16"),
+                    usage: wgpu::BufferUsages::STORAGE
+                        | wgpu::BufferUsages::COPY_SRC,
+                    mapped_at_creation: false,
+                    size: f16_size,
+                },
+            ),
+            read_distance_buffer_f16: self.gpu.device.create_buffer(
+                &wgpu::BufferDescriptor {
+                    label: Some("read distance16"),
+                    usage: wgpu::BufferUsages::MAP_READ
+                        | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                    size: f16_size,
+                },
+            ),
+            read_color_buffer: self
+                .gpu
+                .read_buffer("pixel color", image_size)
+                .unwrap(),
+            read_distance_buffer_f32: self
+                .gpu
+                .read_buffer("pixel f32 distance", image_size)
+                .unwrap(),
+        }
+    }
+
+    fn store_pixel_buffers(
+        &mut self,
+        block: BlockIndex,
+        image_size: ImageSize,
+        buf: PixelBuffers,
+    ) {
+        self.pixel_buffers.insert((block, image_size), buf);
+    }
+
     async fn render_pixel_f32(
         &mut self,
         vs: &ImageRenderSettings,
+        pixel_buffers: &mut PixelBuffers,
+        shapes: &mut RenderShapes,
     ) -> (Vec<RawDistancePixel>, Option<Vec<[u8; 4]>>) {
-        let image_size = self.submit_pixel(vs);
-        let pixel_buffers = self.pixel_buffers.get_mut(&image_size).unwrap();
-
+        self.submit_pixel(vs, pixel_buffers, shapes);
         let color = if let Some(c) = pixel_buffers.merge.output_color() {
             self.gpu
                 .copy(c, &mut pixel_buffers.read_color_buffer)
@@ -996,57 +1145,19 @@ impl GpuWorker {
         (distance, color)
     }
 
-    fn submit_pixel(&mut self, vs: &ImageRenderSettings) -> ImageSize {
-        let ImageRenderSettings {
-            scene, mode, view, ..
-        } = vs;
+    fn submit_pixel(
+        &mut self,
+        vs: &ImageRenderSettings,
+        pixel_buffers: &mut PixelBuffers,
+        shapes: &mut RenderShapes,
+    ) -> ImageSize {
+        let ImageRenderSettings { mode, view, .. } = vs;
         let image_size = vs.render_size();
         let world_to_model = view.world_to_model();
-        let pixel_buffers =
-            self.pixel_buffers.entry(image_size).or_insert_with(|| {
-                let f16_size = (u64::from(image_size.width())
-                    * u64::from(image_size.height())
-                    * std::mem::size_of::<Float16>() as u64)
-                    .next_multiple_of(4); // Round up for alignment here!
-                PixelBuffers {
-                    render: self.pixel_ctx.render.buffers(image_size).unwrap(),
-                    merge: self.pixel_ctx.merge.buffers(image_size).unwrap(),
-                    distance_buffer_f16: self.gpu.device.create_buffer(
-                        &wgpu::BufferDescriptor {
-                            label: Some("distance16"),
-                            usage: wgpu::BufferUsages::STORAGE
-                                | wgpu::BufferUsages::COPY_SRC,
-                            mapped_at_creation: false,
-                            size: f16_size,
-                        },
-                    ),
-                    read_distance_buffer_f16: self.gpu.device.create_buffer(
-                        &wgpu::BufferDescriptor {
-                            label: Some("read distance16"),
-                            usage: wgpu::BufferUsages::MAP_READ
-                                | wgpu::BufferUsages::COPY_DST,
-                            mapped_at_creation: false,
-                            size: f16_size,
-                        },
-                    ),
-                    read_color_buffer: self
-                        .gpu
-                        .read_buffer("pixel color", image_size)
-                        .unwrap(),
-                    read_distance_buffer_f32: self
-                        .gpu
-                        .read_buffer("pixel f32 distance", image_size)
-                        .unwrap(),
-                }
-            });
 
         // Render and accumulate every shape into merge buffers
         pixel_buffers.merge.reset();
 
-        let shapes = self
-            .shapes
-            .entry(by_address::ByAddress(scene.shapes.clone()))
-            .or_insert_with(|| RenderShapes::new(scene, &self.gpu));
         for s in shapes.shapes.iter() {
             self.pixel_ctx
                 .render
@@ -1091,5 +1202,11 @@ impl GpuWorker {
         }
 
         image_size
+    }
+
+    fn end_frame(&mut self, active: HashSet<BlockIndex>) {
+        self.voxel_buffers.retain(|k, _v| active.contains(&k.0));
+        self.pixel_buffers.retain(|k, _v| active.contains(&k.0));
+        self.shapes.retain(|k, _v| active.contains(&k.0));
     }
 }

@@ -17,9 +17,12 @@ pub struct WorldView<'a, N: Notify> {
     pub world: &'a mut World,
     pub syntax: &'a egui_extras::syntax_highlighting::SyntectSettings,
     pub views: &'a mut HashMap<BlockIndex, ViewData>,
-    pub out: &'a mut Vec<(BlockIndex, ViewResponse)>,
     pub rx: &'a MessageReceiver<N>,
     pub render_pool: &'a render::RenderWorkerPool<N>,
+
+    pub out: Vec<(BlockIndex, ViewResponse)>,
+    /// List of blocks with active views (used to prune the render pool)
+    pub active: std::collections::HashSet<BlockIndex>,
 }
 
 impl Tab {
@@ -74,6 +77,9 @@ impl<'a, N: Notify> WorldView<'a, N> {
         ui: &mut egui::Ui,
         index: BlockIndex,
     ) -> ViewResponse {
+        // Mark that this block is being used in the view
+        self.active.insert(index);
+
         // Is the block valid?
         // Does the block have a current view?
         // Does the view list have an entry for this block?

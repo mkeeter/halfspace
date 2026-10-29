@@ -617,6 +617,7 @@ impl<P: Platform> App<P> {
             .store(0, std::sync::atomic::Ordering::Relaxed);
         self.undo = state::Undo::new(&self.data);
         self.rx.increment_gen(); // orphan previous tasks
+        self.render_pool.end_frame(HashSet::new()); // destroy render objects
     }
 
     pub fn start_world_rebuild(&mut self) {
@@ -1221,22 +1222,27 @@ impl<P: Platform> App<P> {
         painter.rect_filled(rect, 0.0, style.visuals.panel_fill);
         painter.galley(text_corner, layout, egui::Color32::BLACK);
 
-        let mut io_out = vec![];
+        // Draw the dock view!
         let mut bw = gui::WorldView {
             world: &mut self.data,
             syntax: &self.syntax,
             views: &mut self.views,
             rx: &self.rx,
-            out: &mut io_out,
             render_pool: &self.render_pool,
+            out: vec![],
+            active: HashSet::new(),
         };
         egui_dock::DockArea::new(&mut self.tree)
             .style(egui_dock::Style::from_egui(ui.global_style().as_ref()))
             .show_leaf_collapse_buttons(false)
             .show_leaf_close_all_buttons(false)
             .show_inside(ui, &mut bw);
+
+        // Once we finish drawing the dock view, we can prune render objects
+        self.render_pool.end_frame(bw.active);
+
         let mut changed = false;
-        for (block, flags) in io_out {
+        for (block, flags) in bw.out {
             for f in flags.iter() {
                 match f {
                     ViewResponse::FOCUS_ERR => {
