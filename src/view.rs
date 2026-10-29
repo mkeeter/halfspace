@@ -28,6 +28,9 @@ pub struct ViewData {
     /// Interaction canvas
     pub canvas: ViewCanvas,
 
+    /// Rolling stats for mean and variance, on a per-level basis
+    stats: Vec<RollingWindow<32>>,
+
     /// Current image
     image: Option<ViewImage>,
 
@@ -36,6 +39,42 @@ pub struct ViewData {
 
     /// Monotonic counter to identify the most recent task
     generation: u64,
+}
+
+/// Welford's Online Algorithm for mean and variance calculations
+#[derive(Default)]
+struct RollingWindow<const N: usize> {
+    data: std::collections::VecDeque<f32>,
+    mean: f32,
+    m2: f32,
+}
+
+impl<const N: usize> RollingWindow<N> {
+    fn mean(&self) -> f32 {
+        self.mean
+    }
+
+    fn variance(&self) -> f32 {
+        self.m2 / self.data.len() as f32
+    }
+
+    fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    fn push(&mut self, x: f32) {
+        // Clamp to `N` items
+        if self.data.len() == N {
+            let x = self.data.pop_front().unwrap();
+            let new_mean = self.mean;
+            self.mean -= (x - self.mean) / self.data.len() as f32;
+            self.m2 -= (x - new_mean) * (x - self.mean);
+        }
+        self.data.push_back(x);
+        let old_mean = self.mean;
+        self.mean += (x - self.mean) / self.data.len() as f32;
+        self.m2 += (x - old_mean) * (x - self.mean);
+    }
 }
 
 /// Tuple of data to be loaded and its corresponding WGPU texture
@@ -90,6 +129,7 @@ impl From<ViewCanvas> for ViewData {
             image: None,
             start_level: 0,
             generation: 0,
+            stats: vec![],
         }
     }
 }
@@ -227,6 +267,18 @@ impl ViewImage {
             _ => false,
         }
     }
+
+    fn partial_match(&self, settings: &RenderSettings) -> bool {
+        match (self, settings) {
+            (ViewImage::Voxel { settings, .. }, RenderSettings::Voxel(vs)) => {
+                settings.partial_match(vs)
+            }
+            (ViewImage::Pixel { settings, .. }, RenderSettings::Image(vs)) => {
+                settings.partial_match(vs)
+            }
+            _ => false,
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -253,6 +305,7 @@ impl ViewData {
             image: None,
             generation: 0,
             start_level: 0,
+            stats: vec![],
         }
     }
 
@@ -272,6 +325,19 @@ impl ViewData {
         // Adjust self.start_level to hit a render time target, with some
         // hysteresis to avoid bouncing between levels
         let level = r.image.level();
+        if level >= self.stats.len() {
+            self.stats.resize_with(level + 1, Default::default);
+        }
+        println!(
+            "rendered {:?} [{level}] in {:?} ({})",
+            r.block, render_time, self.start_level
+        );
+        self.stats[level].push(render_time.as_secs_f32() * 1000.0);
+        println!("{:?}", r.block);
+        for (i, s) in self.stats.iter().enumerate() {
+            println!("  {i}: {} ± {} ({})", s.mean(), s.variance(), s.len());
+        }
+
         if level == self.start_level {
             if render_time > TARGET_RENDER_TIME && level < MAX_LEVEL {
                 self.start_level += 1;
@@ -581,6 +647,16 @@ impl ViewData {
             .is_some_and(|prev| prev.should_cancel(&settings))
         {
             self.task = None; // dropping the task cancels it
+        }
+
+        // If the scene or size has changed, clear our settings (since they're
+        // no longer going to be useful).
+        if self
+            .image
+            .as_ref()
+            .is_none_or(|image| !image.partial_match(&settings))
+        {
+            self.stats.clear();
         }
 
         // If we don't have a task (either because it's done or it was cancelled

@@ -279,6 +279,19 @@ impl ImageRenderSettings {
             && view == &other.view
             && base_size == &other.base_size
     }
+
+    /// Returns `true` if the render scene and size are identical
+    pub fn partial_match(&self, other: &ImageRenderSettings) -> bool {
+        // Manual destructuring to fail loudly if things change
+        let Self {
+            scene,
+            mode: _,
+            view: _,
+            base_size,
+            level: _,
+        } = self;
+        scene == &other.scene && base_size == &other.base_size
+    }
 }
 
 #[derive(Clone)]
@@ -330,6 +343,20 @@ impl VoxelRenderSettings {
             && perspective == &other.perspective
             && view == &other.view
             && base_size == &other.base_size
+    }
+
+    /// Returns `true` if the render scene and size are identical
+    pub fn partial_match(&self, other: &VoxelRenderSettings) -> bool {
+        // Manual destructuring to fail loudly if things change
+        let Self {
+            scene,
+            mode: _,
+            perspective: _,
+            view: _,
+            base_size,
+            level: _,
+        } = self;
+        scene == &other.scene && base_size == &other.base_size
     }
 }
 
