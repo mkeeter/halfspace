@@ -318,33 +318,38 @@ impl ViewData {
         device: &wgpu::Device,
         resources: &WgpuResources,
     ) {
-        const TARGET_RENDER_TIME: Duration = Duration::from_millis(33);
+        const TARGET_RENDER_TIME_MILLIS: f32 = 20.0;
         const MAX_LEVEL: usize = 10;
         let render_time = r.start_time.elapsed();
 
-        // Adjust self.start_level to hit a render time target, with some
-        // hysteresis to avoid bouncing between levels
+        // Accumulate per-level rolling statistics
         let level = r.image.level();
         if level >= self.stats.len() {
             self.stats.resize_with(level + 1, Default::default);
         }
+        self.stats[level].push(render_time.as_secs_f32() * 1000.0);
+
         println!(
             "rendered {:?} [{level}] in {:?} ({})",
             r.block, render_time, self.start_level
         );
-        self.stats[level].push(render_time.as_secs_f32() * 1000.0);
         println!("{:?}", r.block);
         for (i, s) in self.stats.iter().enumerate() {
             println!("  {i}: {} ± {} ({})", s.mean(), s.variance(), s.len());
         }
 
-        if level == self.start_level {
-            if render_time > TARGET_RENDER_TIME && level < MAX_LEVEL {
-                self.start_level += 1;
-            } else if render_time < TARGET_RENDER_TIME * 3 / 4 {
-                self.start_level = self.start_level.saturating_sub(1);
+        let mut new_start_level = None;
+        for (i, s) in self.stats.iter().enumerate() {
+            let worst = s.mean() + s.variance().sqrt() * 2.0;
+            if worst < TARGET_RENDER_TIME_MILLIS {
+                new_start_level = Some(i);
+                break;
             }
         }
+        self.start_level =
+            new_start_level.unwrap_or(self.stats.len().min(MAX_LEVEL));
+        println!("  new level: {}", self.start_level);
+
         if r.generation == self.generation {
             let _ = self.task.take();
             if let Some(next) = level.checked_sub(1) {
