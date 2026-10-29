@@ -55,7 +55,6 @@ use crate::{
 use by_address::ByAddress;
 use egui_wgpu::wgpu;
 use fidget::{
-    raster::pixel::RawDistancePixel,
     render::{ImageSize, VoxelSize},
     wgpu::Context as _, // trait import
 };
@@ -455,9 +454,7 @@ pub(crate) async fn render_worker<N: Notify>(
                             let mut buf =
                                 gpu.get_pixel_buffers(block, image_size);
                             let image = gpu
-                                .render_pixel_f16(
-                                    &settings, &mut buf, &mut shape,
-                                )
+                                .render_pixel(&settings, &mut buf, &mut shape)
                                 .await;
                             gpu.store_pixel_buffers(block, image_size, buf);
                             RenderImage::Pixel { image, settings }
@@ -488,10 +485,7 @@ pub(crate) async fn render_worker<N: Notify>(
                     // cancellation again after we're done.
                     enum ExportImage {
                         Rgba(RgbaImage),
-                        Distance {
-                            distance: Vec<RawDistancePixel>,
-                            color: Option<Vec<[u8; 4]>>,
-                        },
+                        Distance(PixelImage),
                     }
                     // We will build bespoke shape and voxel/pixel buffers for
                     // export, instead of trying to borrow one from a scene.
@@ -514,11 +508,11 @@ pub(crate) async fn render_worker<N: Notify>(
                             // the GPU object
                             let mut buf =
                                 gpu.build_pixel_buffers(rs.render_size());
-                            let (distance, color) = gpu
-                                .render_pixel_f32(rs, &mut buf, &mut shapes)
+                            let out = gpu
+                                .render_pixel(rs, &mut buf, &mut shapes)
                                 .await;
                             let size = rs.render_size();
-                            (ExportImage::Distance { distance, color }, size)
+                            (ExportImage::Distance(out), size)
                         }
                     };
 
@@ -534,14 +528,15 @@ pub(crate) async fn render_worker<N: Notify>(
                     }
 
                     let out = match &data {
-                        ExportImage::Distance { distance, color } => {
-                            if let Some(c) = color {
+                        ExportImage::Distance(p) => {
+                            if let Some(c) = &p.color {
                                 std::borrow::Cow::Borrowed(c.as_bytes())
                             } else {
-                                distance
+                                p.distance
                                     .iter()
                                     .flat_map(|p| {
-                                        if p.inside() {
+                                        // Check float16 sign bit
+                                        if p.0 & (1 << 15) != 0 {
                                             [0xFF; 4]
                                         } else {
                                             [0x00; 4]
@@ -626,12 +621,9 @@ pub struct PixelBuffers {
     merge: fidget::wgpu::pixel::merge::Buffers,
 
     // We use a raw buffer for the `f16` because we have to align it manually
-    distance_buffer_f16: wgpu::Buffer,
-    read_distance_buffer_f16: wgpu::Buffer,
+    distance_buffer: wgpu::Buffer,
+    read_distance_buffer: wgpu::Buffer,
 
-    read_distance_buffer_f32: fidget::wgpu::buf::ReadBuffer<
-        fidget::wgpu::pixel::merge::PixelDistanceBufferTag,
-    >,
     read_color_buffer: fidget::wgpu::buf::ReadBuffer<
         fidget::wgpu::pixel::merge::PixelColorBufferTag,
     >,
@@ -952,7 +944,7 @@ impl GpuWorker {
         self.voxel_buffers.insert((block, image_size), buf);
     }
 
-    async fn render_pixel_f16(
+    async fn render_pixel(
         &mut self,
         vs: &ImageRenderSettings,
         pixel_buffers: &mut PixelBuffers,
@@ -1002,7 +994,7 @@ impl GpuWorker {
                             wgpu::BindGroupEntry {
                                 binding: 1,
                                 resource: pixel_buffers
-                                    .distance_buffer_f16
+                                    .distance_buffer
                                     .as_entire_binding(),
                             },
                         ],
@@ -1017,16 +1009,16 @@ impl GpuWorker {
         }
 
         encoder.copy_buffer_to_buffer(
-            &pixel_buffers.distance_buffer_f16,
+            &pixel_buffers.distance_buffer,
             0,
-            &pixel_buffers.read_distance_buffer_f16,
+            &pixel_buffers.read_distance_buffer,
             0,
-            pixel_buffers.distance_buffer_f16.size(),
+            pixel_buffers.distance_buffer.size(),
         );
         self.gpu.queue.submit(std::iter::once(encoder.finish()));
 
         let distance = {
-            let slice = pixel_buffers.read_distance_buffer_f16.slice(..);
+            let slice = pixel_buffers.read_distance_buffer.slice(..);
 
             let (tx, rx) = flume::bounded(1);
             slice.map_async(wgpu::MapMode::Read, move |_| tx.send(()).unwrap());
@@ -1043,7 +1035,7 @@ impl GpuWorker {
                 * usize::try_from(image_size.height()).unwrap();
             <[Float16]>::ref_from_bytes(&slice[..]).unwrap()[..n].to_owned()
         };
-        pixel_buffers.read_distance_buffer_f16.unmap();
+        pixel_buffers.read_distance_buffer.unmap();
 
         PixelImage {
             distance,
@@ -1071,7 +1063,7 @@ impl GpuWorker {
         PixelBuffers {
             render: self.pixel_ctx.render.buffers(image_size).unwrap(),
             merge: self.pixel_ctx.merge.buffers(image_size).unwrap(),
-            distance_buffer_f16: self.gpu.device.create_buffer(
+            distance_buffer: self.gpu.device.create_buffer(
                 &wgpu::BufferDescriptor {
                     label: Some("distance16"),
                     usage: wgpu::BufferUsages::STORAGE
@@ -1080,7 +1072,7 @@ impl GpuWorker {
                     size: f16_size,
                 },
             ),
-            read_distance_buffer_f16: self.gpu.device.create_buffer(
+            read_distance_buffer: self.gpu.device.create_buffer(
                 &wgpu::BufferDescriptor {
                     label: Some("read distance16"),
                     usage: wgpu::BufferUsages::MAP_READ
@@ -1093,10 +1085,6 @@ impl GpuWorker {
                 .gpu
                 .read_buffer("pixel color", image_size)
                 .unwrap(),
-            read_distance_buffer_f32: self
-                .gpu
-                .read_buffer("pixel f32 distance", image_size)
-                .unwrap(),
         }
     }
 
@@ -1107,42 +1095,6 @@ impl GpuWorker {
         buf: PixelBuffers,
     ) {
         self.pixel_buffers.insert((block, image_size), buf);
-    }
-
-    async fn render_pixel_f32(
-        &mut self,
-        vs: &ImageRenderSettings,
-        pixel_buffers: &mut PixelBuffers,
-        shapes: &mut RenderShapes,
-    ) -> (Vec<RawDistancePixel>, Option<Vec<[u8; 4]>>) {
-        self.submit_pixel(vs, pixel_buffers, shapes);
-        let color = if let Some(c) = pixel_buffers.merge.output_color() {
-            self.gpu
-                .copy(c, &mut pixel_buffers.read_color_buffer)
-                .expect("failed to read pixel color buffer");
-            let mapped_color_image = self
-                .gpu
-                .map_image_async(&mut pixel_buffers.read_color_buffer)
-                .await;
-            let data = mapped_color_image.image().take().0;
-            Some(<[[u8; 4]]>::ref_from_bytes(data.as_bytes()).unwrap().into())
-        } else {
-            None
-        };
-
-        self.gpu
-            .copy(
-                pixel_buffers.merge.output_distance(),
-                &mut pixel_buffers.read_distance_buffer_f32,
-            )
-            .expect("failed to read f32 pixel distance buffer");
-        let mapped_distance_image = self
-            .gpu
-            .map_image_async(&mut pixel_buffers.read_distance_buffer_f32)
-            .await;
-        let distance_img = mapped_distance_image.image();
-        let distance = distance_img.take().0;
-        (distance, color)
     }
 
     fn submit_pixel(
