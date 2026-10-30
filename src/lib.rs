@@ -1538,6 +1538,17 @@ impl<P: Platform> App<P> {
             view.request_highres_render(*block, &self.rx, &self.render_worker);
         }
     }
+
+    /// Requests informational renders (to improve frame stats)
+    fn request_informational_render(&mut self) {
+        for (block, view) in &mut self.views {
+            view.request_informational_render(
+                *block,
+                &self.rx,
+                &self.render_worker,
+            );
+        }
+    }
 }
 
 impl<P: Platform> eframe::App for App<P> {
@@ -1563,6 +1574,8 @@ impl<P: Platform> eframe::App for App<P> {
                 ui.request_repaint_after(delay);
             } else if self.needs_highres_render {
                 self.request_highres_render();
+            } else {
+                self.request_informational_render();
             }
         }
     }

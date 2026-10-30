@@ -15,6 +15,7 @@ use crate::{
 pub use state::{ViewMode2, ViewMode3};
 
 use egui_wgpu::wgpu;
+use log::trace;
 
 /// State associated with a given view in the GUI
 ///
@@ -326,6 +327,42 @@ impl ViewData {
         }
     }
 
+    /// Request an informational render for this view
+    ///
+    /// This is used to improve frame statistics, so that we can do a better job
+    /// of picking `start_level` on subsequent frames.
+    pub fn request_informational_render<N: Notify>(
+        &mut self,
+        block: BlockIndex,
+        rx: &MessageReceiver<N>,
+        render_worker: &RenderWorker<N>,
+    ) {
+        // Don't do informational renders if a task is in progress
+        if self.task.is_some() {
+            return;
+        }
+        // Views which aren't shown don't have an image, so we'll just return
+        // right away.
+        let Some(image) = &self.image else {
+            return;
+        };
+        // Pick the highest image level with bad variance (> 20% of render time)
+        // We skip the start level because it's used for normal rendering
+        for (level, s) in self.stats.iter().enumerate().rev().skip(1) {
+            let stdev = s.variance().sqrt();
+            if stdev == 0.0 || stdev.is_nan() || stdev / s.mean() > 0.2 {
+                self.spawn_render_task(
+                    block,
+                    true,
+                    image.settings().with_level(level),
+                    rx,
+                    render_worker,
+                );
+                break;
+            }
+        }
+    }
+
     /// Callback when a render task is complete
     pub fn update(
         &mut self,
@@ -344,13 +381,13 @@ impl ViewData {
         }
         self.stats[level].push(render_time.as_secs_f32() * 1000.0);
 
-        println!(
+        trace!(
             "rendered {:?} [{level}] in {:?} ({})",
             r.block, render_time, self.start_level
         );
-        println!("{:?}", r.block);
+        trace!("{:?}", r.block);
         for (i, s) in self.stats.iter().enumerate() {
-            println!("  {i}: {} ± {} ({})", s.mean(), s.variance(), s.len());
+            trace!("  {i}: {} ± {} ({})", s.mean(), s.variance(), s.len());
         }
 
         let mut new_start_level = None;
@@ -363,10 +400,21 @@ impl ViewData {
         }
         self.start_level =
             new_start_level.unwrap_or(self.stats.len().min(MAX_LEVEL));
-        println!("  new level: {}", self.start_level);
+        // Trim stats above the the start level
+        self.stats
+            .resize_with(self.start_level + 1, Default::default);
+
+        trace!("  new level: {}", self.start_level);
 
         if r.generation == self.generation {
             let _ = self.task.take();
+
+            // Information renders are only used to update stats!
+            if r.informational {
+                let _ = self.task.take();
+                return;
+            }
+
             let prev_image = self.image.take();
             self.image = Some(match r.image {
                 RenderImage::Voxel { image, settings } => {
