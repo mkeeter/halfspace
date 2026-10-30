@@ -1433,8 +1433,8 @@ impl<P: Platform> App<P> {
 
     fn platform_share(&self) {
         let state = self.get_state();
-        use base64::{Engine as _, engine::general_purpose::URL_SAFE};
-        let data = URL_SAFE.encode(state.to_binary());
+        use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+        let data = URL_SAFE_NO_PAD.encode(state.to_binary());
         self.platform.share(&data);
     }
 

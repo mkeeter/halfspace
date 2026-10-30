@@ -281,14 +281,13 @@ impl AppState {
     pub fn to_binary(&self) -> Vec<u8> {
         let mut compressed = vec![];
         compressed.extend(BIN_TAG.to_le_bytes());
-        compressed.extend(BIN_VERSION_DEFLATE.to_le_bytes());
-
-        let json_buffer = serde_json::ser::to_vec(&self).unwrap();
-        log::debug!("got {} bytes of JSON", json_buffer.len());
+        compressed.extend(BIN_VERSION_CBOR_BROTLI.to_le_bytes());
+        let mut cbor_buffer = vec![];
+        ciborium::ser::into_writer(&self, &mut cbor_buffer).unwrap();
 
         // buffer_size = 4096, quality = 6 (0-11), lg_window_size = 22 (10-24)
         brotli::CompressorWriter::new(&mut compressed, 4096, 11, 22)
-            .write_all(&json_buffer)
+            .write_all(&cbor_buffer)
             .unwrap();
         debug!("compressed to {} bytes", compressed.len());
 
@@ -307,7 +306,7 @@ impl AppState {
                 actual: tag,
             });
         }
-        if version != BIN_VERSION_DEFLATE {
+        if version != BIN_VERSION_CBOR_BROTLI {
             return Err(BinaryReadError::BadVersion { version });
         }
 
@@ -322,7 +321,9 @@ impl AppState {
 }
 
 const BIN_TAG: u32 = 0x68616c66; // 'half'
-const BIN_VERSION_DEFLATE: u32 = 1;
+
+/// Flag indicating CBOR compressed with Brotli
+const BIN_VERSION_CBOR_BROTLI: u32 = 1;
 
 #[derive(Deserialize)]
 struct RawAppState {
