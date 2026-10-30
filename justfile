@@ -35,7 +35,7 @@ _dist opt:
     {{cargo-web}} build --lib --release --target wasm32-unknown-unknown
     rm -rf {{PKG_DIR}}/*
     wasm-bindgen target/wasm32-unknown-unknown/release/halfspace.wasm --out-dir {{PKG_DIR}} --target web
-    wasm-opt {{opt}} pkg/halfspace_bg.wasm -o {{PKG_WA}}
+    wasm-opt {{opt}} {{PKG_DIR}}/halfspace_bg.wasm -o {{PKG_WA}}
     mkdir -p {{DIST_DIR}}
     rm    -rf {{DIST_DIR}}/*
     cp {{PKG_WA}} '{{DIST_DIR}}/halfspace.{{replace_regex(sha256_file(PKG_WA), CUT8, "")}}.wasm'
