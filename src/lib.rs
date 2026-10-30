@@ -219,8 +219,9 @@ enum Message {
 struct RenderViewReply {
     block: BlockIndex,
     generation: u64,
-    start_time: Instant,
+    render_time: std::time::Duration,
     image: render::RenderImage,
+    informational: bool,
 }
 
 /// Message sender for worker tasks
@@ -376,6 +377,15 @@ pub(crate) struct App<P: Platform> {
 
     /// Confirms that `meta.name` should be used for local saves
     local_name_confirmed: bool,
+
+    /// Last timestamp when interactive GPU work was submitted
+    ///
+    /// We wait some amount of time after this point to dispatch non-interactive
+    /// GPU work (i.e. higher-resolution rendering).
+    last_gpu_time: Instant,
+
+    /// Marks whether there are views rendered at non-native resolution
+    needs_highres_render: bool,
 }
 
 enum ScriptState {
@@ -585,6 +595,8 @@ impl<P: Platform> App<P> {
             quit_confirmed: false,
             request_repaint: false,
             local_name_confirmed: false,
+            last_gpu_time: Instant::now(),
+            needs_highres_render: true,
         }
     }
 
@@ -1231,6 +1243,8 @@ impl<P: Platform> App<P> {
             render_worker: &self.render_worker,
             out: vec![],
             active: HashSet::new(),
+            rendering_interactive_frame: false,
+            needs_highres_render: false,
         };
         egui_dock::DockArea::new(&mut self.tree)
             .style(egui_dock::Style::from_egui(ui.global_style().as_ref()))
@@ -1240,6 +1254,11 @@ impl<P: Platform> App<P> {
 
         // Once we finish drawing the dock view, we can prune render objects
         self.render_worker.end_frame(bw.active);
+
+        if bw.rendering_interactive_frame {
+            self.last_gpu_time = Instant::now();
+        }
+        self.needs_highres_render = bw.needs_highres_render;
 
         let mut changed = false;
         for (block, flags) in bw.out {
@@ -1512,6 +1531,24 @@ impl<P: Platform> App<P> {
         self.load_from_state(AppState::default());
         self.request_repaint = true;
     }
+
+    /// Request a high-resolution render for all views
+    fn request_highres_render(&mut self) {
+        for (block, view) in &mut self.views {
+            view.request_highres_render(*block, &self.rx, &self.render_worker);
+        }
+    }
+
+    /// Requests informational renders (to improve frame stats)
+    fn request_informational_render(&mut self) {
+        for (block, view) in &mut self.views {
+            view.request_informational_render(
+                *block,
+                &self.rx,
+                &self.render_worker,
+            );
+        }
+    }
 }
 
 impl<P: Platform> eframe::App for App<P> {
@@ -1529,6 +1566,17 @@ impl<P: Platform> eframe::App for App<P> {
 
         if std::mem::take(&mut self.request_repaint) {
             ui.request_repaint();
+        } else {
+            let idle_time = Instant::now().duration_since(self.last_gpu_time);
+            if let Some(delay) =
+                std::time::Duration::from_millis(50).checked_sub(idle_time)
+            {
+                ui.request_repaint_after(delay);
+            } else if self.needs_highres_render {
+                self.request_highres_render();
+            } else {
+                self.request_informational_render();
+            }
         }
     }
 }
@@ -1775,13 +1823,12 @@ impl<P: Platform> App<P> {
             }
             Message::RenderView(reply) => {
                 if let Some(e) = self.views.get_mut(&reply.block) {
-                    e.update(
-                        reply,
-                        &self.rx,
-                        &self.render_worker,
-                        &self.device,
-                        &self.pipelines,
-                    )
+                    if reply.image.level() > 0
+                        && reply.image.level() == e.start_level()
+                    {
+                        self.last_gpu_time = Instant::now();
+                    }
+                    e.update(reply, &self.device, &self.pipelines);
                 }
             }
             Message::Loaded { state } => match self.modal {
