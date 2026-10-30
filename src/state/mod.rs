@@ -24,9 +24,10 @@
 //! crate).  Within a major version, we _try_ to deserialize it, but return a
 //! default state if deserialization fails.
 use crate::view::ViewData;
-use log::warn;
+use log::{debug, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::io::{Read, Write};
 
 mod undo;
 mod v1;
@@ -34,6 +35,24 @@ mod v2;
 mod v3;
 pub use undo::Undo;
 pub use v3::*;
+
+#[derive(thiserror::Error, Debug)]
+pub enum BinaryReadError {
+    #[error("data stream is too short for tag and version")]
+    TooShort,
+
+    #[error("bad binary tag; expected {expected}, got {actual}")]
+    BadTag { expected: u32, actual: u32 },
+
+    #[error("unknown binary version {version}")]
+    BadVersion { version: u32 },
+
+    #[error("decompression read failed")]
+    ReadFailed(#[from] std::io::Error),
+
+    #[error("reading failed")]
+    Read(#[from] ReadError),
+}
 
 /// Unique index for blocks
 ///
@@ -258,7 +277,52 @@ impl AppState {
     pub fn serialize(&self) -> String {
         serde_json::to_string_pretty(self).expect("serialization failed")
     }
+
+    pub fn to_binary(&self) -> Vec<u8> {
+        let mut compressed = vec![];
+        compressed.extend(BIN_TAG.to_le_bytes());
+        compressed.extend(BIN_VERSION_DEFLATE.to_le_bytes());
+
+        let json_buffer = serde_json::ser::to_vec(&self).unwrap();
+        log::debug!("got {} bytes of JSON", json_buffer.len());
+
+        // buffer_size = 4096, quality = 6 (0-11), lg_window_size = 22 (10-24)
+        brotli::CompressorWriter::new(&mut compressed, 4096, 11, 22)
+            .write_all(&json_buffer)
+            .unwrap();
+        debug!("compressed to {} bytes", compressed.len());
+
+        compressed
+    }
+
+    pub fn from_binary(data: &[u8]) -> Result<Self, BinaryReadError> {
+        if data.len() < 8 {
+            return Err(BinaryReadError::TooShort);
+        }
+        let tag = u32::from_le_bytes(data[0..4].try_into().unwrap());
+        let version = u32::from_le_bytes(data[0..8].try_into().unwrap());
+        if tag != BIN_TAG {
+            return Err(BinaryReadError::BadTag {
+                expected: BIN_TAG,
+                actual: tag,
+            });
+        }
+        if version != BIN_VERSION_DEFLATE {
+            return Err(BinaryReadError::BadVersion { version });
+        }
+
+        let mut decompressed = vec![];
+        let mut d = brotli::Decompressor::new(&data[8..], 4096);
+        d.read_to_end(&mut decompressed)?;
+        let s =
+            std::str::from_utf8(&decompressed).map_err(ReadError::NotUtf8)?;
+        let out = Self::deserialize(s)?;
+        Ok(out)
+    }
 }
+
+const BIN_TAG: u32 = 0x68616c66; // 'half'
+const BIN_VERSION_DEFLATE: u32 = 1;
 
 #[derive(Deserialize)]
 struct RawAppState {

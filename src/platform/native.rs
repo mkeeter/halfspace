@@ -188,6 +188,10 @@ impl Platform for NativePlatform {
         });
         RenderWorker::new(tx)
     }
+
+    fn share(&self, data: &str) {
+        info!("sharing {data}");
+    }
 }
 
 impl NativePlatform {
