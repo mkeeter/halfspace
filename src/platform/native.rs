@@ -191,6 +191,7 @@ impl Platform for NativePlatform {
 
     fn share(&self, data: &str) {
         info!("sharing {data}");
+        info!("data is {} bytes long", data.len());
     }
 }
 
