@@ -84,17 +84,6 @@ impl RenderImage {
             RenderImage::Voxel { settings, .. } => settings.level,
         }
     }
-
-    pub fn settings(&self) -> RenderSettings {
-        match self {
-            RenderImage::Pixel { settings, .. } => {
-                RenderSettings::Image(settings.clone())
-            }
-            RenderImage::Voxel { settings, .. } => {
-                RenderSettings::Voxel(settings.clone())
-            }
-        }
-    }
 }
 
 #[derive(
@@ -129,6 +118,12 @@ pub struct RenderTaskHandle {
     cancel: fidget::render::CancelToken,
 }
 
+impl RenderTaskHandle {
+    pub fn level(&self) -> usize {
+        self.settings.level()
+    }
+}
+
 impl Drop for RenderTaskHandle {
     fn drop(&mut self) {
         self.cancel.cancel()
@@ -150,17 +145,17 @@ impl<N: Notify> RenderWorker<N> {
         &self,
         block: BlockIndex,
         generation: u64,
+        informational: bool,
         settings: RenderSettings,
         tx: MessageGenSender<N>,
     ) -> RenderTaskHandle {
         let cancel = fidget::render::CancelToken::new();
-        let start_time = Instant::now();
         let task = RenderTask::Render {
             kind: TaskKind::Display {
                 block,
                 generation,
-                start_time,
                 reply: tx,
+                informational,
             },
             settings: settings.clone(),
             cancel: cancel.clone(),
@@ -220,7 +215,9 @@ pub enum TaskKind<N: Notify> {
         block: BlockIndex,
         generation: u64,
         reply: MessageGenSender<N>,
-        start_time: Instant,
+
+        /// Indicates that the render is to improve frame statistics
+        informational: bool,
     },
     Export {
         reply: MessageSender<N>,
@@ -232,15 +229,6 @@ pub enum TaskKind<N: Notify> {
 pub enum RenderSettings {
     Image(ImageRenderSettings),
     Voxel(VoxelRenderSettings),
-}
-
-impl RenderSettings {
-    fn scene(&self) -> &Scene {
-        match self {
-            RenderSettings::Voxel(settings) => &settings.scene,
-            RenderSettings::Image(settings) => &settings.scene,
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -361,6 +349,13 @@ impl VoxelRenderSettings {
 }
 
 impl RenderSettings {
+    fn scene(&self) -> &Scene {
+        match self {
+            RenderSettings::Voxel(settings) => &settings.scene,
+            RenderSettings::Image(settings) => &settings.scene,
+        }
+    }
+
     pub fn from_canvas(
         canvas: &ViewCanvas,
         scene: Scene,
@@ -450,8 +445,8 @@ pub(crate) async fn render_worker<N: Notify>(
                 TaskKind::Display {
                     block,
                     generation,
-                    start_time,
                     reply,
+                    informational,
                 } => {
                     if cancel.is_cancelled() {
                         continue;
@@ -464,12 +459,16 @@ pub(crate) async fn render_worker<N: Notify>(
                         .remove(&(block, ByAddress(scene.shapes.clone())))
                         .unwrap_or_else(|| RenderShapes::new(&scene, &gpu.gpu));
 
+                    // We'll track render time after buffers are created
+                    let start_time;
+
                     // Dispatch to either voxel or pixel rendering
                     let image = match settings {
                         RenderSettings::Voxel(settings) => {
                             let image_size = settings.render_size();
                             let mut buf =
                                 gpu.get_voxel_buffers(block, image_size);
+                            start_time = Instant::now();
                             let image = gpu
                                 .render_voxel(&settings, &mut buf, &mut shape)
                                 .await;
@@ -480,6 +479,7 @@ pub(crate) async fn render_worker<N: Notify>(
                             let image_size = settings.render_size();
                             let mut buf =
                                 gpu.get_pixel_buffers(block, image_size);
+                            start_time = Instant::now();
                             let image = gpu
                                 .render_pixel(&settings, &mut buf, &mut shape)
                                 .await;
@@ -492,8 +492,9 @@ pub(crate) async fn render_worker<N: Notify>(
                     reply.send(Message::RenderView(RenderViewReply {
                         block,
                         generation,
-                        start_time,
+                        render_time: start_time.elapsed(),
                         image,
+                        informational,
                     }))
                 }
                 TaskKind::Export { reply } => {

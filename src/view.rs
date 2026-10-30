@@ -15,7 +15,6 @@ use crate::{
 pub use state::{ViewMode2, ViewMode3};
 
 use egui_wgpu::wgpu;
-use web_time::Duration;
 
 /// State associated with a given view in the GUI
 ///
@@ -279,6 +278,24 @@ impl ViewImage {
             _ => false,
         }
     }
+
+    pub fn level(&self) -> usize {
+        match self {
+            ViewImage::Pixel { settings, .. } => settings.level,
+            ViewImage::Voxel { settings, .. } => settings.level,
+        }
+    }
+
+    pub fn settings(&self) -> RenderSettings {
+        match self {
+            ViewImage::Pixel { settings, .. } => {
+                RenderSettings::Image(settings.clone())
+            }
+            ViewImage::Voxel { settings, .. } => {
+                RenderSettings::Voxel(settings.clone())
+            }
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -309,18 +326,42 @@ impl ViewData {
         }
     }
 
-    /// Callback when a render task is complete
-    pub fn update<N: Notify>(
+    /// Request a high-resolution render for this view
+    ///
+    /// This is a no-op if the view either has a high-resolution view or has a
+    /// spawned task.
+    pub fn request_highres_render<N: Notify>(
         &mut self,
-        r: RenderViewReply,
+        block: BlockIndex,
         rx: &MessageReceiver<N>,
         render_worker: &RenderWorker<N>,
+    ) {
+        // Views which aren't shown don't have an image, so we'll just return
+        // right away.
+        let Some(image) = &self.image else {
+            return;
+        };
+        if image.level() != 0 && self.task.is_none() {
+            self.spawn_render_task(
+                block,
+                false,
+                image.settings().with_level(0),
+                rx,
+                render_worker,
+            );
+        }
+    }
+
+    /// Callback when a render task is complete
+    pub fn update(
+        &mut self,
+        r: RenderViewReply,
         device: &wgpu::Device,
         resources: &WgpuResources,
     ) {
         const TARGET_RENDER_TIME_MILLIS: f32 = 20.0;
         const MAX_LEVEL: usize = 10;
-        let render_time = r.start_time.elapsed();
+        let render_time = r.render_time;
 
         // Accumulate per-level rolling statistics
         let level = r.image.level();
@@ -352,14 +393,6 @@ impl ViewData {
 
         if r.generation == self.generation {
             let _ = self.task.take();
-            if let Some(next) = level.checked_sub(1) {
-                self.spawn_render_task(
-                    r.block,
-                    r.image.settings().with_level(next),
-                    rx,
-                    render_worker,
-                );
-            }
             let prev_image = self.image.take();
             self.image = Some(match r.image {
                 RenderImage::Voxel { image, settings } => {
@@ -615,6 +648,7 @@ impl ViewData {
     fn spawn_render_task<N: Notify>(
         &mut self,
         block: BlockIndex,
+        informational: bool,
         settings: RenderSettings,
         rx: &MessageReceiver<N>,
         render_worker: &RenderWorker<N>,
@@ -623,6 +657,7 @@ impl ViewData {
         self.task = Some(render_worker.spawn(
             block,
             self.generation,
+            informational,
             settings,
             rx.sender_with_gen(),
         ));
@@ -632,13 +667,15 @@ impl ViewData {
     ///
     /// This should be called in the main GUI loop while visiting the editor
     /// tabs, when images are needed.
+    ///
+    /// Returns a tuple of `(image to draw, rendering interactive frame)`
     pub(crate) fn image<N: Notify>(
         &mut self,
         block: BlockIndex,
         scene: Scene,
         rx: &MessageReceiver<N>,
         render_worker: &RenderWorker<N>,
-    ) -> Option<&mut ViewImage> {
+    ) -> (Option<&mut ViewImage>, bool) {
         // Build settings assuming that we're starting from a max-level render
         let settings =
             RenderSettings::from_canvas(&self.canvas, scene, self.start_level);
@@ -673,9 +710,14 @@ impl ViewData {
                 .as_ref()
                 .is_none_or(|image| !image.matches(&settings))
         {
-            self.spawn_render_task(block, settings, rx, render_worker);
+            self.spawn_render_task(block, false, settings, rx, render_worker);
         }
-        self.image.as_mut()
+
+        let has_gpu_work = self
+            .task
+            .as_ref()
+            .is_some_and(|t| t.level() == self.start_level);
+        (self.image.as_mut(), has_gpu_work)
     }
 
     pub fn prev_image(&mut self) -> Option<&mut ViewImage> {

@@ -21,8 +21,18 @@ pub struct WorldView<'a, N: Notify> {
     pub render_worker: &'a render::RenderWorker<N>,
 
     pub out: Vec<(BlockIndex, ViewResponse)>,
+
     /// List of blocks with active views (used to prune the render pool)
     pub active: std::collections::HashSet<BlockIndex>,
+
+    /// Indicates whether any view is rendering an interactive (low-res) frame
+    ///
+    /// This is used to delay high-res rendering until the user is done
+    /// interacting with the GUI.
+    pub rendering_interactive_frame: bool,
+
+    /// Indicates whether any view needs a high-res frame
+    pub needs_highres_render: bool,
 }
 
 impl Tab {
@@ -176,12 +186,14 @@ impl<'a, N: Notify> WorldView<'a, N> {
         // previous image, drawing it in an *invalid* state (with a red border).
         let current_canvas = entry.canvas;
         let (image, valid) = if let Some(block_view) = block_view {
-            let Some(image) = entry.image(
+            let (image, interactive) = entry.image(
                 index,
                 block_view.scene.clone(),
                 self.rx,
                 self.render_worker,
-            ) else {
+            );
+            self.rendering_interactive_frame |= interactive;
+            let Some(image) = image else {
                 return view::fallback_ui(
                     ui,
                     index,
@@ -191,6 +203,7 @@ impl<'a, N: Notify> WorldView<'a, N> {
                     None,
                 );
             };
+            self.needs_highres_render |= image.level() != 0;
             (image, true)
         } else if let Some(prev_image) = entry.prev_image() {
             (prev_image, false)
