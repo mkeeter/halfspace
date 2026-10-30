@@ -378,7 +378,10 @@ pub(crate) struct App<P: Platform> {
     /// Confirms that `meta.name` should be used for local saves
     local_name_confirmed: bool,
 
-    /// Last timestamp when GPU work was submitted
+    /// Last timestamp when interactive GPU work was submitted
+    ///
+    /// We wait some amount of time after this point to dispatch non-interactive
+    /// GPU work (i.e. higher-resolution rendering).
     last_gpu_time: Instant,
 
     /// Marks whether there are views rendered at non-native resolution
@@ -1552,13 +1555,13 @@ impl<P: Platform> eframe::App for App<P> {
 
         if std::mem::take(&mut self.request_repaint) {
             ui.request_repaint();
-        } else if self.needs_highres_render {
+        } else {
             let idle_time = Instant::now().duration_since(self.last_gpu_time);
             if let Some(delay) =
                 std::time::Duration::from_millis(50).checked_sub(idle_time)
             {
                 ui.request_repaint_after(delay);
-            } else {
+            } else if self.needs_highres_render {
                 self.request_highres_render();
             }
         }
@@ -1807,8 +1810,12 @@ impl<P: Platform> App<P> {
             }
             Message::RenderView(reply) => {
                 if let Some(e) = self.views.get_mut(&reply.block) {
+                    if reply.image.level() > 0
+                        && reply.image.level() == e.start_level()
+                    {
+                        self.last_gpu_time = Instant::now();
+                    }
                     e.update(reply, &self.device, &self.pipelines);
-                    self.last_gpu_time = Instant::now();
                 }
             }
             Message::Loaded { state } => match self.modal {

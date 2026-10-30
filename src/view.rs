@@ -94,32 +94,6 @@ impl<T> TextureData<T> {
     }
 }
 
-impl ViewData {
-    /// Returns a characteristic transform matrix for this view
-    ///
-    /// The scale should be applied to mouse motion in pixels
-    pub fn characteristic_matrix(&self) -> nalgebra::Matrix4<f32> {
-        match self.canvas {
-            ViewCanvas::Canvas2 { canvas, .. } => {
-                let m = canvas.view().world_to_model()
-                    * canvas.image_size().screen_to_world();
-                #[rustfmt::skip]
-                let mat = nalgebra::Matrix4::new(
-                    m[(0, 0)], m[(0, 1)], 0.0, m[(0, 2)],
-                    m[(1, 0)], m[(1, 1)], 0.0, m[(1, 2)],
-                    0.0,        0.0,      1.0, 0.0,
-                    m[(2, 0)], m[(2, 1)], 0.0, m[(2,2)],
-                );
-                mat
-            }
-            ViewCanvas::Canvas3 { canvas, .. } => {
-                canvas.view().world_to_model()
-                    * canvas.image_size().screen_to_world()
-            }
-        }
-    }
-}
-
 impl From<ViewCanvas> for ViewData {
     fn from(canvas: ViewCanvas) -> Self {
         Self {
@@ -722,6 +696,34 @@ impl ViewData {
 
     pub fn prev_image(&mut self) -> Option<&mut ViewImage> {
         self.image.as_mut()
+    }
+
+    pub fn start_level(&self) -> usize {
+        self.start_level
+    }
+
+    /// Returns a characteristic transform matrix for this view
+    ///
+    /// The scale should be applied to mouse motion in pixels
+    pub fn characteristic_matrix(&self) -> nalgebra::Matrix4<f32> {
+        match self.canvas {
+            ViewCanvas::Canvas2 { canvas, .. } => {
+                let m = canvas.view().world_to_model()
+                    * canvas.image_size().screen_to_world();
+                #[rustfmt::skip]
+                let mat = nalgebra::Matrix4::new(
+                    m[(0, 0)], m[(0, 1)], 0.0, m[(0, 2)],
+                    m[(1, 0)], m[(1, 1)], 0.0, m[(1, 2)],
+                    0.0,        0.0,      1.0, 0.0,
+                    m[(2, 0)], m[(2, 1)], 0.0, m[(2,2)],
+                );
+                mat
+            }
+            ViewCanvas::Canvas3 { canvas, .. } => {
+                canvas.view().world_to_model()
+                    * canvas.image_size().screen_to_world()
+            }
+        }
     }
 }
 
