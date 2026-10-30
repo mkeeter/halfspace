@@ -663,12 +663,8 @@ impl<P: Platform> App<P> {
                     if ui.button("\u{f019} Download").clicked() {
                         self.on_download();
                     }
-                    if ui.button("\u{f019} Share").clicked() {
-                        let state = self.get_state();
-                        use base64::{
-                            Engine as _, engine::general_purpose::URL_SAFE,
-                        };
-                        info!("{:?}", URL_SAFE.encode(state.to_binary()));
+                    if ui.button("\u{f50e} Share model via URL").clicked() {
+                        self.platform_share();
                     }
                     ui.separator();
                     if ui.button("\u{eb4b} Save").clicked() {
@@ -709,7 +705,7 @@ impl<P: Platform> App<P> {
                             self.on_load(true);
                         }
                         if ui.button("\u{f019} Share").clicked() {
-                            self.on_share();
+                            self.platform_share();
                         }
                         ui.separator();
                     }
@@ -1439,7 +1435,7 @@ impl<P: Platform> App<P> {
         let state = self.get_state();
         use base64::{Engine as _, engine::general_purpose::URL_SAFE};
         let data = URL_SAFE.encode(state.to_binary());
-        self.platform.on_share(&data);
+        self.platform.share(&data);
     }
 
     fn open_local(&mut self) {

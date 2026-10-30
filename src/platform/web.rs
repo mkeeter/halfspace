@@ -294,6 +294,34 @@ impl platform::Platform for WebPlatform {
         let tx = TX_CHANNEL.get().unwrap().clone();
         RenderWorker::new(tx)
     }
+
+    fn share(&self, data: &str) {
+        let window = web_sys::window().ok_or("no window").unwrap();
+        let location = window.location();
+
+        let params =
+            web_sys::UrlSearchParams::new_with_str(&location.search().unwrap()).unwrap();
+        params.delete("example");
+        params.delete("model");
+        params.set("model", data);
+        let query = String::from(params.to_string());
+
+        let url = format!(
+            "{}{}{}",
+            location.pathname().unwrap(),
+            if query.is_empty() {
+                String::new()
+            } else {
+                format!("?{query}")
+            },
+            location.hash().unwrap(),
+        );
+
+        window
+            .history().unwrap()
+            .replace_state_with_url(&JsValue::NULL, "", Some(&url))
+            .unwrap()
+    }
 }
 
 impl WebPlatform {
