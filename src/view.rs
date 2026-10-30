@@ -320,7 +320,7 @@ impl ViewData {
             self.spawn_render_task(
                 block,
                 false,
-                image.settings().with_level(0),
+                image.settings().with_level(image.level() - 1),
                 rx,
                 render_worker,
             );
