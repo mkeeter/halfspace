@@ -261,14 +261,23 @@ impl AppState {
         compressed.extend(BIN_VERSION_JSON_BROTLI.to_le_bytes());
         let json_buffer = serde_json::ser::to_vec(&self).unwrap();
 
-        // buffer_size = 4096, quality = 11 (0-11), lg_window_size = 22 (10-24)
-        let mut w =
-            brotli::CompressorWriter::new(&mut compressed, 4096, 11, 22);
-        w.write_all(&json_buffer).unwrap();
-        w.flush().unwrap();
-        let _ = w.into_inner(); // finalize the stream
-        debug!("compressed to {} bytes", compressed.len());
+        use brotli::enc::{
+            BrotliEncoderParams, backward_references::BrotliEncoderMode,
+        };
+        let params = BrotliEncoderParams {
+            quality: 11,
+            mode: BrotliEncoderMode::BROTLI_MODE_TEXT,
+            size_hint: json_buffer.len(),
+            // Smallest window that covers the input, clamped to the valid range
+            lgwin: (usize::BITS
+                - json_buffer.len().saturating_sub(1).leading_zeros())
+            .clamp(10, 24) as i32,
+            ..Default::default()
+        };
 
+        brotli::BrotliCompress(&mut &json_buffer[..], &mut compressed, &params)
+            .unwrap();
+        debug!("compressed to {} bytes", compressed.len());
         compressed
     }
 
