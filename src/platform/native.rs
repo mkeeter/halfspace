@@ -5,22 +5,11 @@ use crate::{
     state::FromBytesError,
     wgpu_setup,
 };
+use anyhow::Context;
 use log::{info, warn};
 use std::io::{Read, Write};
 
 use clap::Parser;
-
-#[derive(thiserror::Error, Debug)]
-pub enum ReadError {
-    #[error("io error encountered when opening file")]
-    CouldNotOpen(#[source] std::io::Error),
-
-    #[error("io error encountered when reading file")]
-    CouldNotRead(#[source] std::io::Error),
-
-    #[error(transparent)]
-    FromBytes(#[from] FromBytesError),
-}
 
 struct NativePlatform {
     rx_channel: Option<MessageReceiver<Notify>>,
@@ -222,6 +211,18 @@ impl platform::PlatformExport for ExportTarget {
     }
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum ReadError {
+    #[error("io error encountered when opening file")]
+    CouldNotOpen(#[source] std::io::Error),
+
+    #[error("io error encountered when reading file")]
+    CouldNotRead(#[source] std::io::Error),
+
+    #[error(transparent)]
+    FromBytes(#[from] FromBytesError),
+}
+
 /// An experimental CAD tool
 #[derive(clap::Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -240,6 +241,10 @@ struct Args {
 
     /// File to edit (created if not present)
     target: Option<std::path::PathBuf>,
+
+    /// Example to load
+    #[clap(long, conflicts_with = "target", requires = "debug")]
+    model: Option<String>,
 }
 
 #[derive(Clone)]
@@ -313,6 +318,17 @@ pub fn run() -> anyhow::Result<()> {
                 && !app.load_example(&format!("{example}.half"))
             {
                 warn!("could not find example '{example}'");
+            } else if let Some(model) = args.model {
+                // Debug option: deserialize from a base64 string
+                use base64::{
+                    Engine as _, engine::general_purpose::URL_SAFE_NO_PAD,
+                };
+                let bin = URL_SAFE_NO_PAD
+                    .decode(model)
+                    .context("base64 decoding failed")?;
+                let state = AppState::from_binary(&bin)
+                    .context("could not decode binary state")?;
+                app.load_from_state(state);
             }
 
             Ok(Box::new(app))
