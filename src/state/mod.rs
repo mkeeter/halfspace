@@ -189,7 +189,7 @@ impl AppState {
 
     pub fn deserialize(s: &str) -> Result<Self, DeserializeError> {
         let raw: RawAppState = serde_json::from_str(s)?;
-        Ok(raw.try_into()?)
+        raw.try_into()
     }
 
     fn deserialize_from_reader<R: Reader>(
@@ -298,9 +298,7 @@ impl AppState {
         d.read_to_end(&mut decompressed)
             .map_err(BinaryReadError::Decompression)?;
         let _ = d.into_inner(); // finalize decompression
-        let s = std::str::from_utf8(&decompressed)
-            .map_err(FromBytesError::NotUtf8)?;
-        let out = Self::deserialize(s).map_err(FromBytesError::Deserialize)?;
+        let out = Self::from_bytes(&decompressed)?;
         Ok(out)
     }
 }

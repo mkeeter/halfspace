@@ -346,8 +346,7 @@ fn load_from_file(filename: &std::path::Path) -> Result<AppState, ReadError> {
         .map_err(ReadError::CouldNotOpen)?;
     let mut data = vec![];
     f.read_to_end(&mut data).map_err(ReadError::CouldNotRead)?;
-    let s = std::str::from_utf8(&data).map_err(FromBytesError::NotUtf8)?;
-    Ok(AppState::deserialize(s).map_err(FromBytesError::Deserialize)?)
+    Ok(AppState::from_bytes(&data)?)
 }
 
 /// Writes to the given file
