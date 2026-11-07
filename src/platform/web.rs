@@ -60,6 +60,12 @@ pub fn run() {
         .and_then(|s| web_sys::UrlSearchParams::new_with_str(&s))
         .ok();
 
+    let raw_hash = location.hash().ok();
+    let hash = raw_hash
+        .as_ref()
+        .and_then(|s| s.strip_prefix('#'))
+        .and_then(|s| web_sys::UrlSearchParams::new_with_str(s).ok());
+
     // Get an optional `verbose` parameter from the URL string
     let verbose =
         if let Some(v) = params.as_ref().and_then(|p| p.get("verbose")) {
@@ -89,6 +95,24 @@ pub fn run() {
     }
 
     let example = params.and_then(|p| p.get("example"));
+    let model = hash.and_then(|p| {
+        let model = p.get("model")?;
+        use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+        let bin = match URL_SAFE_NO_PAD.decode(model) {
+            Ok(bin) => Some(bin),
+            Err(e) => {
+                error!("base64 decoding failed: {e:#?}");
+                None
+            }
+        }?;
+        match AppState::from_binary(&bin) {
+            Ok(state) => Some(state),
+            Err(e) => {
+                error!("could not decode binary state: {e:#?}");
+                None
+            }
+        }
+    });
     wasm_bindgen_futures::spawn_local(async move {
         // Start the render worker before doing any other work
         start_worker(
@@ -126,7 +150,15 @@ pub fn run() {
                     let mut platform = WebPlatform::new(&cc.egui_ctx);
                     let notify_rx = platform.take_notify_rx();
                     let mut app = App::<WebPlatform>::new(cc, platform, false);
-                    if let Some(example) = example
+                    if let Some(model) = model {
+                        if example.is_some() {
+                            warn!(
+                                "model and example are both present; \
+                                defaulting to model"
+                            );
+                        }
+                        app.load_from_state(model)
+                    } else if let Some(example) = example
                         && !app.load_example(&example)
                     {
                         warn!("failed to load example '{example}'");
@@ -415,7 +447,7 @@ pub(crate) async fn dialog_worker(
                     let data = f.read().await;
                     match std::str::from_utf8(&data)
                         .map_err(state::ReadError::NotUtf8)
-                        .and_then(AppState::deserialize)
+                        .and_then(|s| Ok(AppState::deserialize(s)?))
                     {
                         Ok(state) => Message::Loaded { state },
                         Err(e) => Message::LoadFailed {

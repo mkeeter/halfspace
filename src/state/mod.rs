@@ -48,10 +48,13 @@ pub enum BinaryReadError {
     BadVersion { version: u32 },
 
     #[error("decompression read failed")]
-    ReadFailed(#[from] std::io::Error),
+    Decompression(#[source] std::io::Error),
 
-    #[error("reading failed")]
-    Read(#[from] ReadError),
+    #[error("data is not UTF-8")]
+    NotUtf8(#[source] std::str::Utf8Error),
+
+    #[error(transparent)]
+    Deserialize(#[from] DeserializeError),
 }
 
 /// Unique index for blocks
@@ -72,12 +75,21 @@ impl BlockIndex {
 
 #[derive(thiserror::Error, Debug)]
 pub enum ReadError {
+    #[error("io error encountered when opening file")]
+    CouldNotOpen(#[source] std::io::Error),
+
     #[error("io error encountered when reading file")]
-    IoError(#[from] std::io::Error),
+    CouldNotRead(#[source] std::io::Error),
 
     #[error("file is not UTF-8")]
-    NotUtf8(#[from] std::str::Utf8Error),
+    NotUtf8(#[source] std::str::Utf8Error),
 
+    #[error(transparent)]
+    Deserialize(#[from] DeserializeError),
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum DeserializeError {
     #[error("could not parse JSON")]
     ParseError(#[from] serde_json::Error),
 
@@ -179,50 +191,15 @@ impl AppState {
         }
     }
 
-    pub fn deserialize(s: &str) -> Result<Self, ReadError> {
+    pub fn deserialize(s: &str) -> Result<Self, DeserializeError> {
         let raw: RawAppState = serde_json::from_str(s)?;
-        if raw.tag != TAG {
-            return Err(ReadError::BadTag {
-                expected: TAG.to_owned(),
-                actual: raw.tag,
-            });
-        }
-        let data = match raw.major {
-            v1::MAJOR_VERSION => {
-                let data = Self::deserialize_from_reader::<v1::Reader>(raw)?;
-                let data = v2::Reader::migrate(data);
-                v3::Reader::migrate(data)
-            }
-            v2::MAJOR_VERSION => {
-                let data = Self::deserialize_from_reader::<v2::Reader>(raw)?;
-                v3::Reader::migrate(data)
-            }
-            v3::MAJOR_VERSION => {
-                Self::deserialize_from_reader::<v3::Reader>(raw)?
-            }
-            i => {
-                return Err(ReadError::BadMajorVersion {
-                    actual_major: i,
-                    expected_major: &[v1::MAJOR_VERSION, v2::MAJOR_VERSION],
-                });
-            }
-        };
-
-        Ok(Self {
-            tag: TAG.to_owned(),
-            major: MAJOR_VERSION,
-            minor: MINOR_VERSION,
-            meta: data.meta,
-            views: data.views,
-            world: data.world,
-            dock: data.dock,
-        })
+        Ok(raw.try_into()?)
     }
 
     fn deserialize_from_reader<R: Reader>(
         raw: RawAppState,
-    ) -> Result<ReadData<R>, ReadError> {
-        let too_new = || ReadError::TooNew {
+    ) -> Result<ReadData<R>, DeserializeError> {
+        let too_new = || DeserializeError::TooNew {
             expected_major: R::MAJOR_VERSION,
             actual_major: raw.major,
             expected_minor: R::MINOR_VERSION,
@@ -234,7 +211,7 @@ impl AppState {
                 if perhaps_too_new {
                     too_new()
                 } else {
-                    ReadError::from(e)
+                    DeserializeError::from(e)
                 }
             })?;
         let meta: R::Metadata = raw
@@ -244,7 +221,7 @@ impl AppState {
                     if perhaps_too_new {
                         too_new()
                     } else {
-                        ReadError::from(e)
+                        DeserializeError::from(e)
                     }
                 })
             })
@@ -255,7 +232,7 @@ impl AppState {
                 if perhaps_too_new {
                     too_new()
                 } else {
-                    ReadError::from(e)
+                    DeserializeError::from(e)
                 }
             })?;
         let dock = match serde_json::from_value(raw.dock) {
@@ -281,14 +258,15 @@ impl AppState {
     pub fn to_binary(&self) -> Vec<u8> {
         let mut compressed = vec![];
         compressed.extend(BIN_TAG.to_le_bytes());
-        compressed.extend(BIN_VERSION_CBOR_BROTLI.to_le_bytes());
-        let mut cbor_buffer = vec![];
-        ciborium::ser::into_writer(&self, &mut cbor_buffer).unwrap();
+        compressed.extend(BIN_VERSION_JSON_BROTLI.to_le_bytes());
+        let json_buffer = serde_json::ser::to_vec(&self).unwrap();
 
-        // buffer_size = 4096, quality = 6 (0-11), lg_window_size = 22 (10-24)
-        brotli::CompressorWriter::new(&mut compressed, 4096, 11, 22)
-            .write_all(&cbor_buffer)
-            .unwrap();
+        // buffer_size = 4096, quality = 11 (0-11), lg_window_size = 22 (10-24)
+        let mut w =
+            brotli::CompressorWriter::new(&mut compressed, 4096, 11, 22);
+        w.write_all(&json_buffer).unwrap();
+        w.flush().unwrap();
+        let _ = w.into_inner(); // finalize the stream
         debug!("compressed to {} bytes", compressed.len());
 
         compressed
@@ -299,22 +277,24 @@ impl AppState {
             return Err(BinaryReadError::TooShort);
         }
         let tag = u32::from_le_bytes(data[0..4].try_into().unwrap());
-        let version = u32::from_le_bytes(data[0..8].try_into().unwrap());
+        let version = u32::from_le_bytes(data[4..8].try_into().unwrap());
         if tag != BIN_TAG {
             return Err(BinaryReadError::BadTag {
                 expected: BIN_TAG,
                 actual: tag,
             });
         }
-        if version != BIN_VERSION_CBOR_BROTLI {
+        if version != BIN_VERSION_JSON_BROTLI {
             return Err(BinaryReadError::BadVersion { version });
         }
 
         let mut decompressed = vec![];
         let mut d = brotli::Decompressor::new(&data[8..], 4096);
-        d.read_to_end(&mut decompressed)?;
-        let s =
-            std::str::from_utf8(&decompressed).map_err(ReadError::NotUtf8)?;
+        d.read_to_end(&mut decompressed)
+            .map_err(BinaryReadError::Decompression)?;
+        let _ = d.into_inner(); // finalize decompression
+        let s = std::str::from_utf8(&decompressed)
+            .map_err(BinaryReadError::NotUtf8)?;
         let out = Self::deserialize(s)?;
         Ok(out)
     }
@@ -322,8 +302,8 @@ impl AppState {
 
 const BIN_TAG: u32 = 0x68616c66; // 'half'
 
-/// Flag indicating CBOR compressed with Brotli
-const BIN_VERSION_CBOR_BROTLI: u32 = 1;
+/// Flag indicating JSON compressed with Brotli
+const BIN_VERSION_JSON_BROTLI: u32 = 1;
 
 #[derive(Deserialize)]
 struct RawAppState {
@@ -334,4 +314,46 @@ struct RawAppState {
     world: serde_json::Value,
     views: serde_json::Value,
     dock: serde_json::Value,
+}
+
+impl TryFrom<RawAppState> for AppState {
+    type Error = DeserializeError;
+    fn try_from(raw: RawAppState) -> Result<Self, Self::Error> {
+        if raw.tag != TAG {
+            return Err(DeserializeError::BadTag {
+                expected: TAG.to_owned(),
+                actual: raw.tag,
+            });
+        }
+        let data = match raw.major {
+            v1::MAJOR_VERSION => {
+                let data = Self::deserialize_from_reader::<v1::Reader>(raw)?;
+                let data = v2::Reader::migrate(data);
+                v3::Reader::migrate(data)
+            }
+            v2::MAJOR_VERSION => {
+                let data = Self::deserialize_from_reader::<v2::Reader>(raw)?;
+                v3::Reader::migrate(data)
+            }
+            v3::MAJOR_VERSION => {
+                Self::deserialize_from_reader::<v3::Reader>(raw)?
+            }
+            i => {
+                return Err(DeserializeError::BadMajorVersion {
+                    actual_major: i,
+                    expected_major: &[v1::MAJOR_VERSION, v2::MAJOR_VERSION],
+                });
+            }
+        };
+
+        Ok(Self {
+            tag: TAG.to_owned(),
+            major: MAJOR_VERSION,
+            minor: MINOR_VERSION,
+            meta: data.meta,
+            views: data.views,
+            world: data.world,
+            dock: data.dock,
+        })
+    }
 }

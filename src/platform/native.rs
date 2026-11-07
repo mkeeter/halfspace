@@ -267,14 +267,20 @@ pub fn run() -> anyhow::Result<()> {
                         platform.set_filename(filename);
                         Some(state)
                     }
-                    Err(state::ReadError::IoError(e))
-                        if e.kind() == std::io::ErrorKind::NotFound =>
-                    {
-                        // We can specify a filename to create
-                        info!(
-                            "file {filename:?} is not yet present; treating it as empty"
-                        );
-                        platform.set_filename(filename);
+                    Err(state::ReadError::CouldNotOpen(e)) => {
+                        if e.kind() == std::io::ErrorKind::NotFound {
+                            // We can specify a filename to create
+                            info!(
+                                "file {filename:?} is not yet present; \
+                                 treating it as empty"
+                            );
+                            platform.set_filename(filename);
+                        } else {
+                            log::error!(
+                                "got `CouldNotOpen` without \
+                                `ErrorKind::NotFound`; this is suspicious"
+                            );
+                        }
                         None
                     }
                     Err(e) => return Err(e.into()),
@@ -307,11 +313,15 @@ fn load_from_file(
     filename: &std::path::Path,
 ) -> Result<AppState, state::ReadError> {
     info!("loading {filename:?}");
-    let mut f = std::fs::File::options().read(true).open(filename)?;
+    let mut f = std::fs::File::options()
+        .read(true)
+        .open(filename)
+        .map_err(state::ReadError::CouldNotOpen)?;
     let mut data = vec![];
-    f.read_to_end(&mut data)?;
-    let s = std::str::from_utf8(&data)?;
-    AppState::deserialize(s)
+    f.read_to_end(&mut data)
+        .map_err(state::ReadError::CouldNotRead)?;
+    let s = std::str::from_utf8(&data).map_err(state::ReadError::NotUtf8)?;
+    Ok(AppState::deserialize(s)?)
 }
 
 /// Writes to the given file
