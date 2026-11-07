@@ -346,7 +346,7 @@ fn load_from_file(filename: &std::path::Path) -> Result<AppState, ReadError> {
         .map_err(ReadError::CouldNotOpen)?;
     let mut data = vec![];
     f.read_to_end(&mut data).map_err(ReadError::CouldNotRead)?;
-    Ok(AppState::from_bytes(&data)?)
+    Ok(AppState::from_json_bytes(&data)?)
 }
 
 /// Writes to the given file

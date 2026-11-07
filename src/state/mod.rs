@@ -182,12 +182,14 @@ impl AppState {
         }
     }
 
-    pub fn from_bytes(s: &[u8]) -> Result<Self, FromBytesError> {
+    /// Builds an `AppState` from bytes representing JSON
+    pub fn from_json_bytes(s: &[u8]) -> Result<Self, FromBytesError> {
         let d = std::str::from_utf8(s).map_err(FromBytesError::NotUtf8)?;
-        Ok(Self::deserialize(d)?)
+        Ok(Self::from_json(d)?)
     }
 
-    pub fn deserialize(s: &str) -> Result<Self, DeserializeError> {
+    /// Builds an `AppState` from a JSON string
+    pub fn from_json(s: &str) -> Result<Self, DeserializeError> {
         let raw: RawAppState = serde_json::from_str(s)?;
         raw.try_into()
     }
@@ -298,7 +300,7 @@ impl AppState {
         d.read_to_end(&mut decompressed)
             .map_err(BinaryReadError::Decompression)?;
         let _ = d.into_inner(); // finalize decompression
-        let out = Self::from_bytes(&decompressed)?;
+        let out = Self::from_json_bytes(&decompressed)?;
         Ok(out)
     }
 }

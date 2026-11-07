@@ -520,7 +520,7 @@ impl<P: Platform> App<P> {
 
         let mut examples = vec![];
         for (file_name, data) in examples::EXAMPLES {
-            match AppState::deserialize(data) {
+            match AppState::from_json(data) {
                 Ok(data) => {
                     examples.push(Example {
                         file_name: file_name.to_string(),
@@ -1149,7 +1149,7 @@ impl<P: Platform> App<P> {
                 match r {
                     FileNameResponse::Ok(name) => {
                         let data = self.platform.read_from_local_storage(&name);
-                        self.modal = match AppState::deserialize(&data) {
+                        self.modal = match AppState::from_json(&data) {
                             Ok(state) => {
                                 self.load_from_state(state);
                                 self.local_name_confirmed = true;

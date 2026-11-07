@@ -445,7 +445,7 @@ pub(crate) async fn dialog_worker(
                     .await
                 {
                     let data = f.read().await;
-                    match AppState::from_bytes(&data) {
+                    match AppState::from_json_bytes(&data) {
                         Ok(state) => Message::Loaded { state },
                         Err(e) => Message::LoadFailed {
                             title: "Open error".to_owned(),
