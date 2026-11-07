@@ -2,7 +2,7 @@ use crate::{
     App, AppState, Message, MessageReceiver, MessageSender, Modal,
     platform::{self, Platform},
     render::{RenderTask, RenderWorker},
-    state, wgpu_setup,
+    wgpu_setup,
 };
 use log::{error, info, warn};
 use wasm_bindgen::prelude::*;
@@ -445,10 +445,7 @@ pub(crate) async fn dialog_worker(
                     .await
                 {
                     let data = f.read().await;
-                    match std::str::from_utf8(&data)
-                        .map_err(state::ReadError::NotUtf8)
-                        .and_then(|s| Ok(AppState::deserialize(s)?))
-                    {
+                    match AppState::from_bytes(&data) {
                         Ok(state) => Message::Loaded { state },
                         Err(e) => Message::LoadFailed {
                             title: "Open error".to_owned(),

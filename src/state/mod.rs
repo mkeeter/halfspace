@@ -27,7 +27,7 @@ use crate::view::ViewData;
 use log::{debug, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::io::{Read, Write};
+use std::io::Read;
 
 mod undo;
 mod v1;
@@ -50,11 +50,8 @@ pub enum BinaryReadError {
     #[error("decompression read failed")]
     Decompression(#[source] std::io::Error),
 
-    #[error("data is not UTF-8")]
-    NotUtf8(#[source] std::str::Utf8Error),
-
     #[error(transparent)]
-    Deserialize(#[from] DeserializeError),
+    FromBytes(#[from] FromBytesError),
 }
 
 /// Unique index for blocks
@@ -74,14 +71,8 @@ impl BlockIndex {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum ReadError {
-    #[error("io error encountered when opening file")]
-    CouldNotOpen(#[source] std::io::Error),
-
-    #[error("io error encountered when reading file")]
-    CouldNotRead(#[source] std::io::Error),
-
-    #[error("file is not UTF-8")]
+pub enum FromBytesError {
+    #[error("data is not UTF-8")]
     NotUtf8(#[source] std::str::Utf8Error),
 
     #[error(transparent)]
@@ -189,6 +180,11 @@ impl AppState {
             views,
             dock,
         }
+    }
+
+    pub fn from_bytes(s: &[u8]) -> Result<Self, FromBytesError> {
+        let d = std::str::from_utf8(s).map_err(FromBytesError::NotUtf8)?;
+        Ok(Self::deserialize(d)?)
     }
 
     pub fn deserialize(s: &str) -> Result<Self, DeserializeError> {
@@ -303,8 +299,8 @@ impl AppState {
             .map_err(BinaryReadError::Decompression)?;
         let _ = d.into_inner(); // finalize decompression
         let s = std::str::from_utf8(&decompressed)
-            .map_err(BinaryReadError::NotUtf8)?;
-        let out = Self::deserialize(s)?;
+            .map_err(FromBytesError::NotUtf8)?;
+        let out = Self::deserialize(s).map_err(FromBytesError::Deserialize)?;
         Ok(out)
     }
 }

@@ -2,12 +2,25 @@ use crate::{
     App, AppState, Message, MessageReceiver, MessageSender, Modal,
     platform::{self, Platform},
     render::{RenderTask, RenderWorker},
-    state, wgpu_setup,
+    state::FromBytesError,
+    wgpu_setup,
 };
 use log::{info, warn};
 use std::io::{Read, Write};
 
 use clap::Parser;
+
+#[derive(thiserror::Error, Debug)]
+pub enum ReadError {
+    #[error("io error encountered when opening file")]
+    CouldNotOpen(#[source] std::io::Error),
+
+    #[error("io error encountered when reading file")]
+    CouldNotRead(#[source] std::io::Error),
+
+    #[error(transparent)]
+    FromBytes(#[from] FromBytesError),
+}
 
 struct NativePlatform {
     rx_channel: Option<MessageReceiver<Notify>>,
@@ -267,7 +280,7 @@ pub fn run() -> anyhow::Result<()> {
                         platform.set_filename(filename);
                         Some(state)
                     }
-                    Err(state::ReadError::CouldNotOpen(e)) => {
+                    Err(ReadError::CouldNotOpen(e)) => {
                         if e.kind() == std::io::ErrorKind::NotFound {
                             // We can specify a filename to create
                             info!(
@@ -309,19 +322,16 @@ pub fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn load_from_file(
-    filename: &std::path::Path,
-) -> Result<AppState, state::ReadError> {
+fn load_from_file(filename: &std::path::Path) -> Result<AppState, ReadError> {
     info!("loading {filename:?}");
     let mut f = std::fs::File::options()
         .read(true)
         .open(filename)
-        .map_err(state::ReadError::CouldNotOpen)?;
+        .map_err(ReadError::CouldNotOpen)?;
     let mut data = vec![];
-    f.read_to_end(&mut data)
-        .map_err(state::ReadError::CouldNotRead)?;
-    let s = std::str::from_utf8(&data).map_err(state::ReadError::NotUtf8)?;
-    Ok(AppState::deserialize(s)?)
+    f.read_to_end(&mut data).map_err(ReadError::CouldNotRead)?;
+    let s = std::str::from_utf8(&data).map_err(FromBytesError::NotUtf8)?;
+    Ok(AppState::deserialize(s).map_err(FromBytesError::Deserialize)?)
 }
 
 /// Writes to the given file
