@@ -50,6 +50,9 @@ pub enum BinaryReadError {
     #[error("decompression read failed")]
     Decompression(#[source] std::io::Error),
 
+    #[error("decompressed data was too large")]
+    TooMuchData,
+
     #[error(transparent)]
     FromBytes(#[from] FromBytesError),
 }
@@ -331,10 +334,17 @@ impl AppState {
         }
 
         let mut decompressed = vec![];
-        let mut d = brotli::Decompressor::new(&data[8..], 4096);
-        d.read_to_end(&mut decompressed)
+        let d = brotli::Decompressor::new(&data[8..], 4096);
+
+        // Limit to 32 MiB of file size to protect against decompression bombs
+        // (that's very large, given our typical file sizes!)
+        const MAX_DECOMPRESSED_SIZE: u64 = 32 * 1024 * 1024;
+        d.take(MAX_DECOMPRESSED_SIZE + 1)
+            .read_to_end(&mut decompressed)
             .map_err(BinaryReadError::Decompression)?;
-        let _ = d.into_inner(); // finalize decompression
+        if decompressed.len() as u64 > MAX_DECOMPRESSED_SIZE {
+            return Err(BinaryReadError::TooMuchData);
+        }
         let out = Self::from_json_bytes(&decompressed)?;
         Ok(out)
     }

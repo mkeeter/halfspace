@@ -285,20 +285,15 @@ pub fn run() -> anyhow::Result<()> {
                         platform.set_filename(filename);
                         Some(state)
                     }
-                    Err(ReadError::CouldNotOpen(e)) => {
-                        if e.kind() == std::io::ErrorKind::NotFound {
-                            // We can specify a filename to create
-                            info!(
-                                "file {filename:?} is not yet present; \
-                                 treating it as empty"
-                            );
-                            platform.set_filename(filename);
-                        } else {
-                            log::error!(
-                                "got `CouldNotOpen` without \
-                                `ErrorKind::NotFound`; this is suspicious"
-                            );
-                        }
+                    Err(ReadError::CouldNotOpen(e))
+                        if e.kind() == std::io::ErrorKind::NotFound =>
+                    {
+                        // We can specify a filename to create
+                        info!(
+                            "file {filename:?} is not yet present; \
+                             treating it as empty"
+                        );
+                        platform.set_filename(filename);
                         None
                     }
                     Err(e) => return Err(e.into()),

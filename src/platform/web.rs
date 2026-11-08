@@ -345,14 +345,18 @@ impl platform::Platform for WebPlatform {
             web_sys::UrlSearchParams::new_with_str(&location.search().unwrap())
                 .unwrap();
         search.delete("example");
+        let query = format!("{}", search.to_string());
 
         let url = format!(
             "{}{}#{}",
             location.pathname().unwrap(),
-            search.to_string(),
+            if query.is_empty() {
+                "".to_owned()
+            } else {
+                format!("?{query}")
+            },
             params.to_string(),
         );
-        log::info!("got params {params:?}");
 
         window
             .history()
