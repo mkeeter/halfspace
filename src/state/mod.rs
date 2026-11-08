@@ -191,7 +191,42 @@ impl AppState {
     /// Builds an `AppState` from a JSON string
     pub fn from_json(s: &str) -> Result<Self, DeserializeError> {
         let raw: RawAppState = serde_json::from_str(s)?;
-        raw.try_into()
+        if raw.tag != TAG {
+            return Err(DeserializeError::BadTag {
+                expected: TAG.to_owned(),
+                actual: raw.tag,
+            });
+        }
+        let data = match raw.major {
+            v1::MAJOR_VERSION => {
+                let data = Self::deserialize_from_reader::<v1::Reader>(raw)?;
+                let data = v2::Reader::migrate(data);
+                v3::Reader::migrate(data)
+            }
+            v2::MAJOR_VERSION => {
+                let data = Self::deserialize_from_reader::<v2::Reader>(raw)?;
+                v3::Reader::migrate(data)
+            }
+            v3::MAJOR_VERSION => {
+                Self::deserialize_from_reader::<v3::Reader>(raw)?
+            }
+            i => {
+                return Err(DeserializeError::BadMajorVersion {
+                    actual_major: i,
+                    expected_major: &[v1::MAJOR_VERSION, v2::MAJOR_VERSION],
+                });
+            }
+        };
+
+        Ok(Self {
+            tag: TAG.to_owned(),
+            major: MAJOR_VERSION,
+            minor: MINOR_VERSION,
+            meta: data.meta,
+            views: data.views,
+            world: data.world,
+            dock: data.dock,
+        })
     }
 
     fn deserialize_from_reader<R: Reader>(
@@ -319,46 +354,4 @@ struct RawAppState {
     world: serde_json::Value,
     views: serde_json::Value,
     dock: serde_json::Value,
-}
-
-impl TryFrom<RawAppState> for AppState {
-    type Error = DeserializeError;
-    fn try_from(raw: RawAppState) -> Result<Self, Self::Error> {
-        if raw.tag != TAG {
-            return Err(DeserializeError::BadTag {
-                expected: TAG.to_owned(),
-                actual: raw.tag,
-            });
-        }
-        let data = match raw.major {
-            v1::MAJOR_VERSION => {
-                let data = Self::deserialize_from_reader::<v1::Reader>(raw)?;
-                let data = v2::Reader::migrate(data);
-                v3::Reader::migrate(data)
-            }
-            v2::MAJOR_VERSION => {
-                let data = Self::deserialize_from_reader::<v2::Reader>(raw)?;
-                v3::Reader::migrate(data)
-            }
-            v3::MAJOR_VERSION => {
-                Self::deserialize_from_reader::<v3::Reader>(raw)?
-            }
-            i => {
-                return Err(DeserializeError::BadMajorVersion {
-                    actual_major: i,
-                    expected_major: &[v1::MAJOR_VERSION, v2::MAJOR_VERSION],
-                });
-            }
-        };
-
-        Ok(Self {
-            tag: TAG.to_owned(),
-            major: MAJOR_VERSION,
-            minor: MINOR_VERSION,
-            meta: data.meta,
-            views: data.views,
-            world: data.world,
-            dock: data.dock,
-        })
-    }
 }
