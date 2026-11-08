@@ -2,8 +2,10 @@ use crate::{
     App, AppState, Message, MessageReceiver, MessageSender, Modal,
     platform::{self, Platform},
     render::{RenderTask, RenderWorker},
-    state, wgpu_setup,
+    state::FromBytesError,
+    wgpu_setup,
 };
+use anyhow::Context;
 use log::{info, warn};
 use std::io::{Read, Write};
 
@@ -188,6 +190,11 @@ impl Platform for NativePlatform {
         });
         RenderWorker::new(tx)
     }
+
+    fn share(&self, data: &str) {
+        info!("sharing {data}");
+        info!("data is {} bytes long", data.len());
+    }
 }
 
 impl NativePlatform {
@@ -202,6 +209,18 @@ impl platform::PlatformExport for ExportTarget {
     fn save(&self, data: &[u8]) -> Result<(), std::io::Error> {
         std::fs::File::create(&self.0)?.write_all(data)
     }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum ReadError {
+    #[error("io error encountered when opening file")]
+    CouldNotOpen(#[source] std::io::Error),
+
+    #[error("io error encountered when reading file")]
+    CouldNotRead(#[source] std::io::Error),
+
+    #[error(transparent)]
+    FromBytes(#[from] FromBytesError),
 }
 
 /// An experimental CAD tool
@@ -222,6 +241,10 @@ struct Args {
 
     /// File to edit (created if not present)
     target: Option<std::path::PathBuf>,
+
+    /// Example to load
+    #[clap(long, conflicts_with = "target", requires = "debug")]
+    model: Option<String>,
 }
 
 #[derive(Clone)]
@@ -262,12 +285,13 @@ pub fn run() -> anyhow::Result<()> {
                         platform.set_filename(filename);
                         Some(state)
                     }
-                    Err(state::ReadError::IoError(e))
+                    Err(ReadError::CouldNotOpen(e))
                         if e.kind() == std::io::ErrorKind::NotFound =>
                     {
                         // We can specify a filename to create
                         info!(
-                            "file {filename:?} is not yet present; treating it as empty"
+                            "file {filename:?} is not yet present; \
+                             treating it as empty"
                         );
                         platform.set_filename(filename);
                         None
@@ -289,6 +313,17 @@ pub fn run() -> anyhow::Result<()> {
                 && !app.load_example(&format!("{example}.half"))
             {
                 warn!("could not find example '{example}'");
+            } else if let Some(model) = args.model {
+                // Debug option: deserialize from a base64 string
+                use base64::{
+                    Engine as _, engine::general_purpose::URL_SAFE_NO_PAD,
+                };
+                let bin = URL_SAFE_NO_PAD
+                    .decode(model)
+                    .context("base64 decoding failed")?;
+                let state = AppState::from_binary(&bin)
+                    .context("could not decode binary state")?;
+                app.load_from_state(state);
             }
 
             Ok(Box::new(app))
@@ -298,15 +333,15 @@ pub fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn load_from_file(
-    filename: &std::path::Path,
-) -> Result<AppState, state::ReadError> {
+fn load_from_file(filename: &std::path::Path) -> Result<AppState, ReadError> {
     info!("loading {filename:?}");
-    let mut f = std::fs::File::options().read(true).open(filename)?;
+    let mut f = std::fs::File::options()
+        .read(true)
+        .open(filename)
+        .map_err(ReadError::CouldNotOpen)?;
     let mut data = vec![];
-    f.read_to_end(&mut data)?;
-    let s = std::str::from_utf8(&data)?;
-    AppState::deserialize(s)
+    f.read_to_end(&mut data).map_err(ReadError::CouldNotRead)?;
+    Ok(AppState::from_json_bytes(&data)?)
 }
 
 /// Writes to the given file

@@ -69,6 +69,11 @@ where
     /// Changes the window title
     fn update_title(&self, saved: bool);
 
+    /// Sets the URL or prints a compressed shareable file
+    ///
+    /// The `data` should be a compressed URL-safe string
+    fn share(&self, data: &str);
+
     /// Returns a target to be used when exporting files
     ///
     /// The `name` argument is a hint provided in the file's metadata; other

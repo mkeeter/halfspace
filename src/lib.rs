@@ -520,7 +520,7 @@ impl<P: Platform> App<P> {
 
         let mut examples = vec![];
         for (file_name, data) in examples::EXAMPLES {
-            match AppState::deserialize(data) {
+            match AppState::from_json(data) {
                 Ok(data) => {
                     examples.push(Example {
                         file_name: file_name.to_string(),
@@ -663,6 +663,9 @@ impl<P: Platform> App<P> {
                     if ui.button("\u{f019} Download").clicked() {
                         self.on_download();
                     }
+                    if ui.button("\u{f50e} Share model via URL").clicked() {
+                        self.platform_share();
+                    }
                     ui.separator();
                     if ui.button("\u{eb4b} Save").clicked() {
                         self.on_save_local();
@@ -700,6 +703,9 @@ impl<P: Platform> App<P> {
                         }
                         if ui.button("Open (local)").clicked() {
                             self.on_load(true);
+                        }
+                        if ui.button("\u{f019} Share").clicked() {
+                            self.platform_share();
                         }
                         ui.separator();
                     }
@@ -1143,7 +1149,7 @@ impl<P: Platform> App<P> {
                 match r {
                     FileNameResponse::Ok(name) => {
                         let data = self.platform.read_from_local_storage(&name);
-                        self.modal = match AppState::deserialize(&data) {
+                        self.modal = match AppState::from_json(&data) {
                             Ok(state) => {
                                 self.load_from_state(state);
                                 self.local_name_confirmed = true;
@@ -1423,6 +1429,13 @@ impl<P: Platform> App<P> {
 
     fn platform_update_title(&self) {
         self.platform.update_title(self.undo.is_saved());
+    }
+
+    fn platform_share(&self) {
+        let state = self.get_state();
+        use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+        let data = URL_SAFE_NO_PAD.encode(state.to_binary());
+        self.platform.share(&data);
     }
 
     fn open_local(&mut self) {
