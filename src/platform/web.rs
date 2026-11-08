@@ -331,6 +331,7 @@ impl platform::Platform for WebPlatform {
         let window = web_sys::window().ok_or("no window").unwrap();
         let location = window.location();
 
+        // Add `model=...` to the location hash in the URL
         let params = web_sys::UrlSearchParams::new_with_str(
             &location.hash().unwrap().trim_start_matches('#'),
         )
@@ -338,10 +339,17 @@ impl platform::Platform for WebPlatform {
         params.delete("model");
         params.set("model", data);
 
+        // Delete `example=...` from the search parameters, because we don't
+        // want to have both in our shareable URLs.
+        let search =
+            web_sys::UrlSearchParams::new_with_str(&location.search().unwrap())
+                .unwrap();
+        search.delete("example");
+
         let url = format!(
             "{}{}#{}",
             location.pathname().unwrap(),
-            location.search().unwrap(),
+            search.to_string(),
             params.to_string(),
         );
         log::info!("got params {params:?}");
