@@ -50,11 +50,11 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     if vertex_index < 6 {
         output.position = uniforms.transform * vec4<f32>(pos[vertex_index % 6], 0.0, 1.0);
         output.position.z = 0.0; // XXX this is a hack
-        output.tex_coords = uv[vertex_index % 6];
     } else {
+        // Use a non-zero Z position to mark axis overlap quad
         output.position = vec4<f32>(pos[vertex_index % 6], 0.5, 1.0);
-        output.tex_coords = uv[vertex_index % 6];
     }
+    output.tex_coords = uv[vertex_index % 6];
     return output;
 }
 
@@ -117,20 +117,16 @@ fn color_stripe(f: f32) -> f32 {
     return run(base, f_abs, dim, bands);
 }
 
-struct Rgba {
-  @location(0) color: vec4<f32>,
-}
-
 // Fragment shader
 @fragment
 fn fs_main(
     @builtin(position) position: vec4<f32>,
     @location(0) tex_coords: vec2<f32>,
-) -> Rgba {
+) -> @location(0) vec4<f32> {
     // The pixel canvas has z == 0
     let d = textureSample(t_distance, s_distance, tex_coords).r;
     var color: vec4<f32>;
-    if (uniforms.has_color != 0) {
+    if uniforms.has_color != 0 {
         let stripes = color_stripe(d + 1.0 / 140.0);
         var rgb = textureSample(t_color, s_color, tex_coords).rgb;
         if d <= 0.0 {
@@ -145,7 +141,7 @@ fn fs_main(
     }
 
     if position.z == 0.0 {
-        return Rgba(color);
+        return color;
     } else if uniforms.show_axes != 0 {
         let p = vec4<f32>(
             (tex_coords.x - 0.5) *  2.0,
@@ -154,32 +150,27 @@ fn fs_main(
         let d = q.xy / q.w;
         let r = sqrt(d.x * d.x + d.y * d.y);
 
-        // We'll draw both length-1 axes and a more gradually-scaling axis, for
-        // ease of use.
         let scale = min(uniforms.mat[0][0], uniforms.mat[1][1]);
         let adj = sqrt(scale);
 
         // Central circle is drawn using adjusted scale
         if r / adj < 0.035 {
-            return Rgba(vec4f(1.0));
+            return vec4f(1.0);
         }
 
         if d.x >= 0.0 && d.x <= 1.0 && abs(d.y) / adj < 0.015 {
-            return Rgba(vec4f(1.0, 0.0, 0.0, 1.0));
+            return vec4f(1.0, 0.0, 0.0, 1.0);
         }
         if d.x >= 0.0 && d.x / scale <= 0.5 && abs(d.y) / scale < 0.015 {
-            return Rgba((vec4f(1.0, 0.0, 0.0, 1.0) + 2.0 * color) / 3.0);
+            return (vec4f(1.0, 0.0, 0.0, 1.0) + 2.0 * color) / 3.0;
         }
 
         if d.y >= 0.0 && d.y <= 1.0 && abs(d.x) / adj < 0.015 {
-            return Rgba(vec4f(0.0, 1.0, 0.0, 1.0));
+            return vec4f(0.0, 1.0, 0.0, 1.0);
         }
         if d.y >= 0.0 && d.y / scale <= 0.5 && abs(d.x) / scale < 0.015 {
-            return Rgba((vec4f(0.0, 1.0, 0.0, 1.0) + 2.0 * color) / 3.0);
+            return (vec4f(0.0, 1.0, 0.0, 1.0) + 2.0 * color) / 3.0;
         }
-
-        discard;
-    } else {
-        discard;
     }
+    discard;
 }

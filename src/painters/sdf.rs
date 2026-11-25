@@ -384,7 +384,6 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
             show_axes: u32::from(self.show_axes),
             _pad: [0; _],
         };
-        println!("{}", mat.try_inverse().unwrap());
         {
             let mut writer = queue
                 .write_buffer_with(
