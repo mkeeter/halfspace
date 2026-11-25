@@ -1,7 +1,11 @@
 // Uniform buffer containing the transform matrix
 struct Uniforms {
+    // Combined transform matrix for canvas + image
     transform: mat4x4<f32>,
+    // Transform matrix
+    mat: mat4x4<f32>,
     has_color: u32,
+    show_axes: u32,
 };
 
 @group(0) @binding(0) var t_distance: texture_2d<f32>;
@@ -43,9 +47,14 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     );
 
     var output: VertexOutput;
-    output.position = uniforms.transform * vec4<f32>(pos[vertex_index], 0.0, 1.0);
-    output.position.z = 0.0; // XXX this is a hack
-    output.tex_coords = uv[vertex_index];
+    if vertex_index < 6 {
+        output.position = uniforms.transform * vec4<f32>(pos[vertex_index % 6], 0.0, 1.0);
+        output.position.z = 0.0; // XXX this is a hack
+        output.tex_coords = uv[vertex_index % 6];
+    } else {
+        output.position = vec4<f32>(pos[vertex_index % 6], 0.5, 1.0);
+        output.tex_coords = uv[vertex_index % 6];
+    }
     return output;
 }
 
@@ -114,9 +123,12 @@ struct Rgba {
 
 // Fragment shader
 @fragment
-fn fs_main(@location(0) tex_coords: vec2<f32>) -> Rgba {
+fn fs_main(
+    @builtin(position) position: vec4<f32>,
+    @location(0) tex_coords: vec2<f32>,
+) -> Rgba {
+    // The pixel canvas has z == 0
     let d = textureSample(t_distance, s_distance, tex_coords).r;
-
     var color: vec4<f32>;
     if (uniforms.has_color != 0) {
         let stripes = color_stripe(d + 1.0 / 140.0);
@@ -131,5 +143,43 @@ fn fs_main(@location(0) tex_coords: vec2<f32>) -> Rgba {
     } else {
         color = color_orange_to_blue(d);
     }
-    return Rgba(color);
+
+    if position.z == 0.0 {
+        return Rgba(color);
+    } else if uniforms.show_axes != 0 {
+        let p = vec4<f32>(
+            (tex_coords.x - 0.5) *  2.0,
+            (tex_coords.y - 0.5) * -2.0, 0.0, 1.0);
+        let q = uniforms.mat * p;
+        let d = q.xy / q.w;
+        let r = sqrt(d.x * d.x + d.y * d.y);
+
+        // We'll draw both length-1 axes and a more gradually-scaling axis, for
+        // ease of use.
+        let scale = min(uniforms.mat[0][0], uniforms.mat[1][1]);
+        let adj = sqrt(scale);
+
+        // Central circle is drawn using adjusted scale
+        if r / adj < 0.035 {
+            return Rgba(vec4f(1.0));
+        }
+
+        if d.x >= 0.0 && d.x <= 1.0 && abs(d.y) / adj < 0.015 {
+            return Rgba(vec4f(1.0, 0.0, 0.0, 1.0));
+        }
+        if d.x >= 0.0 && d.x / scale <= 0.5 && abs(d.y) / scale < 0.015 {
+            return Rgba((vec4f(1.0, 0.0, 0.0, 1.0) + 2.0 * color) / 3.0);
+        }
+
+        if d.y >= 0.0 && d.y <= 1.0 && abs(d.x) / adj < 0.015 {
+            return Rgba(vec4f(0.0, 1.0, 0.0, 1.0));
+        }
+        if d.y >= 0.0 && d.y / scale <= 0.5 && abs(d.x) / scale < 0.015 {
+            return Rgba((vec4f(0.0, 1.0, 0.0, 1.0) + 2.0 * color) / 3.0);
+        }
+
+        discard;
+    } else {
+        discard;
+    }
 }

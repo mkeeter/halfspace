@@ -114,18 +114,33 @@ pub enum ViewCanvas {
     Canvas2 {
         canvas: fidget::gui::Canvas2,
         mode: ViewMode2,
+        show_axes: bool,
     },
     Canvas3 {
         canvas: fidget::gui::Canvas3,
         perspective: bool,
         mode: ViewMode3,
+        show_axes: bool,
     },
+}
+
+impl ViewCanvas {
+    fn show_axes(&self) -> bool {
+        match self {
+            Self::Canvas2 { show_axes, .. }
+            | Self::Canvas3 { show_axes, .. } => *show_axes,
+        }
+    }
 }
 
 impl From<&ViewCanvas> for state::ViewState {
     fn from(v: &ViewCanvas) -> state::ViewState {
         match v {
-            ViewCanvas::Canvas2 { canvas, mode } => {
+            ViewCanvas::Canvas2 {
+                canvas,
+                mode,
+                show_axes,
+            } => {
                 let (view, size) = canvas.components();
                 let (center, scale) = view.components();
                 ViewState::View2 {
@@ -134,12 +149,14 @@ impl From<&ViewCanvas> for state::ViewState {
                     scale,
                     width: size.width(),
                     height: size.height(),
+                    show_axes: *show_axes,
                 }
             }
             ViewCanvas::Canvas3 {
                 canvas,
                 perspective,
                 mode,
+                show_axes,
             } => {
                 let (view, size) = canvas.components();
                 let (center, scale, yaw, pitch) = view.components();
@@ -153,6 +170,7 @@ impl From<&ViewCanvas> for state::ViewState {
                     height: size.height(),
                     depth: size.depth(),
                     perspective: *perspective,
+                    show_axes: *show_axes,
                 }
             }
         }
@@ -170,12 +188,17 @@ impl From<ViewState> for ViewCanvas {
                 scale,
                 width,
                 height,
+                show_axes,
             } => {
                 let canvas = fidget::gui::Canvas2::from_components(
                     fidget::gui::View2::from_components(center, scale),
                     fidget::render::ImageSize::new(width, height),
                 );
-                Self::Canvas2 { canvas, mode }
+                Self::Canvas2 {
+                    canvas,
+                    mode,
+                    show_axes,
+                }
             }
             ViewState::View3 {
                 mode,
@@ -187,6 +210,7 @@ impl From<ViewState> for ViewCanvas {
                 height,
                 depth,
                 perspective,
+                show_axes,
             } => {
                 let canvas = fidget::gui::Canvas3::from_components(
                     fidget::gui::View3::from_components(
@@ -198,6 +222,7 @@ impl From<ViewState> for ViewCanvas {
                     canvas,
                     mode,
                     perspective,
+                    show_axes,
                 }
             }
         }
@@ -293,6 +318,7 @@ impl ViewData {
                     ),
                 ),
                 mode: ViewMode2::Sdf,
+                show_axes: true,
             },
             image: None,
             generation: 0,
@@ -803,12 +829,14 @@ pub fn edit_button(
     };
     let mut tag = initial_tag;
     let mut reset_camera = false;
-    let perspective =
-        if let ViewCanvas::Canvas3 { perspective, .. } = &mut entry.canvas {
-            Some(perspective)
-        } else {
-            None
-        };
+    let (perspective, show_axes) = match &mut entry.canvas {
+        ViewCanvas::Canvas2 { show_axes, .. } => (None, show_axes),
+        ViewCanvas::Canvas3 {
+            perspective,
+            show_axes,
+            ..
+        } => (Some(perspective), show_axes),
+    };
     egui::ComboBox::from_id_salt(index.id().with("view_editor"))
         .selected_text(CAMERA)
         .width(0.0)
@@ -827,6 +855,7 @@ pub fn edit_button(
             );
             ui.selectable_value(&mut tag, ViewCanvasType::Shaded, "3D shaded");
             ui.separator();
+            ui.checkbox(show_axes, "Show axes");
             if let Some(p) = perspective {
                 ui.checkbox(p, "Perspective");
                 ui.separator();
@@ -836,6 +865,7 @@ pub fn edit_button(
             }
         });
     // If we've edited the canvas tag, then update it in the entry
+    let show_axes = entry.canvas.show_axes();
     if tag != initial_tag {
         out |= ViewResponse::REDRAW;
         let mut next_canvas = match tag {
@@ -847,6 +877,7 @@ pub fn edit_button(
                         ViewCanvasType::Bitfield => ViewMode2::Bitfield,
                         _ => unreachable!("invalid 2d canvas tag {tag:?}"),
                     },
+                    show_axes,
                 }
             }
             ViewCanvasType::Heightmap | ViewCanvasType::Shaded => {
@@ -863,6 +894,7 @@ pub fn edit_button(
                         _ => unreachable!("invalid 3d canvas tag {tag:?}"),
                     },
                     perspective: false,
+                    show_axes,
                 }
             }
         };

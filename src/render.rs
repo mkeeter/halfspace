@@ -362,19 +362,22 @@ impl RenderSettings {
         level: usize,
     ) -> Self {
         match canvas {
-            ViewCanvas::Canvas2 { canvas, mode } => {
-                RenderSettings::Image(ImageRenderSettings {
-                    scene,
-                    view: canvas.view(),
-                    base_size: canvas.image_size(),
-                    mode: *mode,
-                    level,
-                })
-            }
+            ViewCanvas::Canvas2 {
+                canvas,
+                mode,
+                show_axes: _,
+            } => RenderSettings::Image(ImageRenderSettings {
+                scene,
+                view: canvas.view(),
+                base_size: canvas.image_size(),
+                mode: *mode,
+                level,
+            }),
             ViewCanvas::Canvas3 {
                 canvas,
                 mode,
                 perspective,
+                show_axes: _,
             } => {
                 let size = canvas.image_size();
                 RenderSettings::Voxel(VoxelRenderSettings {
