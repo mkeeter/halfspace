@@ -19,7 +19,8 @@ pub struct Uniforms {
     transform: [[f32; 4]; 4],
     mat: [[f32; 4]; 4],
     has_color: u32,
-    show_axes: u32,
+    axis_scale: f32,
+    image_size: [u32; 2],
     _pad: [u32; 2],
 }
 
@@ -381,7 +382,7 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
             transform: transform.into(),
             mat: mat.into(),
             has_color: u32::from(self.color.is_some()),
-            show_axes: u32::from(self.axis_scale.is_some()), // XXX TODO
+            axis_scale: self.axis_scale.unwrap_or(-1.0),
             _pad: [0; _],
         };
         {

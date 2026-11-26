@@ -5,7 +5,7 @@ struct Uniforms {
     // Transform matrix
     mat: mat4x4<f32>,
     has_color: u32,
-    show_axes: u32,
+    axis_scale: f32,
 };
 
 @group(0) @binding(0) var t_distance: texture_2d<f32>;
@@ -142,7 +142,7 @@ fn fs_main(
 
     if position.z == 0.0 {
         return color;
-    } else if uniforms.show_axes != 0 {
+    } else if uniforms.axis_scale > 0.0 {
         let p = vec4<f32>(
             (tex_coords.x - 0.5) *  2.0,
             (tex_coords.y - 0.5) * -2.0, 0.0, 1.0);
@@ -151,25 +151,26 @@ fn fs_main(
         let r = sqrt(d.x * d.x + d.y * d.y);
 
         let scale = min(uniforms.mat[0][0], uniforms.mat[1][1]);
-        let adj = sqrt(scale);
 
-        // Central circle is drawn using adjusted scale
-        if r / adj < 0.035 {
+        // Central white dot
+        if r / scale < 0.035 {
             return vec4f(1.0);
+        } else if r / scale < 0.04 {
+            return vec4(0.0, 0.0, 0.0, 1.0);
         }
 
-        if d.x >= 0.0 && d.x <= 1.0 && abs(d.y) / adj < 0.015 {
+        // X axis
+        if d.x >= 0.0 && d.x <= uniforms.axis_scale && abs(d.y) / scale < 0.015 {
             return vec4f(1.0, 0.0, 0.0, 1.0);
-        }
-        if d.x >= 0.0 && d.x / scale <= 0.5 && abs(d.y) / scale < 0.015 {
-            return (vec4f(1.0, 0.0, 0.0, 1.0) + 2.0 * color) / 3.0;
+        } else if d.x >= 0.0 && d.x / scale <= 0.5 && abs(d.y) / scale < 0.015 {
+            return (vec4f(1.0, 0.0, 0.0, 1.0) + 3.0 * color) / 4.0;
         }
 
-        if d.y >= 0.0 && d.y <= 1.0 && abs(d.x) / adj < 0.015 {
+        // Y axis
+        if d.y >= 0.0 && d.y <= uniforms.axis_scale && abs(d.x) / scale < 0.015 {
             return vec4f(0.0, 1.0, 0.0, 1.0);
-        }
-        if d.y >= 0.0 && d.y / scale <= 0.5 && abs(d.x) / scale < 0.015 {
-            return (vec4f(0.0, 1.0, 0.0, 1.0) + 2.0 * color) / 3.0;
+        } else if d.y >= 0.0 && d.y / scale <= 0.5 && abs(d.x) / scale < 0.015 {
+            return (vec4f(0.0, 1.0, 0.0, 1.0) + 3.0 * color) / 4.0;
         }
     }
     discard;
