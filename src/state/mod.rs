@@ -69,7 +69,7 @@ impl BlockIndex {
     }
     pub fn id(&self) -> egui::Id {
         // XXX should this be somewhere else, to remove the egui dep?
-        egui::Id::new("block").with(self.0)
+        egui::Id::unique(("block", self.0))
     }
 }
 

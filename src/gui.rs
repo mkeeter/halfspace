@@ -965,7 +965,7 @@ fn block_name(
     let mut open = false;
     match ui.memory(|mem| mem.data.get_temp(id)) {
         Some(NameEdit { needs_focus }) => {
-            let text_edit_id = egui::Id::new(index).with("name_edit");
+            let text_edit_id = egui::Id::unique((index, "name_edit"));
             let mut out = egui::TextEdit::singleline(name)
                 .id(text_edit_id)
                 .desired_width(f32::INFINITY)

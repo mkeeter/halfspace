@@ -860,14 +860,14 @@ impl<P: Platform> App<P> {
         let screen_rect = ctx.content_rect();
         let layer_id = egui::LayerId::new(
             egui::Order::Middle,
-            egui::Id::new("modal_layer"),
+            egui::Id::unique("modal_layer"),
         );
         ctx.layer_painter(layer_id).rect_filled(
             screen_rect,
             0.0,
             egui::Color32::from_black_alpha(192),
         );
-        egui::Area::new("modal_blocker_input".into())
+        egui::Area::new(egui::Id::unique("modal_blocker_input"))
             .order(egui::Order::Middle)
             .interactable(true)
             .fixed_pos(screen_rect.min)
@@ -1643,7 +1643,7 @@ impl<P: Platform> App<P> {
 
         // XXX there is a drag-and-drop implementation that's built into egui,
         // see `egui_demo_lib/src/demo/drag_and_drop.rs`
-        let r = dnd(ui, "dnd").show_vec(
+        let r = dnd(ui, egui::Id::unique("dnd")).show_vec(
             &mut self.data.order,
             |ui, index, handle, state| {
                 let block = self.data.blocks.get_mut(index).unwrap();
