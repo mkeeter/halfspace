@@ -379,7 +379,7 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
 
         let uniforms = Uniforms {
             transform: transform.into(),
-            mat: mat.try_inverse().unwrap().into(), // XXX AAAAGH
+            mat: mat.into(),
             has_color: u32::from(self.color.is_some()),
             show_axes: u32::from(self.axis_scale.is_some()), // XXX TODO
             _pad: [0; _],
@@ -435,20 +435,22 @@ fn transform2(
         let width = size.width() as f32;
         let height = size.height() as f32;
         if width > height {
-            nalgebra::Scale2::new(height / width, 1.0)
+            nalgebra::Scale2::new(width / height, 1.0)
         } else {
-            nalgebra::Scale2::new(1.0, width / height)
+            nalgebra::Scale2::new(1.0, height / width)
         }
     };
     let prev_aspect_ratio = aspect_ratio(image_size);
     let curr_aspect_ratio = aspect_ratio(canvas_size);
 
     // Canvas view transform only
-    let c = curr_aspect_ratio.to_homogeneous()
-        * canvas_view.world_to_model().try_inverse().unwrap();
+    let c = canvas_view.world_to_model() * curr_aspect_ratio.to_homogeneous();
+
     // Canvas view transform combined with image view
-    let m = prev_aspect_ratio.to_homogeneous().try_inverse().unwrap()
-        * c
+    let m = prev_aspect_ratio.to_homogeneous()
+        // (c^-1) is equivalent to (curr_aspect^-1) * (canvas_view^-1),
+        // so everything is in the correct order to cancel out
+        * c.try_inverse().unwrap() 
         * image_view.world_to_model();
 
     #[rustfmt::skip]
