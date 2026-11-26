@@ -38,8 +38,8 @@ pub struct WgpuSdfPainter {
     /// Settings with which the image was rendered
     settings: ImageRenderSettings,
 
-    /// Whether to draw axes
-    show_axes: bool,
+    /// Scale to use when drawing axes (if active)
+    axis_scale: Option<f32>,
 }
 
 impl WgpuSdfPainter {
@@ -56,7 +56,7 @@ impl WgpuSdfPainter {
         settings: ImageRenderSettings,
         size: fidget::render::ImageSize,
         view: fidget::gui::View2,
-        show_axes: bool,
+        axis_scale: Option<f32>,
     ) -> Self {
         Self {
             size,
@@ -66,7 +66,7 @@ impl WgpuSdfPainter {
             distance,
             color,
             settings,
-            show_axes,
+            axis_scale,
         }
     }
 }
@@ -381,7 +381,7 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
             transform: transform.into(),
             mat: mat.try_inverse().unwrap().into(), // XXX AAAAGH
             has_color: u32::from(self.color.is_some()),
-            show_axes: u32::from(self.show_axes),
+            show_axes: u32::from(self.axis_scale.is_some()), // XXX TODO
             _pad: [0; _],
         };
         {

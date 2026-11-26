@@ -238,7 +238,7 @@ impl<'a, N: Notify> WorldView<'a, N> {
                 ViewCanvas::Canvas2 {
                     mode,
                     canvas,
-                    show_axes,
+                    axis_scale,
                 },
             ) if settings.mode == mode && !will_discard => {
                 ui.painter().add(egui_wgpu::Callback::new_paint_callback(
@@ -251,7 +251,7 @@ impl<'a, N: Notify> WorldView<'a, N> {
                         settings.clone(),
                         size,
                         canvas.view(),
-                        show_axes,
+                        axis_scale,
                     ),
                 ));
             }

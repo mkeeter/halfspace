@@ -14,6 +14,7 @@ use crate::{
 
 pub use state::{ViewMode2, ViewMode3};
 
+use egui::Widget;
 use egui_wgpu::wgpu;
 use log::trace;
 
@@ -114,21 +115,21 @@ pub enum ViewCanvas {
     Canvas2 {
         canvas: fidget::gui::Canvas2,
         mode: ViewMode2,
-        show_axes: bool,
+        axis_scale: Option<f32>,
     },
     Canvas3 {
         canvas: fidget::gui::Canvas3,
         perspective: bool,
         mode: ViewMode3,
-        show_axes: bool,
+        axis_scale: Option<f32>,
     },
 }
 
 impl ViewCanvas {
-    fn show_axes(&self) -> bool {
+    fn axis_scale(&self) -> Option<f32> {
         match self {
-            Self::Canvas2 { show_axes, .. }
-            | Self::Canvas3 { show_axes, .. } => *show_axes,
+            Self::Canvas2 { axis_scale, .. }
+            | Self::Canvas3 { axis_scale, .. } => *axis_scale,
         }
     }
 }
@@ -139,7 +140,7 @@ impl From<&ViewCanvas> for state::ViewState {
             ViewCanvas::Canvas2 {
                 canvas,
                 mode,
-                show_axes,
+                axis_scale,
             } => {
                 let (view, size) = canvas.components();
                 let (center, scale) = view.components();
@@ -149,14 +150,14 @@ impl From<&ViewCanvas> for state::ViewState {
                     scale,
                     width: size.width(),
                     height: size.height(),
-                    show_axes: *show_axes,
+                    axis_scale: *axis_scale,
                 }
             }
             ViewCanvas::Canvas3 {
                 canvas,
                 perspective,
                 mode,
-                show_axes,
+                axis_scale,
             } => {
                 let (view, size) = canvas.components();
                 let (center, scale, yaw, pitch) = view.components();
@@ -170,7 +171,7 @@ impl From<&ViewCanvas> for state::ViewState {
                     height: size.height(),
                     depth: size.depth(),
                     perspective: *perspective,
-                    show_axes: *show_axes,
+                    axis_scale: *axis_scale,
                 }
             }
         }
@@ -188,7 +189,7 @@ impl From<ViewState> for ViewCanvas {
                 scale,
                 width,
                 height,
-                show_axes,
+                axis_scale,
             } => {
                 let canvas = fidget::gui::Canvas2::from_components(
                     fidget::gui::View2::from_components(center, scale),
@@ -197,7 +198,7 @@ impl From<ViewState> for ViewCanvas {
                 Self::Canvas2 {
                     canvas,
                     mode,
-                    show_axes,
+                    axis_scale,
                 }
             }
             ViewState::View3 {
@@ -210,7 +211,7 @@ impl From<ViewState> for ViewCanvas {
                 height,
                 depth,
                 perspective,
-                show_axes,
+                axis_scale,
             } => {
                 let canvas = fidget::gui::Canvas3::from_components(
                     fidget::gui::View3::from_components(
@@ -222,7 +223,7 @@ impl From<ViewState> for ViewCanvas {
                     canvas,
                     mode,
                     perspective,
-                    show_axes,
+                    axis_scale,
                 }
             }
         }
@@ -318,7 +319,7 @@ impl ViewData {
                     ),
                 ),
                 mode: ViewMode2::Sdf,
-                show_axes: true,
+                axis_scale: Some(1.0),
             },
             image: None,
             generation: 0,
@@ -829,33 +830,64 @@ pub fn edit_button(
     };
     let mut tag = initial_tag;
     let mut reset_camera = false;
-    let (perspective, show_axes) = match &mut entry.canvas {
-        ViewCanvas::Canvas2 { show_axes, .. } => (None, show_axes),
+    let (perspective, axis_scale) = match &mut entry.canvas {
+        ViewCanvas::Canvas2 { axis_scale, .. } => (None, axis_scale),
         ViewCanvas::Canvas3 {
             perspective,
-            show_axes,
+            axis_scale,
             ..
-        } => (Some(perspective), show_axes),
+        } => (Some(perspective), axis_scale),
     };
-    egui::ComboBox::from_id_salt(index.id().with("view_editor"))
-        .selected_text(CAMERA)
-        .width(0.0)
-        .show_ui(ui, |ui| {
-            ui.selectable_value(
-                &mut tag,
-                ViewCanvasType::Bitfield,
-                "2D bitfield",
-            );
-            ui.selectable_value(&mut tag, ViewCanvasType::Sdf, "2D SDF");
-            ui.separator();
-            ui.selectable_value(
-                &mut tag,
-                ViewCanvasType::Heightmap,
-                "3D heightmap",
-            );
-            ui.selectable_value(&mut tag, ViewCanvasType::Shaded, "3D shaded");
-            ui.separator();
-            ui.checkbox(show_axes, "Show axes");
+    let mut close_combobox = false;
+    enum MenuItem {
+        Tag(ViewCanvasType, &'static str),
+        Separator,
+    }
+
+    // Manual ComboBox implementation to work around egui#5225
+    let r = ui.push_id((index.id(), "view_editor"), |ui| {
+        egui::Button::new(CAMERA).ui(ui)
+    });
+    egui::Popup::menu(&r.inner)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            for item in [
+                MenuItem::Tag(ViewCanvasType::Bitfield, "2D bitfield"),
+                MenuItem::Tag(ViewCanvasType::Sdf, "2D SDF"),
+                MenuItem::Separator,
+                MenuItem::Tag(ViewCanvasType::Heightmap, "3D heightmap"),
+                MenuItem::Tag(ViewCanvasType::Shaded, "3D shaded"),
+                MenuItem::Separator,
+            ] {
+                match item {
+                    MenuItem::Separator => {
+                        ui.separator();
+                    }
+                    MenuItem::Tag(v, name) => {
+                        if ui.selectable_value(&mut tag, v, name).clicked() {
+                            close_combobox = true;
+                        }
+                    }
+                }
+            }
+            let mut show_axes = axis_scale.is_some();
+            ui.checkbox(&mut show_axes, "Show axes");
+            if show_axes {
+                if axis_scale.is_none() {
+                    *axis_scale = Some(1.0);
+                }
+                let scale = axis_scale.as_mut().unwrap();
+                ui.horizontal(|ui| {
+                    ui.label("Scale");
+                    ui.add(
+                        egui::DragValue::new(scale)
+                            .speed(0.05)
+                            .range(0.0..=f32::INFINITY),
+                    )
+                });
+            } else {
+                *axis_scale = None;
+            }
             if let Some(p) = perspective {
                 ui.checkbox(p, "Perspective");
                 ui.separator();
@@ -864,8 +896,9 @@ pub fn edit_button(
                 reset_camera = true;
             }
         });
+
     // If we've edited the canvas tag, then update it in the entry
-    let show_axes = entry.canvas.show_axes();
+    let axis_scale = entry.canvas.axis_scale();
     if tag != initial_tag {
         out |= ViewResponse::REDRAW;
         let mut next_canvas = match tag {
@@ -877,7 +910,7 @@ pub fn edit_button(
                         ViewCanvasType::Bitfield => ViewMode2::Bitfield,
                         _ => unreachable!("invalid 2d canvas tag {tag:?}"),
                     },
-                    show_axes,
+                    axis_scale,
                 }
             }
             ViewCanvasType::Heightmap | ViewCanvasType::Shaded => {
@@ -894,7 +927,7 @@ pub fn edit_button(
                         _ => unreachable!("invalid 3d canvas tag {tag:?}"),
                     },
                     perspective: false,
-                    show_axes,
+                    axis_scale,
                 }
             }
         };

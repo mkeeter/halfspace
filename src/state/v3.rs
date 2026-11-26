@@ -42,7 +42,7 @@ pub enum ViewState {
         width: u32,
         height: u32,
         #[serde(default)]
-        show_axes: bool,
+        axis_scale: Option<f32>,
     },
     View3 {
         mode: ViewMode3,
@@ -56,7 +56,7 @@ pub enum ViewState {
         #[serde(default)]
         perspective: bool,
         #[serde(default)]
-        show_axes: bool,
+        axis_scale: Option<f32>,
     },
 }
 
@@ -103,7 +103,7 @@ impl From<v2::ViewState> for ViewState {
                 scale,
                 width,
                 height,
-                show_axes: false,
+                axis_scale: None,
             },
             v2::ViewState::View3 {
                 mode,
@@ -125,7 +125,7 @@ impl From<v2::ViewState> for ViewState {
                 yaw,
                 depth,
                 perspective,
-                show_axes: false,
+                axis_scale: None,
             },
         }
     }
