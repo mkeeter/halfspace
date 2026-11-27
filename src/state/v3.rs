@@ -7,7 +7,15 @@ use super::{MigrateFrom, ReadData, v2};
 use serde::{Deserialize, Serialize};
 
 pub const MAJOR_VERSION: usize = 3;
-pub const MINOR_VERSION: usize = 0;
+
+/// Minor versions must be backwards-compatible
+///
+/// # v1
+/// Add `axis_scale` to `ViewState::View2`
+///
+/// # v0
+/// Initial minor version
+pub const MINOR_VERSION: usize = 1;
 
 pub use v2::{
     BlockState, Metadata, ScriptState, Tab, TabMode, ValueState, ViewMode3,
@@ -33,6 +41,8 @@ pub enum ViewState {
         scale: f32,
         width: u32,
         height: u32,
+        #[serde(default)]
+        axis_scale: Option<f32>,
     },
     View3 {
         mode: ViewMode3,
@@ -91,6 +101,7 @@ impl From<v2::ViewState> for ViewState {
                 scale,
                 width,
                 height,
+                axis_scale: None,
             },
             v2::ViewState::View3 {
                 mode,

@@ -17,8 +17,10 @@ use zerocopy::IntoBytes;
 #[derive(Copy, Clone, zerocopy::IntoBytes, zerocopy::Immutable)]
 pub struct Uniforms {
     transform: [[f32; 4]; 4],
+    mat: [[f32; 4]; 4],
     has_color: u32,
-    _pad: [u32; 3],
+    axis_scale: f32,
+    image_size: [u32; 2],
 }
 
 /// GPU callback
@@ -35,6 +37,9 @@ pub struct WgpuSdfPainter {
 
     /// Settings with which the image was rendered
     settings: ImageRenderSettings,
+
+    /// Scale to use when drawing axes (if active)
+    axis_scale: Option<f32>,
 }
 
 impl WgpuSdfPainter {
@@ -42,6 +47,7 @@ impl WgpuSdfPainter {
     ///
     /// Note that `size` and `view` are associated with the current rendering
     /// quad; the `image` contains its own size and view transforms.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         distance: TextureData<Float16>,
         color: Option<TextureData<[u8; 4]>>,
@@ -50,6 +56,7 @@ impl WgpuSdfPainter {
         settings: ImageRenderSettings,
         size: fidget::render::ImageSize,
         view: fidget::gui::View2,
+        axis_scale: Option<f32>,
     ) -> Self {
         Self {
             size,
@@ -59,6 +66,7 @@ impl WgpuSdfPainter {
             distance,
             color,
             settings,
+            axis_scale,
         }
     }
 }
@@ -182,10 +190,7 @@ impl SdfResources {
                     entry_point: Some("fs_main"),
                     targets: &[Some(wgpu::ColorTargetState {
                         format: target_format,
-                        blend: Some(wgpu::BlendState {
-                            color: wgpu::BlendComponent::OVER,
-                            alpha: wgpu::BlendComponent::OVER,
-                        }),
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
                     compilation_options: Default::default(),
@@ -236,10 +241,7 @@ impl SdfResources {
                     entry_point: Some("fs_main"),
                     targets: &[Some(wgpu::ColorTargetState {
                         format: target_format,
-                        blend: Some(wgpu::BlendState {
-                            color: wgpu::BlendComponent::OVER,
-                            alpha: wgpu::BlendComponent::OVER,
-                        }),
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
                     compilation_options: Default::default(),
@@ -327,12 +329,8 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
             height: render_size.height(),
             depth_or_array_layers: 1,
         };
-        let transform = super::transform2(
-            self.settings.view,
-            render_size,
-            self.view,
-            self.size,
-        );
+        let (transform, mat) =
+            transform2(self.settings.view, render_size, self.view, self.size);
 
         // Write the distance texture
         if !self.distance.data.is_empty() {
@@ -375,8 +373,10 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
 
         let uniforms = Uniforms {
             transform: transform.into(),
+            mat: mat.into(),
             has_color: u32::from(self.color.is_some()),
-            _pad: [0; _],
+            axis_scale: self.axis_scale.unwrap_or(-1.0),
+            image_size: [self.size.width(), self.size.height()],
         };
         {
             let mut writer = queue
@@ -412,6 +412,55 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
             }
         }
         render_pass.set_bind_group(0, &self.bind_group, &[]);
-        render_pass.draw(0..6, 0..1);
+        render_pass.draw(0..18, 0..1);
     }
+}
+
+/// Computes a transform matrix to put a 2D image in the right place on a canvas
+fn transform2(
+    image_view: fidget::gui::View2,
+    image_size: fidget::render::ImageSize,
+    canvas_view: fidget::gui::View2,
+    canvas_size: fidget::render::ImageSize,
+) -> (nalgebra::Matrix4<f32>, nalgebra::Matrix4<f32>) {
+    // don't blame me, I just twiddled the matrices until things
+    // looked right
+    let aspect_ratio = |size: fidget::render::ImageSize| {
+        let width = size.width() as f32;
+        let height = size.height() as f32;
+        if width > height {
+            nalgebra::Scale2::new(width / height, 1.0)
+        } else {
+            nalgebra::Scale2::new(1.0, height / width)
+        }
+    };
+    let prev_aspect_ratio = aspect_ratio(image_size);
+    let curr_aspect_ratio = aspect_ratio(canvas_size);
+
+    // Canvas view transform only
+    let c = canvas_view.world_to_model() * curr_aspect_ratio.to_homogeneous();
+
+    // Canvas view transform combined with image view
+    let m = prev_aspect_ratio.to_homogeneous()
+        // (c^-1) is equivalent to (curr_aspect^-1) * (canvas_view^-1),
+        // so everything is in the correct order to cancel out
+        * c.try_inverse().unwrap() 
+        * image_view.world_to_model();
+
+    #[rustfmt::skip]
+    let transform = nalgebra::Matrix4::new(
+        m[(0, 0)], m[(0, 1)], 0.0, m[(0, 2)] / prev_aspect_ratio.x,
+        m[(1, 0)], m[(1, 1)], 0.0, m[(1, 2)] / prev_aspect_ratio.y,
+        0.0,         0.0,         1.0, 0.0,
+        0.0,         0.0,         0.0, 1.0,
+    );
+    #[rustfmt::skip]
+    let curr = nalgebra::Matrix4::new(
+        c[(0, 0)], c[(0, 1)], 0.0, c[(0, 2)],
+        c[(1, 0)], c[(1, 1)], 0.0, c[(1, 2)],
+        0.0,         0.0,         1.0, 0.0,
+        0.0,         0.0,         0.0, 1.0,
+    );
+
+    (transform, curr)
 }

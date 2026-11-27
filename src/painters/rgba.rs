@@ -78,12 +78,8 @@ impl egui_wgpu::CallbackTrait for WgpuRgbaPainter {
             depth_or_array_layers: 1,
         };
 
-        let transform = super::transform3(
-            self.settings.view,
-            render_size,
-            self.view,
-            self.size,
-        );
+        let transform =
+            transform3(self.settings.view, render_size, self.view, self.size);
 
         // Write the image texture (if not already done)
         if !self.data.data.is_empty() {
@@ -273,4 +269,45 @@ impl RgbaResources {
             rgba_sampler,
         }
     }
+}
+
+/// Computes a transform matrix to put a 3D image in the right place on a canvas
+fn transform3(
+    image_view: fidget::gui::View3,
+    image_size: fidget::render::VoxelSize,
+    canvas_view: fidget::gui::View3,
+    canvas_size: fidget::render::ImageSize,
+) -> nalgebra::Matrix4<f32> {
+    // don't blame me, I just twiddled the matrices until things
+    // looked right
+    let aspect_ratio = |width: u32, height: u32| {
+        let width = width as f32;
+        let height = height as f32;
+        if width > height {
+            nalgebra::Scale3::new(width / height, 1.0, 1.0)
+        } else {
+            nalgebra::Scale3::new(1.0, height / width, 1.0)
+        }
+    };
+    let prev_aspect_ratio =
+        aspect_ratio(image_size.width(), image_size.height());
+    let curr_aspect_ratio =
+        aspect_ratio(canvas_size.width(), canvas_size.height());
+
+    let c = canvas_view.world_to_model() * curr_aspect_ratio.to_homogeneous();
+
+    let m = prev_aspect_ratio.to_homogeneous()
+        // (c^-1) is equivalent to (curr_aspect^-1) * (canvas_view^-1),
+        // so everything is in the correct order to cancel out
+        * c.try_inverse().unwrap()
+        * image_view.world_to_model();
+
+    #[rustfmt::skip]
+    let transform = nalgebra::Matrix4::new(
+        m[(0, 0)], m[(0, 1)], m[(0, 2)], m[(0, 3)] / prev_aspect_ratio.x,
+        m[(1, 0)], m[(1, 1)], m[(1, 2)], m[(1, 3)] / prev_aspect_ratio.y,
+        m[(2, 0)], m[(2, 1)], m[(2, 2)], m[(2, 3)],
+        0.0,         0.0,         0.0, 1.0,
+    );
+    transform
 }
