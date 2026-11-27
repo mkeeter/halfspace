@@ -190,10 +190,7 @@ impl SdfResources {
                     entry_point: Some("fs_main"),
                     targets: &[Some(wgpu::ColorTargetState {
                         format: target_format,
-                        blend: Some(wgpu::BlendState {
-                            color: wgpu::BlendComponent::OVER,
-                            alpha: wgpu::BlendComponent::OVER,
-                        }),
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
                     compilation_options: Default::default(),
@@ -244,10 +241,7 @@ impl SdfResources {
                     entry_point: Some("fs_main"),
                     targets: &[Some(wgpu::ColorTargetState {
                         format: target_format,
-                        blend: Some(wgpu::BlendState {
-                            color: wgpu::BlendComponent::OVER,
-                            alpha: wgpu::BlendComponent::OVER,
-                        }),
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
                     compilation_options: Default::default(),
@@ -418,7 +412,7 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
             }
         }
         render_pass.set_bind_group(0, &self.bind_group, &[]);
-        render_pass.draw(0..12, 0..1);
+        render_pass.draw(0..18, 0..1);
     }
 }
 
@@ -455,8 +449,8 @@ fn transform2(
 
     #[rustfmt::skip]
     let transform = nalgebra::Matrix4::new(
-        m[(0, 0)], m[(0, 1)], 0.0, m[(0, 2)] * curr_aspect_ratio.x,
-        m[(1, 0)], m[(1, 1)], 0.0, m[(1, 2)] * curr_aspect_ratio.y,
+        m[(0, 0)], m[(0, 1)], 0.0, m[(0, 2)] / prev_aspect_ratio.x,
+        m[(1, 0)], m[(1, 1)], 0.0, m[(1, 2)] / prev_aspect_ratio.y,
         0.0,         0.0,         1.0, 0.0,
         0.0,         0.0,         0.0, 1.0,
     );

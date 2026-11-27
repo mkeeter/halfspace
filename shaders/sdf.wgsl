@@ -51,9 +51,12 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     if vertex_index < 6 {
         output.position = uniforms.transform * vec4<f32>(pos[vertex_index % 6], 0.0, 1.0);
         output.position.z = 0.0; // XXX this is a hack
-    } else {
-        // Use a non-zero Z position to mark axis overlap quad
+    } else if vertex_index < 12 {
+        // z == 0.5 is the quad which draws axes
         output.position = vec4<f32>(pos[vertex_index % 6], 0.5, 1.0);
+    } else if vertex_index < 18 {
+        // z == 0.75 is the quad which draws the central point
+        output.position = vec4<f32>(pos[vertex_index % 6], 0.75, 1.0);
     }
     output.tex_coords = uv[vertex_index % 6];
     return output;
@@ -150,47 +153,37 @@ fn fs_main(
         let q = uniforms.mat * p;
         let d = q.xy / q.w;
         let r = sqrt(d.x * d.x + d.y * d.y);
-
         let scale = min(uniforms.mat[0][0], uniforms.mat[1][1]);
         let pix = f32(min(uniforms.image_size.x, uniforms.image_size.y));
 
-        var valid = false;
+        // XY axes are drawn below the dot
+        if position.z == 0.5 {
+            // X axis
+            let line_thickness = 10.0 / pix * scale;
+            const RED = vec4f(0.95, 0.4, 0.4, 1.0);
+            const GREEN = vec4f(0.4, 0.8, 0.4, 1.0);
+            if d.x >= 0.0 && d.x <= uniforms.axis_scale && abs(d.y) < line_thickness {
+                return RED;
+            } else if d.x >= 0.0 && d.x / scale <= 0.5 && abs(d.y) < line_thickness {
+                return vec4(RED.xyz, 0.4);
+            }
 
-        // X axis
-        let line_thickness = 10.0 / pix * scale;
-        const RED = vec4f(0.95, 0.4, 0.4, 1.0);
-        const GREEN = vec4f(0.4, 0.8, 0.4, 1.0);
-        if d.x >= 0.0 && d.x <= uniforms.axis_scale && abs(d.y) < line_thickness {
-            color = RED;
-            valid = true;
-        } else if d.x >= 0.0 && d.x / scale <= 0.5 && abs(d.y) < line_thickness {
-            color = (RED + 3.0 * color) / 4.0;
-            valid = true;
-        }
-
-        // Y axis
-        if d.y >= 0.0 && d.y <= uniforms.axis_scale && abs(d.x) < line_thickness {
-            color = GREEN;
-            valid = true;
-        } else if d.y >= 0.0 && d.y / scale <= 0.5 && abs(d.x) < line_thickness {
-            color = (GREEN + 3.0 * color) / 4.0;
-            valid = true;
-        }
-
-        // Central white dot, above the axes with a blended outline
-        let inner = 20.0 / pix * scale;
-        let outer = 30.0 / pix * scale;
-        if r < inner {
-            color = vec4f(1.0);
-            valid = true;
-        } else if r < outer {
-            let frac = sqrt((r - inner) / (outer - inner));
-            color = vec4(0.12, 0.12, 0.12, 1.0) * (1.0 - frac) + color * frac;
-            valid = true;
-        }
-
-        if valid {
-            return color;
+            // Y axis
+            if d.y >= 0.0 && d.y <= uniforms.axis_scale && abs(d.x) < line_thickness {
+                return GREEN;
+            } else if d.y >= 0.0 && d.y / scale <= 0.5 && abs(d.x) < line_thickness {
+                return vec4(GREEN.xyz, 0.4);
+            }
+        } else if position.z == 0.75 {
+            // Central white dot, above the axes with a blended outline
+            let inner = 20.0 / pix * scale;
+            let outer = 30.0 / pix * scale;
+            if r < inner {
+                return vec4f(1.0);
+            } else if r < outer {
+                let frac = sqrt((r - inner) / (outer - inner));
+                return vec4(0.12, 0.12, 0.12, 1.0) * (1.0 - frac);
+            }
         }
     }
     discard;
