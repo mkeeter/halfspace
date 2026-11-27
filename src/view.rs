@@ -121,15 +121,14 @@ pub enum ViewCanvas {
         canvas: fidget::gui::Canvas3,
         perspective: bool,
         mode: ViewMode3,
-        axis_scale: Option<f32>,
     },
 }
 
 impl ViewCanvas {
     fn axis_scale(&self) -> Option<f32> {
         match self {
-            Self::Canvas2 { axis_scale, .. }
-            | Self::Canvas3 { axis_scale, .. } => *axis_scale,
+            Self::Canvas2 { axis_scale, .. } => *axis_scale,
+            Self::Canvas3 { .. } => None,
         }
     }
 }
@@ -157,7 +156,6 @@ impl From<&ViewCanvas> for state::ViewState {
                 canvas,
                 perspective,
                 mode,
-                axis_scale,
             } => {
                 let (view, size) = canvas.components();
                 let (center, scale, yaw, pitch) = view.components();
@@ -171,7 +169,6 @@ impl From<&ViewCanvas> for state::ViewState {
                     height: size.height(),
                     depth: size.depth(),
                     perspective: *perspective,
-                    axis_scale: *axis_scale,
                 }
             }
         }
@@ -211,7 +208,6 @@ impl From<ViewState> for ViewCanvas {
                 height,
                 depth,
                 perspective,
-                axis_scale,
             } => {
                 let canvas = fidget::gui::Canvas3::from_components(
                     fidget::gui::View3::from_components(
@@ -223,7 +219,6 @@ impl From<ViewState> for ViewCanvas {
                     canvas,
                     mode,
                     perspective,
-                    axis_scale,
                 }
             }
         }
@@ -832,11 +827,9 @@ pub fn edit_button(
     let mut reset_camera = false;
     let (perspective, axis_scale) = match &mut entry.canvas {
         ViewCanvas::Canvas2 { axis_scale, .. } => (None, axis_scale),
-        ViewCanvas::Canvas3 {
-            perspective,
-            axis_scale,
-            ..
-        } => (Some(perspective), axis_scale),
+        ViewCanvas::Canvas3 { perspective, .. } => {
+            (Some(perspective), &mut None)
+        }
     };
     let mut close_combobox = false;
     enum MenuItem {
@@ -927,7 +920,6 @@ pub fn edit_button(
                         _ => unreachable!("invalid 3d canvas tag {tag:?}"),
                     },
                     perspective: false,
-                    axis_scale,
                 }
             }
         };

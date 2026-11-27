@@ -377,7 +377,6 @@ impl RenderSettings {
                 canvas,
                 mode,
                 perspective,
-                axis_scale: _,
             } => {
                 let size = canvas.image_size();
                 RenderSettings::Voxel(VoxelRenderSettings {

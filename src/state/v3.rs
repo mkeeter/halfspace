@@ -11,11 +11,11 @@ pub const MAJOR_VERSION: usize = 3;
 /// Minor versions must be backwards-compatible
 ///
 /// # v1
-/// Add "show axes" boolean to both `ViewState` variants
+/// Add `axis_scale` to `ViewState::View2`
 ///
 /// # v0
 /// Initial minor version
-pub const MINOR_VERSION: usize = 0;
+pub const MINOR_VERSION: usize = 1;
 
 pub use v2::{
     BlockState, Metadata, ScriptState, Tab, TabMode, ValueState, ViewMode3,
@@ -55,8 +55,6 @@ pub enum ViewState {
         depth: u32,
         #[serde(default)]
         perspective: bool,
-        #[serde(default)]
-        axis_scale: Option<f32>,
     },
 }
 
@@ -125,7 +123,6 @@ impl From<v2::ViewState> for ViewState {
                 yaw,
                 depth,
                 perspective,
-                axis_scale: None,
             },
         }
     }
