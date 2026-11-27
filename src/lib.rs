@@ -542,7 +542,27 @@ impl<P: Platform> App<P> {
         // `base16-mocha.dark`, so we'll use its name for `base16-eighties.dark`
         let mut syntax =
             egui_extras::syntax_highlighting::SyntectSettings { ps, ts };
-        let s = syntax.ts.themes.remove("base16-eighties.dark").unwrap();
+        let mut s = syntax.ts.themes.remove("base16-eighties.dark").unwrap();
+
+        // Patch the theme so that <invalid.illegal> is not the same color as
+        // the background, which makes it invisible.  This isn't a bug in the
+        // library; it's using foreground colors, which we don't support.
+        let bg = s.settings.background;
+        for s in s.scopes.iter_mut() {
+            if s.style.foreground == bg
+                && s.scope.selectors.iter().all(|s| {
+                    s.path.scopes.len() == 1
+                        && s.path.scopes[0].to_string() == "invalid.illegal"
+                })
+            {
+                s.style.foreground = Some(syntect::highlighting::Color {
+                    r: 184,
+                    g: 120,
+                    b: 120,
+                    a: 255,
+                });
+            }
+        }
         syntax.ts.themes.insert("base16-mocha.dark".to_owned(), s);
 
         cc.egui_ctx.set_fonts(fonts);
