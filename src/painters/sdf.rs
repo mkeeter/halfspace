@@ -21,7 +21,6 @@ pub struct Uniforms {
     has_color: u32,
     axis_scale: f32,
     image_size: [u32; 2],
-    _pad: [u32; 2],
 }
 
 /// GPU callback
@@ -383,7 +382,7 @@ impl egui_wgpu::CallbackTrait for WgpuSdfPainter {
             mat: mat.into(),
             has_color: u32::from(self.color.is_some()),
             axis_scale: self.axis_scale.unwrap_or(-1.0),
-            _pad: [0; _],
+            image_size: [self.size.width(), self.size.height()],
         };
         {
             let mut writer = queue

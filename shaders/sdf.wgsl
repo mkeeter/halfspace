@@ -6,6 +6,7 @@ struct Uniforms {
     mat: mat4x4<f32>,
     has_color: u32,
     axis_scale: f32,
+    image_size: vec2<u32>,
 };
 
 @group(0) @binding(0) var t_distance: texture_2d<f32>;
@@ -151,25 +152,30 @@ fn fs_main(
         let r = sqrt(d.x * d.x + d.y * d.y);
 
         let scale = min(uniforms.mat[0][0], uniforms.mat[1][1]);
+        let pix = f32(min(uniforms.image_size.x, uniforms.image_size.y));
 
         // Central white dot
-        if r / scale < 0.035 {
+        let inner = 20.0 / pix * scale;
+        let outer = 25.0 / pix * scale;
+        if r < inner {
             return vec4f(1.0);
-        } else if r / scale < 0.04 {
-            return vec4(0.0, 0.0, 0.0, 1.0);
+        } else if r < outer {
+            let frac = 1.0 - (r - inner) / (outer - inner);
+            return vec4(0.0, 0.0, 0.0, frac);
         }
 
         // X axis
-        if d.x >= 0.0 && d.x <= uniforms.axis_scale && abs(d.y) / scale < 0.015 {
+        let line_thickness = 10.0 / pix * scale;
+        if d.x >= 0.0 && d.x <= uniforms.axis_scale && abs(d.y) < line_thickness {
             return vec4f(1.0, 0.0, 0.0, 1.0);
-        } else if d.x >= 0.0 && d.x / scale <= 0.5 && abs(d.y) / scale < 0.015 {
+        } else if d.x >= 0.0 && d.x / scale <= 0.5 && abs(d.y) < line_thickness {
             return (vec4f(1.0, 0.0, 0.0, 1.0) + 3.0 * color) / 4.0;
         }
 
         // Y axis
-        if d.y >= 0.0 && d.y <= uniforms.axis_scale && abs(d.x) / scale < 0.015 {
+        if d.y >= 0.0 && d.y <= uniforms.axis_scale && abs(d.x) < line_thickness {
             return vec4f(0.0, 1.0, 0.0, 1.0);
-        } else if d.y >= 0.0 && d.y / scale <= 0.5 && abs(d.x) / scale < 0.015 {
+        } else if d.y >= 0.0 && d.y / scale <= 0.5 && abs(d.x) < line_thickness {
             return (vec4f(0.0, 1.0, 0.0, 1.0) + 3.0 * color) / 4.0;
         }
     }
