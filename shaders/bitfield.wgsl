@@ -98,29 +98,43 @@ fn fs_main(
         let scale = min(uniforms.mat[0][0], uniforms.mat[1][1]);
         let pix = f32(min(uniforms.image_size.x, uniforms.image_size.y));
 
-        // Central white dot
-        let inner = 20.0 / pix * scale;
-        let outer = 25.0 / pix * scale;
-        if r < inner {
-            return vec4f(1.0);
-        } else if r < outer {
-            let frac = 1.0 - (r - inner) / (outer - inner);
-            return vec4(0.0, 0.0, 0.0, frac);
-        }
+        var valid = false;
 
         // X axis
         let line_thickness = 10.0 / pix * scale;
+        const RED = vec4f(0.95, 0.4, 0.4, 1.0);
+        const GREEN = vec4f(0.4, 0.8, 0.4, 1.0);
         if d.x >= 0.0 && d.x <= uniforms.axis_scale && abs(d.y) < line_thickness {
-            return vec4f(1.0, 0.0, 0.0, 1.0);
+            color = RED;
+            valid = true;
         } else if d.x >= 0.0 && d.x / scale <= 0.5 && abs(d.y) < line_thickness {
-            return (vec4f(1.0, 0.0, 0.0, 1.0) + 3.0 * color) / 4.0;
+            color = (RED + 3.0 * color) / 4.0;
+            valid = true;
         }
 
         // Y axis
         if d.y >= 0.0 && d.y <= uniforms.axis_scale && abs(d.x) < line_thickness {
-            return vec4f(0.0, 1.0, 0.0, 1.0);
+            color = GREEN;
+            valid = true;
         } else if d.y >= 0.0 && d.y / scale <= 0.5 && abs(d.x) < line_thickness {
-            return (vec4f(0.0, 1.0, 0.0, 1.0) + 3.0 * color) / 4.0;
+            color = (GREEN + 3.0 * color) / 4.0;
+            valid = true;
+        }
+
+        // Central white dot, above the axes with a blended outline
+        let inner = 20.0 / pix * scale;
+        let outer = 30.0 / pix * scale;
+        if r < inner {
+            color = vec4f(1.0);
+            valid = true;
+        } else if r < outer {
+            let frac = sqrt((r - inner) / (outer - inner));
+            color = vec4(0.12, 0.12, 0.12, 1.0) * (1.0 - frac) + color * frac;
+            valid = true;
+        }
+
+        if valid {
+            return color;
         }
     }
 
