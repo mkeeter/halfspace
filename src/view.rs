@@ -826,12 +826,9 @@ pub fn edit_button(
     let mut tag = initial_tag;
     let mut reset_camera = false;
     let (perspective, axis_scale) = match &mut entry.canvas {
-        ViewCanvas::Canvas2 { axis_scale, .. } => (None, axis_scale),
-        ViewCanvas::Canvas3 { perspective, .. } => {
-            (Some(perspective), &mut None)
-        }
+        ViewCanvas::Canvas2 { axis_scale, .. } => (None, Some(axis_scale)),
+        ViewCanvas::Canvas3 { perspective, .. } => (Some(perspective), None),
     };
-    let mut close_combobox = false;
     enum MenuItem {
         Tag(ViewCanvasType, &'static str),
         Separator,
@@ -857,29 +854,29 @@ pub fn edit_button(
                         ui.separator();
                     }
                     MenuItem::Tag(v, name) => {
-                        if ui.selectable_value(&mut tag, v, name).clicked() {
-                            close_combobox = true;
-                        }
+                        ui.selectable_value(&mut tag, v, name);
                     }
                 }
             }
-            let mut show_axes = axis_scale.is_some();
-            ui.checkbox(&mut show_axes, "Show axes");
-            if show_axes {
-                if axis_scale.is_none() {
-                    *axis_scale = Some(1.0);
+            if let Some(axis_scale) = axis_scale {
+                let mut show_axes = axis_scale.is_some();
+                ui.checkbox(&mut show_axes, "Show axes");
+                if show_axes {
+                    if axis_scale.is_none() {
+                        *axis_scale = Some(1.0);
+                    }
+                    let scale = axis_scale.as_mut().unwrap();
+                    ui.horizontal(|ui| {
+                        ui.label("Scale");
+                        ui.add(
+                            egui::DragValue::new(scale)
+                                .speed(0.05)
+                                .range(0.0..=f32::INFINITY),
+                        )
+                    });
+                } else {
+                    *axis_scale = None;
                 }
-                let scale = axis_scale.as_mut().unwrap();
-                ui.horizontal(|ui| {
-                    ui.label("Scale");
-                    ui.add(
-                        egui::DragValue::new(scale)
-                            .speed(0.05)
-                            .range(0.0..=f32::INFINITY),
-                    )
-                });
-            } else {
-                *axis_scale = None;
             }
             if let Some(p) = perspective {
                 ui.checkbox(p, "Perspective");
